@@ -3,6 +3,9 @@ import 'dart:math' as math;
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_tts/flutter_tts.dart';
+import 'package:just_audio/just_audio.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:flutter/services.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:sqflite/sqflite.dart';
@@ -43,6 +46,175 @@ class FlashCardItem {
     this.pronunciation = '',
   });
 }
+
+class TtsAudioCache {
+  TtsAudioCache._();
+
+  static final TtsAudioCache instance = TtsAudioCache._();
+
+  final FlutterTts _flutterTts = FlutterTts();
+  final AudioPlayer _player = AudioPlayer();
+  bool _ready = false;
+
+  Future<void> _init() async {
+    if (_ready) return;
+
+    await _flutterTts.awaitSpeakCompletion(true);
+    await _flutterTts.awaitSynthCompletion(true);
+
+    if (Platform.isIOS) {
+      await _flutterTts.setSharedInstance(true);
+      await _flutterTts.setIosAudioCategory(
+        IosTextToSpeechAudioCategory.playback,
+        [IosTextToSpeechAudioCategoryOptions.defaultToSpeaker],
+        IosTextToSpeechAudioMode.defaultMode,
+      );
+    }
+
+    _ready = true;
+  }
+
+  String normalizeLanguageCode(String languageCode) {
+    final code = languageCode.trim();
+
+    if (code.startsWith('de')) return 'de-DE';
+    if (code == 'zh-CN' || code.startsWith('zh-Hans')) return 'zh-CN';
+    if (code == 'zh-TW' || code.startsWith('zh-Hant')) return 'zh-TW';
+    if (code.startsWith('en')) return 'en-US';
+    if (code.startsWith('ja')) return 'ja-JP';
+    if (code.startsWith('ko')) return 'ko-KR';
+    if (code.startsWith('vi')) return 'vi-VN';
+
+    return code.isEmpty ? 'en-US' : code;
+  }
+
+  String _safeHash(String text) {
+    var hash = 0x811c9dc5;
+    for (final unit in text.codeUnits) {
+      hash ^= unit;
+      hash = (hash * 0x01000193) & 0xffffffff;
+    }
+    return hash.toRadixString(16).padLeft(8, '0');
+  }
+
+  Future<Directory> _courseAudioDir({
+    required int courseId,
+    required String languageCode,
+  }) async {
+    final baseDir = await getApplicationDocumentsDirectory();
+    final lang = normalizeLanguageCode(languageCode).replaceAll('-', '_');
+    final dir = Directory('${baseDir.path}/tts_cache/course_$courseId/$lang');
+
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
+    }
+
+    return dir;
+  }
+
+  Future<File> getAudioFile({
+    required String text,
+    required String languageCode,
+    required int courseId,
+  }) async {
+    final dir = await _courseAudioDir(
+      courseId: courseId,
+      languageCode: languageCode,
+    );
+
+    final lang = normalizeLanguageCode(languageCode).replaceAll('-', '_');
+    final hash = _safeHash('${normalizeLanguageCode(languageCode)}|${text.trim()}');
+
+    return File('${dir.path}/${lang}_$hash.wav');
+  }
+
+  Future<File?> ensureAudioForText({
+    required String text,
+    required String languageCode,
+    required int courseId,
+  }) async {
+    final value = text.trim();
+    if (value.isEmpty) return null;
+
+    await _init();
+
+    final file = await getAudioFile(
+      text: value,
+      languageCode: languageCode,
+      courseId: courseId,
+    );
+
+    if (await file.exists() && await file.length() > 0) {
+      return file;
+    }
+
+    if (!(Platform.isAndroid || Platform.isIOS || Platform.isMacOS)) {
+      return null;
+    }
+
+    await _flutterTts.setLanguage(normalizeLanguageCode(languageCode));
+    await _flutterTts.setSpeechRate(0.45);
+    await _flutterTts.setPitch(1.0);
+    await _flutterTts.setVolume(1.0);
+
+    final result = await _flutterTts.synthesizeToFile(value, file.path, true);
+
+    if (result == 1 && await file.exists() && await file.length() > 0) {
+      return file;
+    }
+
+    return null;
+  }
+
+  Future<void> prepareCourseAudio({
+    required List<FlashCardItem> items,
+    required String languageCode,
+    required int courseId,
+  }) async {
+    for (final item in items) {
+      try {
+        await ensureAudioForText(
+          text: item.term,
+          languageCode: languageCode,
+          courseId: courseId,
+        );
+      } catch (e) {
+        debugPrint('CREATE TTS CACHE ERROR: ${item.term} => $e');
+      }
+    }
+  }
+
+  Future<void> playText({
+    required String text,
+    required String languageCode,
+    required int courseId,
+  }) async {
+    final value = text.trim();
+    if (value.isEmpty) return;
+
+    final file = await ensureAudioForText(
+      text: value,
+      languageCode: languageCode,
+      courseId: courseId,
+    );
+
+    if (file != null && await file.exists() && await file.length() > 0) {
+      await _player.stop();
+      await _player.setFilePath(file.path);
+      await _player.play();
+      return;
+    }
+
+    await _init();
+    await _flutterTts.setLanguage(normalizeLanguageCode(languageCode));
+    await _flutterTts.setSpeechRate(0.45);
+    await _flutterTts.setPitch(1.0);
+    await _flutterTts.setVolume(1.0);
+    await _flutterTts.stop();
+    await _flutterTts.speak(value);
+  }
+}
+
 class CourseListItem {
   final int id;
   final String title;
@@ -950,6 +1122,8 @@ ParsedDefinition parseDefinitionAndPronunciation(String raw) {
     return;
   }
 
+  int? savedCourseId;
+
   try {
     await db.transaction((txn) async {
       final courseId = await txn.insert('courses', {
@@ -963,6 +1137,8 @@ ParsedDefinition parseDefinitionAndPronunciation(String raw) {
         'createdAt': now,
         'updatedAt': now,
       });
+
+      savedCourseId = courseId;
 
       for (int i = 0; i < items.length; i++) {
         final item = items[i];
@@ -986,8 +1162,22 @@ ParsedDefinition parseDefinitionAndPronunciation(String raw) {
       debugPrint("TỔNG THẺ VỪA LƯU: ${items.length}");
     });
 
+    final courseId = savedCourseId;
+    if (courseId != null) {
+      if (mounted) {
+        showMessage("Đang tạo âm thanh cho ${items.length} thẻ...");
+      }
+
+      await TtsAudioCache.instance.prepareCourseAudio(
+        items: items,
+        languageCode: getLanguageCode(),
+        courseId: courseId,
+      );
+    }
+
     if (!mounted) return;
 
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text("Đã lưu học phần: $title (${items.length} thẻ)"),
@@ -1912,6 +2102,24 @@ bool isDraggingCard = false;
     return previousState;
   }
 
+  Future<void> playCurrentCardAudio() async {
+    final card = currentCard;
+    final courseId = selectedCourseId ?? widget.courseId;
+
+    if (card == null) return;
+
+    try {
+      await TtsAudioCache.instance.playText(
+        text: card.term,
+        languageCode: _languageCode,
+        courseId: courseId,
+      );
+    } catch (e) {
+      showFlashMessage("Không phát được âm thanh");
+      debugPrint("PLAY TTS ERROR: $e");
+    }
+  }
+
   Future<void> openEditCardDialog() async {
   final card = currentCard;
   if (card == null) return;
@@ -2162,6 +2370,12 @@ bool isDraggingCard = false;
         allCards[index] = result;
       }
     });
+
+    await TtsAudioCache.instance.ensureAudioForText(
+      text: result.term,
+      languageCode: _languageCode,
+      courseId: result.courseId,
+    );
 
     showFlashMessage("Đã sửa thẻ");
   } catch (e) {
@@ -2957,9 +3171,7 @@ Widget buildPeekCard() {
                   ),
                   const Spacer(),
                   buildCardIcon(Icons.edit, openEditCardDialog),
-                  buildCardIcon(Icons.volume_up_outlined, () {
-                    showFlashMessage("TTS sẽ nối vào nút này");
-                  }),
+                  buildCardIcon(Icons.volume_up_outlined, playCurrentCardAudio),
                   buildCardIcon(Icons.mic_none, openMicOverlay),
                   buildCardIcon(
                     isStarred ? Icons.star : Icons.star_border,
