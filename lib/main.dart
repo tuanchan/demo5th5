@@ -3068,29 +3068,25 @@ void exitFlashCards() {
 }
 
 Widget buildPeekCard() {
-  final peekCard = getPeekCard();
+  if (!isDraggingCard || cardDragDx.abs() < 1) {
+    return const SizedBox.shrink();
+  }
 
+  final peekCard = getPeekCard();
   if (peekCard == null) return const SizedBox.shrink();
 
   final dragPercent = (cardDragDx.abs() / 180).clamp(0.0, 1.0);
 
   return IgnorePointer(
-    child: AnimatedOpacity(
-      duration: isDraggingCard
-          ? Duration.zero
-          : const Duration(milliseconds: 180),
+    child: Opacity(
       opacity: dragPercent,
-      child: AnimatedScale(
-        duration: isDraggingCard
-            ? Duration.zero
-            : const Duration(milliseconds: 180),
-        scale: 0.94 + (0.04 * dragPercent),
-        curve: Curves.easeOut,
-        child: Transform.translate(
-          offset: Offset(
-            cardDragDx > 0 ? -22 * (1 - dragPercent) : 22 * (1 - dragPercent),
-            18 * (1 - dragPercent),
-          ),
+      child: Transform.translate(
+        offset: Offset(
+          cardDragDx > 0 ? -22 * (1 - dragPercent) : 22 * (1 - dragPercent),
+          18 * (1 - dragPercent),
+        ),
+        child: Transform.scale(
+          scale: 0.94 + (0.04 * dragPercent),
           child: buildCardFace(
             label: cardDragDx > 0 ? "Thẻ trước" : "Thẻ sau",
             mainText: peekCard.term,
@@ -3102,6 +3098,24 @@ Widget buildPeekCard() {
       ),
     ),
   );
+}
+
+Future<void> finishSwipeCard(int delta) async {
+  final double endDx = delta > 0 ? -420.0 : 420.0;
+
+  setState(() {
+    isDraggingCard = false;
+    cardDragDx = endDx;
+  });
+
+  await Future.delayed(const Duration(milliseconds: 180));
+  if (!mounted) return;
+
+  setState(() {
+    cardDragDx = 0;
+  });
+
+  await moveCard(delta);
 }
 
   Widget buildFlashCard(StudyCardItem card) {
@@ -3129,32 +3143,23 @@ Widget buildPeekCard() {
   });
 },
 
-    onHorizontalDragEnd: (details) {
+    onHorizontalDragEnd: (details) async {
       final velocity = details.primaryVelocity ?? 0;
       final shouldNext = cardDragDx < -110 || velocity < -450;
       final shouldPrev = cardDragDx > 110 || velocity > 450;
 
-      setState(() {
-        isDraggingCard = false;
-      });
-
       if (shouldNext) {
-        setState(() {
-          cardDragDx = 0;
-        });
-        moveCard(1);
+        await finishSwipeCard(1);
         return;
       }
 
       if (shouldPrev) {
-        setState(() {
-          cardDragDx = 0;
-        });
-        moveCard(-1);
+        await finishSwipeCard(-1);
         return;
       }
 
       setState(() {
+        isDraggingCard = false;
         cardDragDx = 0;
       });
     },
