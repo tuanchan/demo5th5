@@ -52,23 +52,56 @@ class TtsAudioCache {
 
   static final TtsAudioCache instance = TtsAudioCache._();
 
-  final FlutterTts _flutterTts = FlutterTts();
   final AudioPlayer _player = AudioPlayer();
+  FlutterTts _flutterTts = FlutterTts();
   bool _ready = false;
+
+  bool get _canCacheAudioFile =>
+      Platform.isAndroid || Platform.isIOS || Platform.isMacOS;
+
+  Future<void> _resetTtsEngine() async {
+    try {
+      await _flutterTts.stop();
+    } catch (_) {}
+
+    _flutterTts = FlutterTts();
+    _ready = false;
+  }
 
   Future<void> _init() async {
     if (_ready) return;
 
-    await _flutterTts.awaitSpeakCompletion(true);
-    await _flutterTts.awaitSynthCompletion(true);
+    // Android TTS bind chậm, nhất là sau hot reload/emulator vừa mở.
+    // Delay ngắn để engine kịp bind, tránh lỗi: not bound to TTS engine.
+    if (Platform.isAndroid) {
+      await Future.delayed(const Duration(milliseconds: 350));
+    }
+
+    try {
+      await _flutterTts.awaitSpeakCompletion(true);
+    } catch (e) {
+      debugPrint('TTS awaitSpeakCompletion ignored: $e');
+    }
+
+    if (_canCacheAudioFile) {
+      try {
+        await _flutterTts.awaitSynthCompletion(true);
+      } catch (e) {
+        debugPrint('TTS awaitSynthCompletion ignored: $e');
+      }
+    }
 
     if (Platform.isIOS) {
-      await _flutterTts.setSharedInstance(true);
-      await _flutterTts.setIosAudioCategory(
-        IosTextToSpeechAudioCategory.playback,
-        [IosTextToSpeechAudioCategoryOptions.defaultToSpeaker],
-        IosTextToSpeechAudioMode.defaultMode,
-      );
+      try {
+        await _flutterTts.setSharedInstance(true);
+        await _flutterTts.setIosAudioCategory(
+          IosTextToSpeechAudioCategory.playback,
+          [IosTextToSpeechAudioCategoryOptions.defaultToSpeaker],
+          IosTextToSpeechAudioMode.defaultMode,
+        );
+      } catch (e) {
+        debugPrint('TTS iOS audio category ignored: $e');
+      }
     }
 
     _ready = true;
@@ -128,6 +161,33 @@ class TtsAudioCache {
     return File('${dir.path}/${lang}_$hash.wav');
   }
 
+  Future<bool> _setupVoice(String languageCode) async {
+    final lang = normalizeLanguageCode(languageCode);
+
+    for (var attempt = 0; attempt < 4; attempt++) {
+      try {
+        await _init();
+
+        if (Platform.isAndroid) {
+          // Gọi nhẹ để ép plugin chạm vào engine sau khi bind.
+          await _flutterTts.isLanguageAvailable(lang);
+        }
+
+        await _flutterTts.setLanguage(lang);
+        await _flutterTts.setSpeechRate(0.45);
+        await _flutterTts.setPitch(1.0);
+        await _flutterTts.setVolume(1.0);
+        return true;
+      } catch (e) {
+        debugPrint('TTS setup retry ${attempt + 1}: $lang => $e');
+        await Future.delayed(Duration(milliseconds: 250 + attempt * 250));
+        await _resetTtsEngine();
+      }
+    }
+
+    return false;
+  }
+
   Future<File?> ensureAudioForText({
     required String text,
     required String languageCode,
@@ -136,7 +196,7 @@ class TtsAudioCache {
     final value = text.trim();
     if (value.isEmpty) return null;
 
-    await _init();
+    if (!_canCacheAudioFile) return null;
 
     final file = await getAudioFile(
       text: value,
@@ -148,19 +208,18 @@ class TtsAudioCache {
       return file;
     }
 
-    if (!(Platform.isAndroid || Platform.isIOS || Platform.isMacOS)) {
-      return null;
-    }
+    // Android emulator hay lỗi synthesizeToFile khi TTS engine chưa bind.
+    // Không cache được thì bỏ qua, lát nữa phát trực tiếp bằng speak().
+    if (!await _setupVoice(languageCode)) return null;
 
-    await _flutterTts.setLanguage(normalizeLanguageCode(languageCode));
-    await _flutterTts.setSpeechRate(0.45);
-    await _flutterTts.setPitch(1.0);
-    await _flutterTts.setVolume(1.0);
+    try {
+      final result = await _flutterTts.synthesizeToFile(value, file.path, true);
 
-    final result = await _flutterTts.synthesizeToFile(value, file.path, true);
-
-    if (result == 1 && await file.exists() && await file.length() > 0) {
-      return file;
+      if (result == 1 && await file.exists() && await file.length() > 0) {
+        return file;
+      }
+    } catch (e) {
+      debugPrint('TTS synthesizeToFile ignored: $e');
     }
 
     return null;
@@ -171,6 +230,8 @@ class TtsAudioCache {
     required String languageCode,
     required int courseId,
   }) async {
+    if (!_canCacheAudioFile) return;
+
     for (final item in items) {
       try {
         await ensureAudioForText(
@@ -184,6 +245,39 @@ class TtsAudioCache {
     }
   }
 
+  Future<void> _speakDirect({
+    required String text,
+    required String languageCode,
+  }) async {
+    final value = text.trim();
+    if (value.isEmpty) return;
+
+    for (var attempt = 0; attempt < 4; attempt++) {
+      try {
+        final ready = await _setupVoice(languageCode);
+        if (!ready) continue;
+
+        await _player.stop();
+        await _flutterTts.stop();
+        await Future.delayed(const Duration(milliseconds: 80));
+
+        final result = await _flutterTts.speak(value);
+        if (result == 1) return;
+
+        debugPrint('TTS speak retry ${attempt + 1}: result=$result');
+      } catch (e) {
+        debugPrint('TTS speak retry ${attempt + 1}: $e');
+      }
+
+      await Future.delayed(Duration(milliseconds: 300 + attempt * 300));
+      await _resetTtsEngine();
+    }
+
+    throw Exception(
+      'Không phát được âm thanh. Android chưa bind được TTS engine hoặc máy chưa cài Speech Services.',
+    );
+  }
+
   Future<void> playText({
     required String text,
     required String languageCode,
@@ -192,26 +286,28 @@ class TtsAudioCache {
     final value = text.trim();
     if (value.isEmpty) return;
 
-    final file = await ensureAudioForText(
-      text: value,
-      languageCode: languageCode,
-      courseId: courseId,
-    );
+    try {
+      final file = await ensureAudioForText(
+        text: value,
+        languageCode: languageCode,
+        courseId: courseId,
+      );
 
-    if (file != null && await file.exists() && await file.length() > 0) {
-      await _player.stop();
-      await _player.setFilePath(file.path);
-      await _player.play();
-      return;
+      if (file != null && await file.exists() && await file.length() > 0) {
+        await _flutterTts.stop();
+        await _player.stop();
+        await _player.setFilePath(file.path);
+        await _player.play();
+        return;
+      }
+    } catch (e) {
+      debugPrint('PLAY CACHE AUDIO ignored: $e');
     }
 
-    await _init();
-    await _flutterTts.setLanguage(normalizeLanguageCode(languageCode));
-    await _flutterTts.setSpeechRate(0.45);
-    await _flutterTts.setPitch(1.0);
-    await _flutterTts.setVolume(1.0);
-    await _flutterTts.stop();
-    await _flutterTts.speak(value);
+    await _speakDirect(
+      text: value,
+      languageCode: languageCode,
+    );
   }
 }
 
