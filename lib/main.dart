@@ -11,7 +11,7 @@ import 'database/app_database.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+  if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
   }
@@ -3658,330 +3658,349 @@ if (!available) {
     final pct = (_score * 100).round();
     final isHigh = pct >= 70;
     final isLow = pct < 40;
+    final scoreColor = isHigh
+        ? AppColors.green
+        : isLow
+            ? AppColors.red
+            : AppColors.blue;
 
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 40),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 22, vertical: 36),
       child: Container(
-        constraints: const BoxConstraints(maxWidth: 400),
-        padding: const EdgeInsets.all(20),
+        constraints: const BoxConstraints(maxWidth: 420),
+        padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
         decoration: BoxDecoration(
-          color: const Color(0xff12122a),
-          borderRadius: BorderRadius.circular(24),
+          color: const Color(0xfff6f1fb),
+          borderRadius: BorderRadius.circular(26),
           border: Border.all(
-            color: const Color(0xff2a2a44),
-            width: 1.2,
+            color: AppColors.border.withOpacity(0.18),
+            width: 1,
           ),
-          boxShadow: [
+          boxShadow: const [
             BoxShadow(
-              color: Colors.black.withOpacity(0.45),
-              blurRadius: 32,
-              offset: const Offset(0, 12),
+              color: Color(0x33000000),
+              offset: Offset(0, 18),
+              blurRadius: 30,
             ),
           ],
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Header
-            Row(
-              children: [
-                const Icon(Icons.mic, color: Color(0xff3e5cff), size: 22),
-                const SizedBox(width: 8),
-                const Expanded(
-                  child: Text(
-                    'Luyện Phát Âm',
-                    style: TextStyle(
-                      color: Color(0xffe6e6f0),
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-                IconButton(
-                  onPressed: () => Navigator.pop(context),
-                  icon: const Icon(Icons.close, color: Color(0xff8888aa)),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 14),
-
-            // Target word
-            Text(
-              widget.targetText,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: const Color(0xffe6e6f0),
-                fontSize: widget.targetText.length > 8 ? 28 : 38,
-                fontWeight: FontWeight.w900,
-                height: 1.15,
-              ),
-            ),
-
-            if (widget.subText.isNotEmpty) ...[
-              const SizedBox(height: 4),
-              Text(
-                widget.subText,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: Color(0xff8888aa),
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-
-            const SizedBox(height: 20),
-
-            // Mic visualizer
-            SizedBox(
-              width: 90,
-              height: 90,
-              child: Stack(
-                alignment: Alignment.center,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
                 children: [
-                  // Ripple
-                  if (_isRecording)
-                    AnimatedBuilder(
-                      animation: _pulseAnim,
-                      builder: (_, __) => Transform.scale(
-                        scale: _pulseAnim.value,
-                        child: Container(
-                          width: 82,
-                          height: 82,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: const Color(0xffff4488).withOpacity(0.18),
-                            border: Border.all(
-                              color: const Color(0xffff4488).withOpacity(0.35),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  // Mic icon
-                  AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    width: 58,
-                    height: 58,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: _isRecording
-                          ? const Color(0xff2a1040)
-                          : const Color(0xff1a1a2e),
-                      border: Border.all(
-                        color: _isRecording
-                            ? const Color(0xffff4488)
-                            : const Color(0xff3e5cff),
-                        width: 2,
-                      ),
-                    ),
-                    child: Icon(
-                      _isRecording ? Icons.mic : Icons.mic_none,
-                      color: _isRecording
-                          ? const Color(0xffff6699)
-                          : const Color(0xff3e5cff),
-                      size: 26,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: 8),
-
-            // Status
-            AnimatedSwitcher(
-              duration: const Duration(milliseconds: 180),
-              child: Text(
-                _statusText,
-                key: ValueKey(_statusText),
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: Color(0xff8888aa),
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-
-            // Result
-            if (_hasResult && _wordResults.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: const Color(0xff0e0e20),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: const Color(0xff2a2a44)),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'BẠN NÓI:',
-                      style: TextStyle(
-                        color: Color(0xff5a5a7a),
-                        fontSize: 10,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Wrap(
-                      spacing: 4,
-                      runSpacing: 4,
-                      children: _wordResults.map((w) {
-                        return Text(
-                          w.text,
-                          style: TextStyle(
-                            color: w.ok
-                                ? const Color(0xffe6e6f0)
-                                : const Color(0xffff5577),
-                            fontSize: 18,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-
-            // Score
-            if (_hasResult) ...[
-              const SizedBox(height: 12),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'ĐỘ CHÍNH XÁC',
-                    style: TextStyle(
-                      color: Color(0xff5a5a7a),
-                      fontSize: 10,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.5,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(99),
-                    child: TweenAnimationBuilder<double>(
-                      tween: Tween(begin: 0, end: _score),
-                      duration: const Duration(milliseconds: 600),
-                      curve: Curves.easeOut,
-                      builder: (_, v, __) => LinearProgressIndicator(
-                        value: v,
-                        minHeight: 10,
-                        backgroundColor: const Color(0xff1a1a2e),
-                        valueColor: AlwaysStoppedAnimation<Color>(
-                          isHigh
-                              ? const Color(0xff10b981)
-                              : isLow
-                                  ? const Color(0xffff4455)
-                                  : const Color(0xff3e5cff),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Center(
+                  const Expanded(
                     child: Text(
-                      '$pct%',
+                      'Luyện phát âm',
                       style: TextStyle(
-                        color: isHigh
-                            ? const Color(0xff10b981)
-                            : isLow
-                                ? const Color(0xffff5577)
-                                : const Color(0xffe6e6f0),
-                        fontSize: 28,
+                        color: AppColors.text,
+                        fontSize: 22,
                         fontWeight: FontWeight.w900,
                       ),
                     ),
                   ),
-                ],
-              ),
-            ],
-
-            const SizedBox(height: 16),
-
-            // Buttons
-            Row(
-              children: [
-                if (_hasResult)
-                  Expanded(
-                    child: _MicButton(
-                      label: 'Làm lại',
-                      icon: Icons.refresh,
-                      color: const Color(0xff1e1e36),
-                      onTap: _micReset,
+                  IconButton(
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(
+                      Icons.close_rounded,
+                      color: AppColors.border,
                     ),
                   ),
-                if (_hasResult) const SizedBox(width: 10),
-                Expanded(
-                  child: _MicButton(
-                    label: _isRecording ? 'Dừng lại' : 'Bắt đầu',
-                    icon: _isRecording ? Icons.stop : Icons.mic,
-                    color: _isRecording
-                        ? const Color(0xffff3366)
-                        : const Color(0xff3e5cff),
-                    onTap: _micToggle,
+                ],
+              ),
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 24),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(22),
+                  border: Border.all(color: AppColors.border, width: 1.4),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: AppColors.border,
+                      offset: Offset(0, 7),
+                      blurRadius: 0,
+                    ),
+                    BoxShadow(
+                      color: Color(0x18000000),
+                      offset: Offset(0, 16),
+                      blurRadius: 24,
+                    ),
+                  ],
+                ),
+                child: Column(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 7,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppColors.blue,
+                        borderRadius: BorderRadius.circular(99),
+                        border: Border.all(color: AppColors.border, width: 1.2),
+                      ),
+                      child: const Text(
+                        'Nhận diện phát âm',
+                        style: TextStyle(
+                          color: AppColors.border,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    Text(
+                      widget.targetText,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: AppColors.text,
+                        fontSize: widget.targetText.length > 8 ? 30 : 40,
+                        fontWeight: FontWeight.w900,
+                        height: 1.12,
+                      ),
+                    ),
+                    if (widget.subText.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        widget.subText,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: AppColors.muted,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 22),
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      width: _isRecording ? 94 : 82,
+                      height: _isRecording ? 94 : 82,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: _isRecording ? AppColors.red : AppColors.panel2,
+                        border: Border.all(color: AppColors.border, width: 1.5),
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppColors.border,
+                            offset: Offset(0, _isRecording ? 4 : 7),
+                            blurRadius: 0,
+                          ),
+                        ],
+                      ),
+                      child: AnimatedBuilder(
+  animation: _pulseAnim,
+  builder: (_, __) {
+    return Transform.scale(
+      scale: _isRecording ? _pulseAnim.value.clamp(1.0, 1.12) : 1.0,
+     child: const Icon(
+  Icons.mic_rounded,
+  color: AppColors.border,
+  size: 32,
+),
+    );
+  },
+),
+                    ),
+                    const SizedBox(height: 14),
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 180),
+                      child: Text(
+                        _statusText,
+                        key: ValueKey(_statusText),
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: AppColors.muted,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (_hasResult && _wordResults.isNotEmpty) ...[
+                const SizedBox(height: 18),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(color: AppColors.border, width: 1.3),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'BẠN NÓI',
+                        style: TextStyle(
+                          color: AppColors.muted,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 5,
+                        runSpacing: 6,
+                        children: _wordResults.map((w) {
+                          return Text(
+                            w.text,
+                            style: TextStyle(
+                              color: w.ok ? AppColors.text : const Color(0xffc0392b),
+                              fontSize: 18,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ],
                   ),
                 ),
               ],
-            ),
-          ],
+              if (_hasResult) ...[
+                const SizedBox(height: 14),
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(color: AppColors.border, width: 1.3),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'ĐỘ CHÍNH XÁC',
+                        style: TextStyle(
+                          color: AppColors.muted,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(99),
+                        child: TweenAnimationBuilder<double>(
+                          tween: Tween(begin: 0, end: _score),
+                          duration: const Duration(milliseconds: 600),
+                          curve: Curves.easeOut,
+                          builder: (_, v, __) => LinearProgressIndicator(
+                            value: v,
+                            minHeight: 12,
+                            backgroundColor: AppColors.panel2,
+                            valueColor: AlwaysStoppedAnimation<Color>(scoreColor),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Center(
+                        child: Text(
+                          '$pct%',
+                          style: const TextStyle(
+                            color: AppColors.text,
+                            fontSize: 28,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+              const SizedBox(height: 18),
+              Row(
+                children: [
+                  if (_hasResult)
+                    Expanded(
+                      child: _MicButton(
+                        label: 'Làm lại',
+                        color: Colors.white,
+                        onTap: _micReset,
+                      ),
+                    ),
+                  if (_hasResult) const SizedBox(width: 10),
+                  Expanded(
+                    child: _MicButton(
+                      label: _isRecording ? 'Dừng lại' : 'Bắt đầu',
+                      color: _isRecording ? AppColors.red : AppColors.yellow,
+                      onTap: _micToggle,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-class _MicButton extends StatelessWidget {
+class _MicButton extends StatefulWidget {
   final String label;
-  final IconData icon;
   final Color color;
   final VoidCallback onTap;
 
   const _MicButton({
     required this.label,
-    required this.icon,
     required this.color,
     required this.onTap,
   });
 
   @override
+  State<_MicButton> createState() => _MicButtonState();
+}
+
+class _MicButtonState extends State<_MicButton> {
+  bool isPressed = false;
+
+  @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        height: 46,
+      onTapDown: (_) => setState(() => isPressed = true),
+      onTapUp: (_) => setState(() => isPressed = false),
+      onTapCancel: () => setState(() => isPressed = false),
+      onTap: widget.onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 90),
+        curve: Curves.easeOut,
+        transform: Matrix4.translationValues(0, isPressed ? 4 : 0, 0),
+        height: 48,
+        alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: color,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: Colors.white.withOpacity(0.1),
-          ),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, color: Colors.white, size: 18),
-            const SizedBox(width: 8),
-            Text(
-              label,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 15,
-                fontWeight: FontWeight.w800,
-              ),
+          color: widget.color,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.border, width: 1.4),
+          boxShadow: [
+            BoxShadow(
+              color: AppColors.border,
+              offset: Offset(0, isPressed ? 1 : 5),
+              blurRadius: 0,
+            ),
+            BoxShadow(
+              color: const Color(0x18000000),
+              offset: Offset(0, isPressed ? 4 : 12),
+              blurRadius: isPressed ? 6 : 18,
             ),
           ],
+        ),
+        child: Text(
+          widget.label,
+          style: const TextStyle(
+            color: AppColors.border,
+            fontSize: 15,
+            fontWeight: FontWeight.w900,
+          ),
         ),
       ),
     );
