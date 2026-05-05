@@ -1,0 +1,42 @@
+name: Build iOS unsigned IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Flutter doctor
+        run: flutter doctor -v
+
+      - name: Get packages
+        run: flutter pub get
+
+      - name: Build iOS app unsigned
+        run: flutter build ios --release --no-codesign
+
+      - name: Create unsigned IPA
+        run: |
+          mkdir -p Payload
+          cp -R build/ios/iphoneos/Runner.app Payload/Runner.app
+          zip -r unsigned-flashcard.ipa Payload
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-flashcard-ipa
+          path: unsigned-flashcard.ipa
