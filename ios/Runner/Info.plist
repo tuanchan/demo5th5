@@ -42,6 +42,11 @@
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
+	<key>NSMicrophoneUsageDescription</key>
+<string>Ứng dụng cần dùng microphone để luyện phát âm.</string>
+
+<key>NSSpeechRecognitionUsageDescription</key>
+<string>Ứng dụng cần nhận diện giọng nói để kiểm tra phát âm.</string>
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>

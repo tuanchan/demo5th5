@@ -1,14 +1,17 @@
 import 'dart:ui';
 import 'dart:math' as math;
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:sqflite/sqflite.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'database/app_database.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+  if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
   }
@@ -86,6 +89,7 @@ class _HomePageState extends State<HomePage> {
 
   bool isLoadingCourses = false;
   List<CourseListItem> courses = [];
+  CourseListItem? selectedHomeCourse;
 
   @override
   void initState() {
@@ -125,11 +129,34 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
-Future<void> openFlashCards() async {
+Future<void> openFlashCards([CourseListItem? course]) async {
+  CourseListItem? targetCourse = course ?? selectedHomeCourse;
+
+  if (targetCourse == null) {
+    if (courses.isEmpty) {
+      await loadCourses();
+    }
+
+    if (courses.length == 1) {
+      targetCourse = courses.first;
+    }
+  }
+
+  if (targetCourse == null) {
+    setState(() {
+      isOpen = true;
+    });
+    showHomeMessage("Hãy chọn học phần trong danh sách trước");
+    return;
+  }
+
   final result = await Navigator.push(
     context,
     MaterialPageRoute(
-      builder: (_) => const FlashCardsPage(),
+      builder: (_) => FlashCardsPage(
+        courseId: targetCourse!.id,
+        courseTitle: targetCourse.title,
+      ),
     ),
   );
 
@@ -170,6 +197,10 @@ Future<void> loadCourses() async {
 
     setState(() {
       courses = rows.map((e) => CourseListItem.fromMap(e)).toList();
+      if (selectedHomeCourse != null) {
+        final stillExists = courses.where((e) => e.id == selectedHomeCourse!.id);
+        selectedHomeCourse = stillExists.isEmpty ? null : stillExists.first;
+      }
       isLoadingCourses = false;
     });
   } catch (e) {
@@ -481,9 +512,13 @@ Future<void> confirmDeleteCourse(CourseListItem course) async {
               itemBuilder: (context, index) {
                 final course = courses[index];
 
+                final isSelected = selectedHomeCourse?.id == course.id;
+
                 return ListTile(
-                  leading: const Icon(
-                    Icons.menu_book,
+                  selected: isSelected,
+                  selectedTileColor: AppColors.yellow.withOpacity(0.18),
+                  leading: Icon(
+                    isSelected ? Icons.check_circle : Icons.menu_book,
                     color: AppColors.border,
                   ),
                   title: Text(
@@ -538,8 +573,11 @@ Future<void> confirmDeleteCourse(CourseListItem course) async {
                     ],
                   ),
                   onTap: () {
+                    setState(() {
+                      selectedHomeCourse = course;
+                    });
                     closeMenu();
-                    showHomeMessage("Đã chọn: ${course.title}");
+                    openFlashCards(course);
                   },
                 );
               },
@@ -1479,8 +1517,31 @@ class StudyCardItem {
   }
 }
 
+class ProgressUndoItem {
+  final int cardId;
+  final int previousPos;
+  final bool previousCompletion;
+  final bool known;
+  final Map<String, Object?>? previousReviewState;
+
+  ProgressUndoItem({
+    required this.cardId,
+    required this.previousPos,
+    required this.previousCompletion,
+    required this.known,
+    required this.previousReviewState,
+  });
+}
+
 class FlashCardsPage extends StatefulWidget {
-  const FlashCardsPage({super.key});
+  final int courseId;
+  final String courseTitle;
+
+  const FlashCardsPage({
+    super.key,
+    required this.courseId,
+    required this.courseTitle,
+  });
 
   @override
   State<FlashCardsPage> createState() => _FlashCardsPageState();
@@ -1497,6 +1558,7 @@ class _FlashCardsPageState extends State<FlashCardsPage>
 
   int? selectedCourseId;
   int currentPos = 0;
+  String _languageCode = 'zh-TW';
 
   bool isLoading = true;
   bool progressTracking = false;
@@ -1509,6 +1571,13 @@ class _FlashCardsPageState extends State<FlashCardsPage>
   String ghostText = '';
   double cardDragDx = 0;
 bool isDraggingCard = false;
+
+  int progressKnownCount = 0;
+  int progressUnknownCount = 0;
+
+  // lịch sử để undo khi bật tiến độ
+  final List<ProgressUndoItem> _progressHistory = [];
+  final Set<int> _sessionUnknownCardIds = {};
 
   StudyCardItem? get currentCard {
     if (visibleOrder.isEmpty) return null;
@@ -1529,7 +1598,7 @@ bool isDraggingCard = false;
 
     flipController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 340),
+      duration: const Duration(milliseconds: 220),
     );
 
     ghostController = AnimationController(
@@ -1550,46 +1619,10 @@ bool isDraggingCard = false;
   Future<void> loadInitialData() async {
     setState(() {
       isLoading = true;
+      selectedCourseId = widget.courseId;
     });
 
-    try {
-      final db = await AppDatabase.instance.database;
-
-      final courseRows = await db.rawQuery('''
-        SELECT 
-          c.id,
-          c.title,
-          c.languageCode,
-          COUNT(cards.id) AS cardCount
-        FROM courses c
-        LEFT JOIN cards 
-          ON cards.courseId = c.id 
-          AND cards.deletedAt IS NULL
-          AND cards.isHidden = 0
-        WHERE c.deletedAt IS NULL
-        GROUP BY c.id, c.title, c.languageCode
-        ORDER BY COALESCE(c.updatedAt, c.createdAt) DESC
-      ''');
-
-      final loadedCourses =
-          courseRows.map((e) => CourseListItem.fromMap(e)).toList();
-
-      if (!mounted) return;
-
-      setState(() {
-        courseList = loadedCourses;
-        selectedCourseId = loadedCourses.isEmpty ? null : loadedCourses.first.id;
-      });
-
-      await loadCardsForCourse(selectedCourseId);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        isLoading = false;
-      });
-      showFlashMessage("Không tải được flash card");
-      debugPrint("FLASHCARD LOAD ERROR: $e");
-    }
+    await loadCardsForCourse(widget.courseId);
   }
 
   Future<void> loadCardsForCourse(int? courseId) async {
@@ -1619,12 +1652,29 @@ bool isDraggingCard = false;
         orderBy: 'position ASC, id ASC',
       );
 
+      // Load languageCode from course
+      final courseRows = await db.query(
+        'courses',
+        columns: ['languageCode'],
+        where: 'id = ?',
+        whereArgs: [courseId],
+        limit: 1,
+      );
+      final langCode = courseRows.isNotEmpty
+          ? (courseRows.first['languageCode']?.toString() ?? 'zh-TW')
+          : 'zh-TW';
+
       if (!mounted) return;
 
       setState(() {
         allCards = rows.map((e) => StudyCardItem.fromMap(e)).toList();
+        _languageCode = langCode;
         currentPos = 0;
         isFlipped = false;
+        progressKnownCount = 0;
+        progressUnknownCount = 0;
+        _progressHistory.clear();
+        _sessionUnknownCardIds.clear();
         flipController.value = 0;
         rebuildVisibleOrder(resetPosition: true);
         isLoading = false;
@@ -1686,7 +1736,8 @@ bool isDraggingCard = false;
     if (currentCard == null) return;
 
     if (progressTracking) {
-      await markCurrentCard(delta > 0);
+      await answerProgress(known: delta > 0);
+      return;
     }
 
     final nextPos = currentPos + delta;
@@ -1710,6 +1761,56 @@ bool isDraggingCard = false;
       isFlipped = false;
       showCompletion = false;
     });
+
+    flipController.value = 0;
+  }
+
+  Future<void> answerProgress({required bool known}) async {
+    final card = currentCard;
+    if (card == null) return;
+
+    final previousPos = currentPos;
+    final previousCompletion = showCompletion;
+    final previousReviewState = await markCurrentCard(known);
+    final nextPos = currentPos + 1;
+    final isDone = nextPos >= visibleOrder.length;
+
+    ghostController.stop();
+    ghostController.reset();
+
+    setState(() {
+      _progressHistory.add(
+        ProgressUndoItem(
+          cardId: card.id,
+          previousPos: previousPos,
+          previousCompletion: previousCompletion,
+          known: known,
+          previousReviewState: previousReviewState,
+        ),
+      );
+
+      if (known) {
+  progressKnownCount++;
+} else {
+  progressUnknownCount++;
+  _sessionUnknownCardIds.add(card.id);
+}
+
+      ghostReverse = false;
+      ghostText = card.term;
+      isFlipped = false;
+
+      if (isDone) {
+        showCompletion = true;
+      } else {
+        currentPos = nextPos;
+        showCompletion = false;
+      }
+    });
+
+    if (!isDone) {
+      ghostController.forward();
+    }
 
     flipController.value = 0;
   }
@@ -1761,20 +1862,21 @@ bool isDraggingCard = false;
     }
   }
 
-  Future<void> markCurrentCard(bool known) async {
+  Future<Map<String, Object?>?> markCurrentCard(bool known) async {
     final card = currentCard;
-    if (card == null) return;
+    if (card == null) return null;
 
     final db = await AppDatabase.instance.database;
     final now = DateTime.now().toIso8601String();
 
     final rows = await db.query(
       'review_states',
-      columns: ['id', 'correctCount', 'wrongCount', 'repetitionCount'],
       where: 'cardId = ?',
       whereArgs: [card.id],
       limit: 1,
     );
+
+    final previousState = rows.isEmpty ? null : Map<String, Object?>.from(rows.first);
 
     if (rows.isEmpty) {
       await db.insert('review_states', {
@@ -1807,116 +1909,266 @@ bool isDraggingCard = false;
       );
     }
 
-    showFlashMessage(known ? "Đã thuộc" : "Đang học");
+    return previousState;
   }
 
   Future<void> openEditCardDialog() async {
-    final card = currentCard;
-    if (card == null) return;
+  final card = currentCard;
+  if (card == null) return;
 
-    final termController = TextEditingController(text: card.term);
-    final definitionController = TextEditingController(text: card.definition);
-    final pronunciationController =
-        TextEditingController(text: card.pronunciation);
+  final termController = TextEditingController(text: card.term);
+  final definitionController = TextEditingController(text: card.definition);
+  final pronunciationController =
+      TextEditingController(text: card.pronunciation);
 
-    final result = await showDialog<StudyCardItem>(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text("Sửa thẻ"),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                LightInput(
-                  controller: termController,
-                  hintText: "Thuật ngữ",
-                  height: 1,
-                ),
-                const SizedBox(height: 12),
-                LightInput(
-                  controller: definitionController,
-                  hintText: "Định nghĩa",
-                  height: 3,
-                ),
-                const SizedBox(height: 12),
-                LightInput(
-                  controller: pronunciationController,
-                  hintText: "Phiên âm",
-                  height: 1,
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text("Hủy"),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                final term = termController.text.trim();
-                final definition = definitionController.text.trim();
-                final pronunciation = pronunciationController.text.trim();
+  String? errorText;
 
-                if (term.isEmpty || definition.isEmpty) return;
-
-                Navigator.pop(
-                  dialogContext,
-                  card.copyWith(
-                    term: term,
-                    definition: definition,
-                    pronunciation: pronunciation,
-                  ),
-                );
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.yellow,
-                foregroundColor: AppColors.border,
+  final result = await showDialog<StudyCardItem>(
+    context: context,
+    barrierColor: Colors.black.withOpacity(0.48),
+    builder: (dialogContext) {
+      return StatefulBuilder(
+        builder: (context, setDialogState) {
+          Widget editInput({
+            required TextEditingController controller,
+            required String label,
+            required IconData icon,
+            int maxLines = 1,
+          }) {
+            return TextField(
+              controller: controller,
+              maxLines: maxLines,
+              minLines: maxLines,
+              style: const TextStyle(
+                color: AppColors.text,
+                fontSize: 15,
+                fontWeight: FontWeight.w800,
               ),
-              child: const Text("Lưu"),
+              decoration: InputDecoration(
+                labelText: label,
+                prefixIcon: Icon(icon, color: AppColors.border, size: 21),
+                filled: true,
+                fillColor: Colors.white,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 14,
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide: BorderSide(
+                    color: AppColors.border.withOpacity(0.45),
+                    width: 1.3,
+                  ),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide: const BorderSide(
+                    color: AppColors.border,
+                    width: 1.8,
+                  ),
+                ),
+              ),
+            );
+          }
+
+          return Dialog(
+            insetPadding: const EdgeInsets.symmetric(horizontal: 22),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(26),
             ),
-          ],
-        );
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+              decoration: BoxDecoration(
+                color: const Color(0xfff6f1fb),
+                borderRadius: BorderRadius.circular(26),
+                border: Border.all(
+                  color: AppColors.border.withOpacity(0.14),
+                  width: 1,
+                ),
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            "Sửa thẻ",
+                            style: TextStyle(
+                              color: AppColors.text,
+                              fontSize: 22,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: () => Navigator.pop(dialogContext),
+                          icon: const Icon(
+                            Icons.close_rounded,
+                            color: AppColors.border,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    editInput(
+                      controller: termController,
+                      label: "Thuật ngữ",
+                      icon: Icons.text_fields_rounded,
+                    ),
+                    const SizedBox(height: 12),
+                    editInput(
+                      controller: definitionController,
+                      label: "Định nghĩa",
+                      icon: Icons.menu_book_rounded,
+                      maxLines: 3,
+                    ),
+                    const SizedBox(height: 12),
+                    editInput(
+                      controller: pronunciationController,
+                      label: "Phiên âm",
+                      icon: Icons.record_voice_over_rounded,
+                    ),
+                    if (errorText != null) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        errorText!,
+                        style: const TextStyle(
+                          color: Color(0xffb3261e),
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 18),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => Navigator.pop(dialogContext),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: AppColors.border,
+                              padding: const EdgeInsets.symmetric(vertical: 13),
+                              side: const BorderSide(
+                                color: AppColors.border,
+                                width: 1.3,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                            ),
+                            child: const Text(
+                              "Hủy",
+                              style: TextStyle(fontWeight: FontWeight.w900),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: () {
+                              final term = termController.text.trim();
+                              final definition =
+                                  definitionController.text.trim();
+                              final pronunciation =
+                                  pronunciationController.text.trim();
+
+                              if (term.isEmpty) {
+                                setDialogState(() {
+                                  errorText = "Vui lòng nhập thuật ngữ";
+                                });
+                                return;
+                              }
+
+                              if (definition.isEmpty) {
+                                setDialogState(() {
+                                  errorText = "Vui lòng nhập định nghĩa";
+                                });
+                                return;
+                              }
+
+                              Navigator.pop(
+                                dialogContext,
+                                card.copyWith(
+                                  term: term,
+                                  definition: definition,
+                                  pronunciation: pronunciation,
+                                ),
+                              );
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.yellow,
+                              foregroundColor: AppColors.border,
+                              padding: const EdgeInsets.symmetric(vertical: 13),
+                              elevation: 0,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                                side: const BorderSide(
+                                  color: AppColors.border,
+                                  width: 1.3,
+                                ),
+                              ),
+                            ),
+                            child: const Text(
+                              "Lưu",
+                              style: TextStyle(fontWeight: FontWeight.w900),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      );
+    },
+  );
+
+  termController.dispose();
+  definitionController.dispose();
+  pronunciationController.dispose();
+
+  if (result == null) return;
+
+  try {
+    final db = await AppDatabase.instance.database;
+
+    final rawText = result.pronunciation.trim().isEmpty
+        ? '${result.term}\t${result.definition}'
+        : '${result.term}\t${result.definition} (${result.pronunciation})';
+
+    await db.update(
+      'cards',
+      {
+        'term': result.term,
+        'definition': result.definition,
+        'pronunciation': result.pronunciation,
+        'rawText': rawText,
+        'updatedAt': DateTime.now().toIso8601String(),
       },
+      where: 'id = ?',
+      whereArgs: [result.id],
     );
 
-    termController.dispose();
-    definitionController.dispose();
-    pronunciationController.dispose();
+    if (!mounted) return;
 
-    if (result == null) return;
+    setState(() {
+      final index = allCards.indexWhere((e) => e.id == result.id);
+      if (index >= 0) {
+        allCards[index] = result;
+      }
+    });
 
-    try {
-      final db = await AppDatabase.instance.database;
-      await db.update(
-        'cards',
-        {
-          'term': result.term,
-          'definition': result.definition,
-          'pronunciation': result.pronunciation,
-          'rawText': '${result.term}\t${result.definition} (${result.pronunciation})',
-          'updatedAt': DateTime.now().toIso8601String(),
-        },
-        where: 'id = ?',
-        whereArgs: [result.id],
-      );
-
-      if (!mounted) return;
-
-      setState(() {
-        final index = allCards.indexWhere((e) => e.id == result.id);
-        if (index >= 0) {
-          allCards[index] = result;
-        }
-      });
-
-      showFlashMessage("Đã sửa thẻ");
-    } catch (e) {
-      showFlashMessage("Sửa thẻ thất bại");
-      debugPrint("EDIT CARD ERROR: $e");
-    }
+    showFlashMessage("Đã sửa thẻ");
+  } catch (e) {
+    showFlashMessage("Sửa thẻ thất bại");
+    debugPrint("EDIT CARD ERROR: $e");
   }
+}
 
   void toggleShuffle() {
     setState(() {
@@ -1937,16 +2189,158 @@ bool isDraggingCard = false;
   void toggleProgressMode() {
     setState(() {
       progressTracking = !progressTracking;
+      progressKnownCount = 0;
+      progressUnknownCount = 0;
+      _progressHistory.clear();
     });
   }
 
   void restartStudy() {
+  setState(() {
+    currentPos = 0;
+    showCompletion = false;
+    progressKnownCount = 0;
+    progressUnknownCount = 0;
+    _progressHistory.clear();
+    _sessionUnknownCardIds.clear();
+    rebuildVisibleOrder(resetPosition: true);
+    resetFlip();
+  });
+}
+void restartUnknownCards() {
+  if (_sessionUnknownCardIds.isEmpty) {
+    showFlashMessage("Không có thẻ chưa thuộc để học lại");
+    return;
+  }
+
+  final unknownIndices = <int>[];
+
+  for (int i = 0; i < allCards.length; i++) {
+    if (_sessionUnknownCardIds.contains(allCards[i].id)) {
+      unknownIndices.add(i);
+    }
+  }
+
+  if (unknownIndices.isEmpty) {
+    showFlashMessage("Không tìm thấy thẻ chưa thuộc");
+    return;
+  }
+
+  setState(() {
+    visibleOrder = unknownIndices;
+    currentPos = 0;
+    showCompletion = false;
+    progressKnownCount = 0;
+    progressUnknownCount = 0;
+    _progressHistory.clear();
+    _sessionUnknownCardIds.clear();
+    isFlipped = false;
+    flipController.value = 0;
+  });
+}
+
+Future<void> resetMemorizedCards() async {
+  try {
+    final db = await AppDatabase.instance.database;
+
+    await db.delete(
+      'review_states',
+      where: '''
+        cardId IN (
+          SELECT id FROM cards
+          WHERE courseId = ? AND deletedAt IS NULL
+        )
+      ''',
+      whereArgs: [selectedCourseId],
+    );
+
+    if (!mounted) return;
+
     setState(() {
+      progressKnownCount = 0;
+      progressUnknownCount = 0;
+      _progressHistory.clear();
+      _sessionUnknownCardIds.clear();
       currentPos = 0;
       showCompletion = false;
+      isFlipped = false;
       rebuildVisibleOrder(resetPosition: true);
-      resetFlip();
+      flipController.value = 0;
     });
+
+    showFlashMessage("Đã đặt lại thẻ ghi nhớ");
+  } catch (e) {
+    showFlashMessage("Không đặt lại được thẻ ghi nhớ");
+    debugPrint("RESET MEMORY ERROR: $e");
+  }
+}
+
+void exitFlashCards() {
+  Navigator.pop(context, true);
+}
+  Future<void> undoLastCard() async {
+    if (_progressHistory.isEmpty) return;
+
+    final undoItem = _progressHistory.removeLast();
+
+    try {
+      final db = await AppDatabase.instance.database;
+
+      if (undoItem.previousReviewState == null) {
+        await db.delete(
+          'review_states',
+          where: 'cardId = ?',
+          whereArgs: [undoItem.cardId],
+        );
+      } else {
+        final restored = Map<String, Object?>.from(undoItem.previousReviewState!);
+        restored.remove('id');
+        await db.update(
+          'review_states',
+          restored,
+          where: 'cardId = ?',
+          whereArgs: [undoItem.cardId],
+        );
+      }
+    } catch (e) {
+      debugPrint("UNDO ERROR: $e");
+    }
+
+    setState(() {
+      if (undoItem.known && progressKnownCount > 0) {
+        progressKnownCount--;
+      }
+      if (!undoItem.known && progressUnknownCount > 0) {
+  progressUnknownCount--;
+  _sessionUnknownCardIds.remove(undoItem.cardId);
+}
+
+      currentPos = undoItem.previousPos;
+      showCompletion = undoItem.previousCompletion;
+      isFlipped = false;
+    });
+
+    flipController.value = 0;
+  }
+
+  void openMicOverlay() {
+    final card = currentCard;
+    if (card == null) return;
+    showDialog(
+      context: context,
+      barrierColor: Colors.black.withOpacity(0.55),
+      builder: (_) => PronunciationOverlay(
+        targetText: card.term,
+        subText: card.pronunciation.isNotEmpty
+            ? card.pronunciation
+            : card.definition,
+        languageCode: _getCourseLanguageCode(),
+      ),
+    );
+  }
+
+  String _getCourseLanguageCode() {
+    return _languageCode;
   }
 
   void showFlashMessage(String text) {
@@ -2058,11 +2452,6 @@ bool isDraggingCard = false;
                     ),
                     const SizedBox(height: 18),
                     settingRow(
-                      title: "Theo dõi tiến độ",
-                      value: progressTracking,
-                      onTap: toggleProgressMode,
-                    ),
-                    settingRow(
                       title: "Chỉ học thẻ đã gắn sao",
                       value: starredOnly,
                       onTap: toggleStarredOnly,
@@ -2072,6 +2461,43 @@ bool isDraggingCard = false;
                       value: shuffleEnabled,
                       onTap: toggleShuffle,
                     ),
+                    settingRow(
+                      title: "Theo dõi tiến độ",
+                      value: progressTracking,
+                      onTap: toggleProgressMode,
+                    ),
+                    if (progressTracking) ...[
+                      const SizedBox(height: 12),
+                      InkWell(
+                        onTap: () {
+                          restartStudy();
+                          Navigator.pop(sheetContext);
+                        },
+                        borderRadius: BorderRadius.circular(16),
+                        child: Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: AppColors.panel2,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: AppColors.border, width: 1.2),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.refresh, color: AppColors.border, size: 20),
+                              const SizedBox(width: 8),
+                              const Text(
+                                "Bắt đầu lại",
+                                style: TextStyle(
+                                  color: AppColors.text,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -2153,13 +2579,8 @@ bool isDraggingCard = false;
                             color: AppColors.border,
                           ),
                         )
-                      : courseList.isEmpty
+                      : allCards.isEmpty
                           ? buildEmptyState(
-                              title: "Chưa có học phần",
-                              message: "Hãy tạo học phần trước rồi quay lại Flash Card.",
-                            )
-                          : allCards.isEmpty
-                              ? buildEmptyState(
                                   title: "Học phần chưa có thẻ",
                                   message: "Hãy thêm thuật ngữ và định nghĩa cho học phần.",
                                 )
@@ -2233,34 +2654,23 @@ bool isDraggingCard = false;
                   ),
                 ],
               ),
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<int>(
-                  value: selectedCourseId,
-                  icon: const Icon(Icons.keyboard_arrow_down),
-                  isExpanded: true,
-                  dropdownColor: Colors.white,
-                  style: const TextStyle(
-                    color: AppColors.text,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 15,
-                  ),
-                  hint: const Text("Chọn học phần"),
-                  items: courseList.map((course) {
-                    return DropdownMenuItem<int>(
-                      value: course.id,
-                      child: Text(
-                        "${course.title} (${course.cardCount})",
-                        overflow: TextOverflow.ellipsis,
+              child: Row(
+                children: [
+                  const Icon(Icons.menu_book, color: AppColors.border, size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      widget.courseTitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: AppColors.text,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 15,
                       ),
-                    );
-                  }).toList(),
-                  onChanged: (value) {
-                    setState(() {
-                      selectedCourseId = value;
-                    });
-                    loadCardsForCourse(value);
-                  },
-                ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -2550,9 +2960,7 @@ Widget buildPeekCard() {
                   buildCardIcon(Icons.volume_up_outlined, () {
                     showFlashMessage("TTS sẽ nối vào nút này");
                   }),
-                  buildCardIcon(Icons.mic_none, () {
-                    showFlashMessage("Luyện phát âm sẽ nối vào nút này");
-                  }),
+                  buildCardIcon(Icons.mic_none, openMicOverlay),
                   buildCardIcon(
                     isStarred ? Icons.star : Icons.star_border,
                     toggleStar,
@@ -2655,8 +3063,7 @@ Widget buildPeekCard() {
                   alignment: Alignment.center,
                   transform: Matrix4.identity()
                     ..setEntry(3, 2, 0.0012)
-                    ..rotateY(rot)
-                    ..rotateZ(direction * 0.18 * (1 - t)),
+                    ..rotateY(rot),
                   child: Container(
                     width: double.infinity,
                     height: double.infinity,
@@ -2693,20 +3100,27 @@ Widget buildPeekCard() {
   }
 
   Widget buildCompletionOverlay() {
-    return Positioned.fill(
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.96),
-          borderRadius: BorderRadius.circular(22),
-          border: Border.all(color: AppColors.border, width: 1.5),
-        ),
+  return Positioned.fill(
+    child: Container(
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.97),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: AppColors.border, width: 1.5),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 18),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.celebration_outlined, size: 64, color: AppColors.border),
+            const Icon(
+              Icons.celebration_outlined,
+              size: 64,
+              color: AppColors.border,
+            ),
             const SizedBox(height: 14),
             const Text(
               "Hoàn thành bộ thẻ",
+              textAlign: TextAlign.center,
               style: TextStyle(
                 color: AppColors.text,
                 fontSize: 25,
@@ -2715,36 +3129,94 @@ Widget buildPeekCard() {
             ),
             const SizedBox(height: 8),
             Text(
-              "Bạn đã đi hết $displayTotal thẻ.",
+              progressTracking
+                  ? "Đã thuộc $progressKnownCount thẻ, chưa thuộc $progressUnknownCount thẻ."
+                  : "Bạn đã đi hết $displayTotal thẻ.",
+              textAlign: TextAlign.center,
               style: const TextStyle(
                 color: AppColors.muted,
                 fontSize: 16,
                 fontWeight: FontWeight.w700,
               ),
             ),
-            const SizedBox(height: 22),
-            ElevatedButton(
-              onPressed: restartStudy,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.yellow,
-                foregroundColor: AppColors.border,
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 13),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  side: const BorderSide(color: AppColors.border, width: 1.4),
+            const SizedBox(height: 24),
+            Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 10,
+              runSpacing: 12,
+              children: [
+                buildFinishButton(
+                  text: "Học lại",
+                  icon: Icons.refresh_rounded,
+                  color: AppColors.yellow,
+                  onTap: restartStudy,
                 ),
-              ),
-              child: const Text(
-                "Học lại",
-                style: TextStyle(fontWeight: FontWeight.w900),
-              ),
+                buildFinishButton(
+                  text: "Thẻ chưa thuộc",
+                  icon: Icons.school_outlined,
+                  color: AppColors.red,
+                  onTap: restartUnknownCards,
+                ),
+                buildFinishButton(
+                  text: "Đặt lại ghi nhớ",
+                  icon: Icons.restart_alt_rounded,
+                  color: Colors.white,
+                  onTap: resetMemorizedCards,
+                ),
+                buildFinishButton(
+                  text: "Thoát",
+                  icon: Icons.logout_rounded,
+                  color: AppColors.blue,
+                  onTap: exitFlashCards,
+                ),
+              ],
             ),
           ],
         ),
       ),
-    );
-  }
-
+    ),
+  );
+}
+Widget buildFinishButton({
+  required String text,
+  required IconData icon,
+  required Color color,
+  required VoidCallback onTap,
+}) {
+  return GestureDetector(
+    onTap: onTap,
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border, width: 1.4),
+        boxShadow: const [
+          BoxShadow(
+            color: AppColors.border,
+            offset: Offset(0, 3),
+            blurRadius: 0,
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 18, color: AppColors.border),
+          const SizedBox(width: 6),
+          Text(
+            text,
+            style: const TextStyle(
+              color: AppColors.border,
+              fontWeight: FontWeight.w900,
+              fontSize: 13,
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
   Widget buildBottomBar() {
     return Container(
       height: 86,
@@ -2757,62 +3229,23 @@ Widget buildPeekCard() {
       ),
       child: Row(
         children: [
-          InkWell(
-            onTap: toggleProgressMode,
-            borderRadius: BorderRadius.circular(16),
-            child: Row(
-              children: [
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  width: 46,
-                  height: 26,
-                  padding: const EdgeInsets.all(3),
-                  decoration: BoxDecoration(
-                    color: progressTracking ? AppColors.border : AppColors.muted,
-                    borderRadius: BorderRadius.circular(99),
-                    boxShadow: progressTracking
-                        ? [
-                            BoxShadow(
-                              color: AppColors.border.withOpacity(0.25),
-                              blurRadius: 12,
-                            )
-                          ]
-                        : null,
-                  ),
-                  alignment: progressTracking
-                      ? Alignment.centerRight
-                      : Alignment.centerLeft,
-                  child: Container(
-                    width: 20,
-                    height: 20,
-                    decoration: const BoxDecoration(
-                      color: Colors.white,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                const Text(
-                  "Tiến độ",
-                  style: TextStyle(
-                    color: AppColors.text,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ],
-            ),
-          ),
           const Spacer(),
           buildRoundNavButton(
             icon: progressTracking ? Icons.close : Icons.chevron_left,
-            onTap: canPrev ? () => moveCard(-1) : null,
+            onTap: showCompletion
+    ? null
+    : progressTracking
+        ? () => moveCard(-1)
+        : (canPrev ? () => moveCard(-1) : null),
             color: progressTracking ? AppColors.red : Colors.white,
           ),
           Container(
             width: 76,
             alignment: Alignment.center,
             child: Text(
-              "$displayIndex / $displayTotal",
+              progressTracking
+                  ? "✓$progressKnownCount  ✕$progressUnknownCount\n$displayIndex / $displayTotal"
+                  : "$displayIndex / $displayTotal",
               style: const TextStyle(
                 color: AppColors.text,
                 fontWeight: FontWeight.w900,
@@ -2821,25 +3254,40 @@ Widget buildPeekCard() {
           ),
           buildRoundNavButton(
             icon: progressTracking ? Icons.check : Icons.chevron_right,
-            onTap: () => moveCard(1),
+            onTap: showCompletion ? null : () => moveCard(1),
             color: progressTracking ? AppColors.green : Colors.white,
           ),
           const Spacer(),
-          buildSmallBottomIcon(
-            icon: Icons.shuffle,
-            active: shuffleEnabled,
-            onTap: toggleShuffle,
-          ),
-          buildSmallBottomIcon(
-            icon: starredOnly ? Icons.star : Icons.star_border,
-            active: starredOnly,
-            onTap: toggleStarredOnly,
-          ),
-          buildSmallBottomIcon(
-            icon: Icons.refresh,
-            active: false,
-            onTap: restartStudy,
-          ),
+          if (progressTracking)
+            Opacity(
+              opacity: _progressHistory.isNotEmpty ? 1.0 : 0.28,
+              child: GestureDetector(
+                onTap: _progressHistory.isNotEmpty ? undoLastCard : null,
+                child: Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: AppColors.border, width: 1.4),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: AppColors.border,
+                        offset: Offset(0, 3),
+                        blurRadius: 0,
+                      ),
+                    ],
+                  ),
+                  child: const Icon(
+                    Icons.undo_rounded,
+                    color: AppColors.border,
+                    size: 22,
+                  ),
+                ),
+              ),
+            )
+          else
+            const SizedBox(width: 44),
         ],
       ),
     );
@@ -2890,6 +3338,655 @@ Widget buildPeekCard() {
   }
 }
 
+
+
+// ─── Pronunciation helpers ────────────────────────────────────────────────────
+
+String normalizeText(String s) {
+  return s
+      .toLowerCase()
+      .replaceAll(
+          RegExp(
+              r"""[.,!?;:'"()\[\]{}，。！？；：''"「」『』（）【】、《》〈〉]"""),
+          '')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+}
+
+double calcSimilarity(String a, String b) {
+  if (a.isEmpty && b.isEmpty) return 1.0;
+  if (a.isEmpty || b.isEmpty) return 0.0;
+  if (a == b) return 1.0;
+
+  final la = a.split('');
+  final lb = b.split('');
+  final m = la.length;
+  final n = lb.length;
+
+  final dp = List.generate(m + 1, (i) => List.generate(n + 1, (j) {
+        if (i == 0) return j;
+        if (j == 0) return i;
+        return 0;
+      }));
+
+  for (int i = 1; i <= m; i++) {
+    for (int j = 1; j <= n; j++) {
+      if (la[i - 1] == lb[j - 1]) {
+        dp[i][j] = dp[i - 1][j - 1];
+      } else {
+        dp[i][j] = 1 +
+            [dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]]
+                .reduce((a, b) => a < b ? a : b);
+      }
+    }
+  }
+
+  final dist = dp[m][n];
+  final maxLen = math.max(m, n);
+  return maxLen == 0 ? 1.0 : math.max(0.0, 1.0 - dist / maxLen);
+}
+
+bool _isCJKLang(String lang) =>
+    lang.startsWith('zh') || lang.startsWith('ja');
+
+List<_WordResult> buildWordResults(String spoken, String target, String lang) {
+  final spokenNorm = normalizeText(spoken);
+  final targetNorm = normalizeText(target);
+
+  if (_isCJKLang(lang)) {
+    final targetChars = targetNorm.split('');
+    return spokenNorm.split('').map((ch) {
+      return _WordResult(text: ch, ok: targetChars.contains(ch));
+    }).toList();
+  } else {
+    final targetWords = targetNorm.split(' ');
+    return spokenNorm.split(' ').map((w) {
+      final ok = targetWords.any(
+          (tw) => tw == w || tw.contains(w) || w.contains(tw));
+      return _WordResult(text: w, ok: ok);
+    }).toList();
+  }
+}
+
+class _WordResult {
+  final String text;
+  final bool ok;
+  _WordResult({required this.text, required this.ok});
+}
+
+// ─── Pronunciation Overlay ────────────────────────────────────────────────────
+
+class PronunciationOverlay extends StatefulWidget {
+  final String targetText;
+  final String subText;
+  final String languageCode;
+
+  const PronunciationOverlay({
+    super.key,
+    required this.targetText,
+    required this.subText,
+    required this.languageCode,
+  });
+
+  @override
+  State<PronunciationOverlay> createState() => _PronunciationOverlayState();
+}
+
+class _PronunciationOverlayState extends State<PronunciationOverlay>
+    with SingleTickerProviderStateMixin {
+  final stt.SpeechToText _speech = stt.SpeechToText();
+  bool _isAvailable = false;
+  bool _isRecording = false;
+  bool _hasResult = false;
+  bool _listenStarted = false;
+
+  String _statusText = 'Nhấn nút để bắt đầu';
+  List<_WordResult> _wordResults = [];
+  double _score = 0.0;
+
+  late AnimationController _pulseController;
+  late Animation<double> _pulseAnim;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    );
+    _pulseAnim = Tween(begin: 1.0, end: 1.28).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    );
+    _initSpeech();
+  }
+
+  Future<void> _initSpeech() async {
+    _isAvailable = await _speech.initialize(
+      onError: (e) {
+        setState(() {
+          _isRecording = false;
+          _pulseController.stop();
+          _pulseController.reset();
+          if (e.errorMsg.contains('permission')) {
+            _statusText = 'Vui lòng cho phép truy cập Microphone.';
+          } else if (e.errorMsg.contains('no-speech') ||
+              e.errorMsg.contains('no_match')) {
+            _statusText = 'Không phát hiện giọng nói. Thử lại nhé!';
+          } else {
+            _statusText = 'Lỗi: ${e.errorMsg}';
+          }
+        });
+      },
+      onStatus: (status) {
+        if (status == 'done' || status == 'notListening') {
+          if (!_listenStarted) return;
+          if (mounted && _isRecording && !_hasResult) {
+            setState(() {
+              _isRecording = false;
+              _pulseController.stop();
+              _pulseController.reset();
+              _statusText = 'Không nhận được giọng nói. Thử lại nhé!';
+            });
+          }
+        }
+      },
+    );
+
+    if (!_isAvailable && mounted) {
+      setState(() {
+        _statusText = 'Thiết bị không hỗ trợ nhận diện giọng nói.';
+      });
+    }
+  }
+
+  void _micReset() {
+    _speech.stop();
+    setState(() {
+      _isRecording = false;
+      _hasResult = false;
+      _wordResults = [];
+      _score = 0.0;
+      _statusText = 'Nhấn nút để bắt đầu';
+    });
+    _pulseController.stop();
+    _pulseController.reset();
+  }
+
+ Future<void> _micToggle() async {
+  if (_isRecording) {
+    await _speech.stop();
+    setState(() {
+      _isRecording = false;
+      _pulseController.stop();
+      _pulseController.reset();
+      _statusText = 'Đã dừng. Nhấn lại để thử.';
+    });
+    return;
+  }
+
+  // Windows desktop thường không nhận ổn với speech_to_text
+  if (Platform.isWindows) {
+    setState(() {
+      _statusText =
+          'Windows không hỗ trợ nhận diện giọng ổn định. Hãy test trên Android/iOS hoặc Web.';
+    });
+    return;
+  }
+
+  bool available = false;
+
+try {
+  available = await _speech.initialize(
+    onError: (e) {
+      if (!mounted) return;
+      setState(() {
+        _isRecording = false;
+        _pulseController.stop();
+        _pulseController.reset();
+        _statusText = 'Lỗi nhận diện: ${e.errorMsg}';
+      });
+    },
+    onStatus: (status) {
+      debugPrint('SPEECH STATUS: $status');
+    },
+  );
+} catch (e) {
+  if (!mounted) return;
+
+  setState(() {
+    _isRecording = false;
+    _pulseController.stop();
+    _pulseController.reset();
+    _statusText =
+        'Thiết bị này không có dịch vụ nhận diện giọng nói. Hãy test bằng Chrome hoặc điện thoại thật.';
+  });
+
+  debugPrint('SPEECH INIT ERROR: $e');
+  return;
+}
+
+if (!available) {
+  setState(() {
+    _statusText =
+        'Thiết bị không hỗ trợ nhận diện giọng nói. BlueStacks thường thiếu Google Speech Service.';
+  });
+  return;
+}
+
+  if (!available) {
+    setState(() {
+      _statusText = 'Thiết bị không hỗ trợ nhận diện giọng nói.';
+    });
+    return;
+  }
+
+  String lastWords = '';
+
+  setState(() {
+    _hasResult = false;
+    _wordResults = [];
+    _score = 0;
+    _isRecording = true;
+    _statusText = 'Đang nghe...';
+  });
+
+  _pulseController.repeat(reverse: true);
+
+  await _speech.listen(
+    localeId: widget.languageCode.isNotEmpty ? widget.languageCode : 'zh-TW',
+    listenFor: const Duration(seconds: 20),
+    pauseFor: const Duration(seconds: 3),
+    partialResults: true,
+    cancelOnError: false,
+    listenMode: stt.ListenMode.dictation,
+    onResult: (result) {
+      lastWords = result.recognizedWords.trim();
+      debugPrint('SPEECH WORDS: $lastWords');
+
+      if (lastWords.isNotEmpty) {
+        _micStop();
+        _micShowResult(lastWords);
+      }
+    },
+  );
+
+  Future.delayed(const Duration(seconds: 8), () {
+    if (!mounted) return;
+    if (_isRecording && lastWords.isEmpty) {
+      _micStop();
+      setState(() {
+        _statusText = 'Không nhận được giọng nói. Thử lại nhé!';
+      });
+    }
+  });
+}
+  void _micStop() {
+    _speech.stop();
+    setState(() => _isRecording = false);
+    _pulseController.stop();
+    _pulseController.reset();
+  }
+
+  void _micShowResult(String spoken) {
+    if (spoken.isEmpty) {
+      setState(() => _statusText = 'Không nhận được giọng nói. Thử lại nhé!');
+      return;
+    }
+
+    final spokenNorm = normalizeText(spoken);
+    final targetNorm = normalizeText(widget.targetText);
+    final score = calcSimilarity(spokenNorm, targetNorm);
+    final wordResults = buildWordResults(spoken, widget.targetText, widget.languageCode);
+
+    setState(() {
+      _statusText = '';
+      _wordResults = wordResults;
+      _score = score;
+      _hasResult = true;
+    });
+  }
+
+  @override
+  void dispose() {
+    _speech.stop();
+    _pulseController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final pct = (_score * 100).round();
+    final isHigh = pct >= 70;
+    final isLow = pct < 40;
+
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 40),
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 400),
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: const Color(0xff12122a),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(
+            color: const Color(0xff2a2a44),
+            width: 1.2,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.45),
+              blurRadius: 32,
+              offset: const Offset(0, 12),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Header
+            Row(
+              children: [
+                const Icon(Icons.mic, color: Color(0xff3e5cff), size: 22),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text(
+                    'Luyện Phát Âm',
+                    style: TextStyle(
+                      color: Color(0xffe6e6f0),
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(Icons.close, color: Color(0xff8888aa)),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 14),
+
+            // Target word
+            Text(
+              widget.targetText,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: const Color(0xffe6e6f0),
+                fontSize: widget.targetText.length > 8 ? 28 : 38,
+                fontWeight: FontWeight.w900,
+                height: 1.15,
+              ),
+            ),
+
+            if (widget.subText.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                widget.subText,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Color(0xff8888aa),
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+
+            const SizedBox(height: 20),
+
+            // Mic visualizer
+            SizedBox(
+              width: 90,
+              height: 90,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  // Ripple
+                  if (_isRecording)
+                    AnimatedBuilder(
+                      animation: _pulseAnim,
+                      builder: (_, __) => Transform.scale(
+                        scale: _pulseAnim.value,
+                        child: Container(
+                          width: 82,
+                          height: 82,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: const Color(0xffff4488).withOpacity(0.18),
+                            border: Border.all(
+                              color: const Color(0xffff4488).withOpacity(0.35),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  // Mic icon
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    width: 58,
+                    height: 58,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: _isRecording
+                          ? const Color(0xff2a1040)
+                          : const Color(0xff1a1a2e),
+                      border: Border.all(
+                        color: _isRecording
+                            ? const Color(0xffff4488)
+                            : const Color(0xff3e5cff),
+                        width: 2,
+                      ),
+                    ),
+                    child: Icon(
+                      _isRecording ? Icons.mic : Icons.mic_none,
+                      color: _isRecording
+                          ? const Color(0xffff6699)
+                          : const Color(0xff3e5cff),
+                      size: 26,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 8),
+
+            // Status
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 180),
+              child: Text(
+                _statusText,
+                key: ValueKey(_statusText),
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Color(0xff8888aa),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+
+            // Result
+            if (_hasResult && _wordResults.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xff0e0e20),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xff2a2a44)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'BẠN NÓI:',
+                      style: TextStyle(
+                        color: Color(0xff5a5a7a),
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 4,
+                      runSpacing: 4,
+                      children: _wordResults.map((w) {
+                        return Text(
+                          w.text,
+                          style: TextStyle(
+                            color: w.ok
+                                ? const Color(0xffe6e6f0)
+                                : const Color(0xffff5577),
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
+            // Score
+            if (_hasResult) ...[
+              const SizedBox(height: 12),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'ĐỘ CHÍNH XÁC',
+                    style: TextStyle(
+                      color: Color(0xff5a5a7a),
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(99),
+                    child: TweenAnimationBuilder<double>(
+                      tween: Tween(begin: 0, end: _score),
+                      duration: const Duration(milliseconds: 600),
+                      curve: Curves.easeOut,
+                      builder: (_, v, __) => LinearProgressIndicator(
+                        value: v,
+                        minHeight: 10,
+                        backgroundColor: const Color(0xff1a1a2e),
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                          isHigh
+                              ? const Color(0xff10b981)
+                              : isLow
+                                  ? const Color(0xffff4455)
+                                  : const Color(0xff3e5cff),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Center(
+                    child: Text(
+                      '$pct%',
+                      style: TextStyle(
+                        color: isHigh
+                            ? const Color(0xff10b981)
+                            : isLow
+                                ? const Color(0xffff5577)
+                                : const Color(0xffe6e6f0),
+                        fontSize: 28,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+
+            const SizedBox(height: 16),
+
+            // Buttons
+            Row(
+              children: [
+                if (_hasResult)
+                  Expanded(
+                    child: _MicButton(
+                      label: 'Làm lại',
+                      icon: Icons.refresh,
+                      color: const Color(0xff1e1e36),
+                      onTap: _micReset,
+                    ),
+                  ),
+                if (_hasResult) const SizedBox(width: 10),
+                Expanded(
+                  child: _MicButton(
+                    label: _isRecording ? 'Dừng lại' : 'Bắt đầu',
+                    icon: _isRecording ? Icons.stop : Icons.mic,
+                    color: _isRecording
+                        ? const Color(0xffff3366)
+                        : const Color(0xff3e5cff),
+                    onTap: _micToggle,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MicButton extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _MicButton({
+    required this.label,
+    required this.icon,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        height: 46,
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: Colors.white.withOpacity(0.1),
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: Colors.white, size: 18),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 15,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 
 class SectionTitle extends StatelessWidget {
