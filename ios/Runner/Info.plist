@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Flutterflashcard</string>
+	<string>FlashCard</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -48,6 +48,11 @@
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Ứng dụng cần nhận diện giọng nói để kiểm tra phát âm.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
+	<true/>
+
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
 </dict>
 </plist>
