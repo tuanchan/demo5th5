@@ -3820,6 +3820,16 @@ class _PronunciationOverlayState extends State<PronunciationOverlay>
     _pulseController.reset();
   }
 
+  Future<void> _micStartAgain() async {
+    _micReset();
+
+    await Future.delayed(const Duration(milliseconds: 120));
+
+    if (!mounted) return;
+
+    await _micToggle();
+  }
+
  Future<void> _micToggle() async {
   if (_isRecording) {
     await _speech.stop();
@@ -4020,119 +4030,121 @@ if (!available) {
                 ],
               ),
               const SizedBox(height: 12),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 24),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(22),
-                  border: Border.all(color: AppColors.border, width: 1.4),
-                  boxShadow: const [
-                    BoxShadow(
-                      color: AppColors.border,
-                      offset: Offset(0, 7),
-                      blurRadius: 0,
-                    ),
-                    BoxShadow(
-                      color: Color(0x18000000),
-                      offset: Offset(0, 16),
-                      blurRadius: 24,
-                    ),
-                  ],
-                ),
-                child: Column(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 7,
+              if (!_hasResult) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 20),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(22),
+                    border: Border.all(color: AppColors.border, width: 1.4),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: AppColors.border,
+                        offset: Offset(0, 7),
+                        blurRadius: 0,
                       ),
-                      decoration: BoxDecoration(
-                        color: AppColors.blue,
-                        borderRadius: BorderRadius.circular(99),
-                        border: Border.all(color: AppColors.border, width: 1.2),
+                      BoxShadow(
+                        color: Color(0x18000000),
+                        offset: Offset(0, 16),
+                        blurRadius: 24,
                       ),
-                      child: const Text(
-                        'Nhận diện phát âm',
-                        style: TextStyle(
-                          color: AppColors.border,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w900,
+                    ],
+                  ),
+                  child: Column(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 7,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppColors.blue,
+                          borderRadius: BorderRadius.circular(99),
+                          border: Border.all(color: AppColors.border, width: 1.2),
+                        ),
+                        child: const Text(
+                          'Nhận diện phát âm',
+                          style: TextStyle(
+                            color: AppColors.border,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w900,
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 18),
-                    Text(
-                      widget.targetText,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: AppColors.text,
-                        fontSize: widget.targetText.length > 8 ? 30 : 40,
-                        fontWeight: FontWeight.w900,
-                        height: 1.12,
-                      ),
-                    ),
-                    if (widget.subText.isNotEmpty) ...[
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 14),
                       Text(
-                        widget.subText,
+                        widget.targetText,
                         textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          color: AppColors.muted,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w800,
+                        style: TextStyle(
+                          color: AppColors.text,
+                          fontSize: widget.targetText.length > 8 ? 30 : 40,
+                          fontWeight: FontWeight.w900,
+                          height: 1.12,
+                        ),
+                      ),
+                      if (widget.subText.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          widget.subText,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: AppColors.muted,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 18),
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 180),
+                        width: _isRecording ? 88 : 76,
+                        height: _isRecording ? 88 : 76,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: _isRecording ? AppColors.red : AppColors.panel2,
+                          border: Border.all(color: AppColors.border, width: 1.5),
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppColors.border,
+                              offset: Offset(0, _isRecording ? 4 : 7),
+                              blurRadius: 0,
+                            ),
+                          ],
+                        ),
+                        child: AnimatedBuilder(
+                          animation: _pulseAnim,
+                          builder: (_, __) {
+                            return Transform.scale(
+                              scale: _isRecording ? _pulseAnim.value.clamp(1.0, 1.12) : 1.0,
+                              child: const Icon(
+                                Icons.mic_rounded,
+                                color: AppColors.border,
+                                size: 32,
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 180),
+                        child: Text(
+                          _statusText,
+                          key: ValueKey(_statusText),
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: AppColors.muted,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                          ),
                         ),
                       ),
                     ],
-                    const SizedBox(height: 22),
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 180),
-                      width: _isRecording ? 94 : 82,
-                      height: _isRecording ? 94 : 82,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: _isRecording ? AppColors.red : AppColors.panel2,
-                        border: Border.all(color: AppColors.border, width: 1.5),
-                        boxShadow: [
-                          BoxShadow(
-                            color: AppColors.border,
-                            offset: Offset(0, _isRecording ? 4 : 7),
-                            blurRadius: 0,
-                          ),
-                        ],
-                      ),
-                      child: AnimatedBuilder(
-  animation: _pulseAnim,
-  builder: (_, __) {
-    return Transform.scale(
-      scale: _isRecording ? _pulseAnim.value.clamp(1.0, 1.12) : 1.0,
-     child: const Icon(
-  Icons.mic_rounded,
-  color: AppColors.border,
-  size: 32,
-),
-    );
-  },
-),
-                    ),
-                    const SizedBox(height: 14),
-                    AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 180),
-                      child: Text(
-                        _statusText,
-                        key: ValueKey(_statusText),
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          color: AppColors.muted,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
-              ),
+              ],
               if (_hasResult && _wordResults.isNotEmpty) ...[
                 const SizedBox(height: 18),
                 Container(
@@ -4228,7 +4240,7 @@ if (!available) {
               const SizedBox(height: 18),
               Row(
                 children: [
-                  if (_hasResult)
+                  if (_hasResult) ...[
                     Expanded(
                       child: _MicButton(
                         label: 'Làm lại',
@@ -4236,16 +4248,25 @@ if (!available) {
                         onTap: _micReset,
                       ),
                     ),
-                  if (_hasResult) const SizedBox(width: 10),
-                  Expanded(
-                    child: _MicButton(
-                      label: _isRecording ? 'Dừng lại' : 'Bắt đầu',
-                      color: _isRecording ? AppColors.red : AppColors.yellow,
-                      onTap: _micToggle,
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _MicButton(
+                        label: 'Bắt đầu',
+                        color: AppColors.yellow,
+                        onTap: _micStartAgain,
+                      ),
                     ),
-                  ),
+                  ] else ...[
+                    Expanded(
+                      child: _MicButton(
+                        label: _isRecording ? 'Dừng lại' : 'Bắt đầu',
+                        color: _isRecording ? AppColors.red : AppColors.yellow,
+                        onTap: _micToggle,
+                      ),
+                    ),
+                  ],
                 ],
-              ),
+              )
             ],
           ),
         ),
