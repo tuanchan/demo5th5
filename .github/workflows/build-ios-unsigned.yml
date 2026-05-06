@@ -6,6 +6,8 @@ on:
     branches:
       - main
       - master
+      - clean-main
+      - clean-restructure
 
 jobs:
   build-ios:
@@ -23,8 +25,14 @@ jobs:
       - name: Flutter doctor
         run: flutter doctor -v
 
+      - name: Clean project
+        run: flutter clean
+
       - name: Get packages
         run: flutter pub get
+
+      - name: Generate launcher icons
+        run: dart run flutter_launcher_icons
 
       - name: Build iOS app unsigned
         run: flutter build ios --release --no-codesign
