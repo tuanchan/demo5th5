@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:archive/archive_io.dart';
 import 'package:flutter/services.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:sqflite/sqflite.dart';
@@ -19,20 +21,192 @@ Future<void> main() async {
     databaseFactory = databaseFactoryFfi;
   }
 
-  runApp(const MyApp());
+  runApp(MyApp());
 }
 
 class AppColors {
-  static const bg = Color(0xffeef1f4);
-  static const panel = Color(0xffffffff);
-  static const panel2 = Color(0xfff7f9fc);
-  static const border = Color(0xff1f3b63);
-  static const text = Color(0xff183153);
-  static const muted = Color(0xff6d7890);
-  static const yellow = Color(0xfff5c400);
-  static const green = Color(0xff8ee88b);
-  static const red = Color(0xffff9f9f);
-  static const blue = Color(0xffa1a7fb);
+  static Map<String, Color> _lightDefaults = {
+    'bg': Color(0xffeef1f4),
+    'panel': Color(0xffffffff),
+    'panel2': Color(0xfff7f9fc),
+    'border': Color(0xff1f3b63),
+    'text': Color(0xff183153),
+    'muted': Color(0xff6d7890),
+    'yellow': Color(0xfff5c400),
+    'green': Color(0xff8ee88b),
+    'red': Color(0xffff9f9f),
+    'blue': Color(0xffa1a7fb),
+  };
+
+  static Map<String, Color> _darkDefaults = {
+    'bg': Color(0xff0f172a),
+    'panel': Color(0xff182235),
+    'panel2': Color(0xff23314a),
+    'border': Color(0xff8fb3e8),
+    'text': Color(0xfff8fbff),
+    'muted': Color(0xffb8c5dc),
+    'yellow': Color(0xfff2c94c),
+    'green': Color(0xff78e08f),
+    'red': Color(0xffff8f9b),
+    'blue': Color(0xff9fa8ff),
+  };
+
+  static Color bg = _lightDefaults['bg']!;
+  static Color panel = _lightDefaults['panel']!;
+  static Color panel2 = _lightDefaults['panel2']!;
+  static Color border = _lightDefaults['border']!;
+  static Color text = _lightDefaults['text']!;
+  static Color muted = _lightDefaults['muted']!;
+  static Color yellow = _lightDefaults['yellow']!;
+  static Color green = _lightDefaults['green']!;
+  static Color red = _lightDefaults['red']!;
+  static Color blue = _lightDefaults['blue']!;
+  static Color buttonInk = Color(0xff183153);
+  static Color get overlay => Colors.black.withOpacity(activeIsDark ? 0.42 : 0.25);
+  static bool activeIsDark = false;
+
+  static Color readableOn(Color bg) {
+    return bg.computeLuminance() > 0.45 ? Color(0xff183153) : Color(0xffffffff);
+  }
+
+  static Map<String, Color> get editableColors => {
+        'bg': bg,
+        'panel': panel,
+        'panel2': panel2,
+        'border': border,
+        'text': text,
+        'muted': muted,
+        'yellow': yellow,
+        'green': green,
+        'red': red,
+        'blue': blue,
+      };
+
+  static Color getByKey(String key) => editableColors[key] ?? text;
+
+  static void setByKey(String key, Color value) {
+    switch (key) {
+      case 'bg': bg = value; break;
+      case 'panel': panel = value; break;
+      case 'panel2': panel2 = value; break;
+      case 'border': border = value; break;
+      case 'text': text = value; break;
+      case 'muted': muted = value; break;
+      case 'yellow': yellow = value; break;
+      case 'green': green = value; break;
+      case 'red': red = value; break;
+      case 'blue': blue = value; break;
+    }
+  }
+
+  static int toInt(Color color) => color.value;
+
+  static Color fromText(String? value, Color fallback) {
+    if (value == null || value.trim().isEmpty) return fallback;
+    final cleaned = value.replaceAll('#', '').replaceAll('0x', '').trim();
+    final parsed = int.tryParse(cleaned.length == 6 ? 'ff$cleaned' : cleaned, radix: 16);
+    return parsed == null ? fallback : Color(parsed);
+  }
+
+  static Future<void> load({required BuildContext context}) async {
+    final mode = await AppSettingsStore.getString('appearance.themeMode') ?? 'light';
+    final platformBrightness = MediaQuery.maybeOf(context)?.platformBrightness ?? Brightness.light;
+    final isDark = mode == 'dark' || (mode == 'system' && platformBrightness == Brightness.dark);
+    activeIsDark = isDark;
+    buttonInk = Color(0xff183153);
+    final base = isDark ? _darkDefaults : _lightDefaults;
+
+    for (final key in base.keys) {
+      final saved = await AppSettingsStore.getString('color.$key');
+      setByKey(key, fromText(saved, base[key]!));
+    }
+  }
+
+  static Future<void> saveColor(String key, Color color) async {
+    setByKey(key, color);
+    await AppSettingsStore.setString('color.$key', toInt(color).toRadixString(16).padLeft(8, '0'));
+    AppThemeController.instance.bump();
+  }
+
+  static Future<void> resetColors({required BuildContext context}) async {
+    final mode = await AppSettingsStore.getString('appearance.themeMode') ?? 'light';
+    final platformBrightness = MediaQuery.maybeOf(context)?.platformBrightness ?? Brightness.light;
+    final isDark = mode == 'dark' || (mode == 'system' && platformBrightness == Brightness.dark);
+    activeIsDark = isDark;
+    buttonInk = Color(0xff183153);
+    final base = isDark ? _darkDefaults : _lightDefaults;
+    for (final key in base.keys) {
+      setByKey(key, base[key]!);
+      await AppSettingsStore.setString('color.$key', toInt(base[key]!).toRadixString(16).padLeft(8, '0'));
+    }
+    AppThemeController.instance.bump();
+  }
+}
+
+class AppThemeController extends ValueNotifier<int> {
+  AppThemeController._() : super(0);
+  static final AppThemeController instance = AppThemeController._();
+  void bump() => value++;
+}
+
+
+class AppSettingsStore {
+  AppSettingsStore._();
+
+  static Future<void> _ensureTable(Database db) async {
+    await db.execute(
+      'CREATE TABLE IF NOT EXISTS app_settings ('
+      'key TEXT PRIMARY KEY, '
+      'value TEXT NOT NULL'
+      ')',
+    );
+  }
+
+  static Future<String?> getString(String key) async {
+    final db = await AppDatabase.instance.database;
+    await _ensureTable(db);
+
+    final rows = await db.query(
+      'app_settings',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: [key],
+      limit: 1,
+    );
+
+    if (rows.isEmpty) return null;
+    return rows.first['value']?.toString();
+  }
+
+  static Future<void> setString(String key, String value) async {
+    final db = await AppDatabase.instance.database;
+    await _ensureTable(db);
+
+    await db.insert(
+      'app_settings',
+      {'key': key, 'value': value},
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  static Future<bool?> getBool(String key) async {
+    final value = await getString(key);
+    if (value == null) return null;
+    return value == '1' || value.toLowerCase() == 'true';
+  }
+
+  static Future<void> setBool(String key, bool value) {
+    return setString(key, value ? '1' : '0');
+  }
+
+  static Future<int?> getInt(String key) async {
+    final value = await getString(key);
+    return value == null ? null : int.tryParse(value);
+  }
+
+  static Future<void> setInt(String key, int value) {
+    return setString(key, value.toString());
+  }
 }
 
 class FlashCardItem {
@@ -74,7 +248,7 @@ class TtsAudioCache {
     // Android TTS bind chậm, nhất là sau hot reload/emulator vừa mở.
     // Delay ngắn để engine kịp bind, tránh lỗi: not bound to TTS engine.
     if (Platform.isAndroid) {
-      await Future.delayed(const Duration(milliseconds: 350));
+      await Future.delayed(Duration(milliseconds: 350));
     }
 
     try {
@@ -143,6 +317,28 @@ class TtsAudioCache {
     }
 
     return dir;
+  }
+
+  Future<void> deleteCourseAudioCache({
+    required int courseId,
+  }) async {
+    if (!_canCacheAudioFile) return;
+
+    try {
+      await _player.stop();
+      await _flutterTts.stop();
+    } catch (_) {}
+
+    try {
+      final baseDir = await getApplicationDocumentsDirectory();
+      final courseDir = Directory('${baseDir.path}/tts_cache/course_$courseId');
+
+      if (await courseDir.exists()) {
+        await courseDir.delete(recursive: true);
+      }
+    } catch (e) {
+      debugPrint('DELETE TTS COURSE CACHE ERROR: courseId=$courseId => $e');
+    }
   }
 
   Future<File> getAudioFile({
@@ -259,7 +455,7 @@ class TtsAudioCache {
 
         await _player.stop();
         await _flutterTts.stop();
-        await Future.delayed(const Duration(milliseconds: 80));
+        await Future.delayed(Duration(milliseconds: 80));
 
         final result = await _flutterTts.speak(value);
         if (result == 1) return;
@@ -333,20 +529,257 @@ class CourseListItem {
     );
   }
 }
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+
+OverlayEntry? _activeAppToastEntry;
+
+void showAppToast(
+  BuildContext context,
+  String text, {
+  IconData icon = Icons.notifications_rounded,
+  Duration duration = const Duration(milliseconds: 2200),
+}) {
+  final overlay = Overlay.maybeOf(context, rootOverlay: true);
+  if (overlay == null) return;
+
+  _activeAppToastEntry?.remove();
+  _activeAppToastEntry = null;
+
+  late OverlayEntry entry;
+  entry = OverlayEntry(
+    builder: (_) => _SlideToast(
+      text: text,
+      icon: icon,
+      duration: duration,
+      onDismissed: () {
+        if (_activeAppToastEntry == entry) {
+          _activeAppToastEntry = null;
+        }
+        entry.remove();
+      },
+    ),
+  );
+
+  _activeAppToastEntry = entry;
+  overlay.insert(entry);
+}
+
+class _SlideToast extends StatefulWidget {
+  final String text;
+  final IconData icon;
+  final Duration duration;
+  final VoidCallback onDismissed;
+
+  _SlideToast({
+    required this.text,
+    required this.icon,
+    required this.duration,
+    required this.onDismissed,
+  });
+
+  @override
+  State<_SlideToast> createState() => _SlideToastState();
+}
+
+class _SlideToastState extends State<_SlideToast> with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _curve;
+  bool _closed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: 320),
+      reverseDuration: Duration(milliseconds: 220),
+    );
+    _curve = CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeOutBack,
+      reverseCurve: Curves.easeInCubic,
+    );
+    _controller.forward();
+    Future.delayed(widget.duration, _dismiss);
+  }
+
+  Future<void> _dismiss() async {
+    if (!mounted || _closed) return;
+    _closed = true;
+    await _controller.reverse();
+    if (mounted) widget.onDismissed();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return const MaterialApp(
-      debugShowCheckedModeBanner: false,
-      home: HomePage(),
+    final media = MediaQuery.of(context);
+    final toastWidth = math.min(media.size.width - 24, 380.0);
+    final bg = AppColors.border;
+    final fg = AppColors.readableOn(bg);
+
+    return Positioned(
+      top: media.padding.top + 14,
+      right: 12,
+      child: AnimatedBuilder(
+        animation: _curve,
+        builder: (context, child) {
+          final value = _curve.value;
+          return Opacity(
+            opacity: value.clamp(0.0, 1.0),
+            child: Transform.translate(
+              offset: Offset((1 - value) * 120, 0),
+              child: child,
+            ),
+          );
+        },
+        child: Material(
+          color: Colors.transparent,
+          child: GestureDetector(
+            onTap: _dismiss,
+            child: Container(
+              width: toastWidth,
+              padding: EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: bg,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: fg.withOpacity(0.18), width: 1),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.18),
+                    offset: Offset(0, 8),
+                    blurRadius: 22,
+                  ),
+                  BoxShadow(
+                    color: AppColors.green.withOpacity(0.18),
+                    offset: Offset(-4, 0),
+                    blurRadius: 0,
+                    spreadRadius: -1,
+                  ),
+                ],
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: AppColors.green,
+                      borderRadius: BorderRadius.circular(13),
+                      border: Border.all(color: fg.withOpacity(0.2)),
+                    ),
+                    child: Icon(widget.icon, color: AppColors.readableOn(AppColors.green), size: 20),
+                  ),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      widget.text,
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: fg,
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w900,
+                        height: 1.25,
+                      ),
+                    ),
+                  ),
+                  SizedBox(width: 8),
+                  Icon(Icons.close_rounded, color: fg.withOpacity(0.75), size: 18),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
 
+class MyApp extends StatefulWidget {
+  MyApp({super.key});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<int>(
+      valueListenable: AppThemeController.instance,
+      builder: (context, _, __) {
+        return MaterialApp(
+          debugShowCheckedModeBanner: false,
+          themeMode: ThemeMode.light,
+          theme: ThemeData(
+            brightness: Brightness.light,
+            scaffoldBackgroundColor: AppColors.bg,
+            fontFamily: 'Arial',
+            snackBarTheme: SnackBarThemeData(
+              backgroundColor: AppColors.border,
+              contentTextStyle: TextStyle(
+                color: AppColors.readableOn(AppColors.border),
+                fontWeight: FontWeight.w800,
+              ),
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            ),
+          ),
+          darkTheme: ThemeData(
+            brightness: Brightness.dark,
+            scaffoldBackgroundColor: AppColors.bg,
+            fontFamily: 'Arial',
+            snackBarTheme: SnackBarThemeData(
+              backgroundColor: AppColors.border,
+              contentTextStyle: TextStyle(
+                color: AppColors.readableOn(AppColors.border),
+                fontWeight: FontWeight.w800,
+              ),
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            ),
+          ),
+          home: AppThemeLoader(child: HomePage()),
+        );
+      },
+    );
+  }
+}
+
+class AppThemeLoader extends StatefulWidget {
+  final Widget child;
+  AppThemeLoader({super.key, required this.child});
+
+  @override
+  State<AppThemeLoader> createState() => _AppThemeLoaderState();
+}
+
+class _AppThemeLoaderState extends State<AppThemeLoader> {
+  bool loaded = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!loaded) {
+      loaded = true;
+      AppColors.load(context: context).then((_) {
+        if (mounted) AppThemeController.instance.bump();
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
+
 class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+  HomePage({super.key});
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -354,10 +787,57 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   bool isOpen = false;
+  double _homeDragStartX = 0;
+  bool _openedByEdgeSwipe = false;
 
   bool isLoadingCourses = false;
   List<CourseListItem> courses = [];
   CourseListItem? selectedHomeCourse;
+  final TextEditingController courseSearchController = TextEditingController();
+  String courseSortType = "updatedDesc";
+
+  List<CourseListItem> get visibleCourses {
+    final keyword = courseSearchController.text.trim().toLowerCase();
+    final filtered = courses.where((course) {
+      if (keyword.isEmpty) return true;
+      return course.title.toLowerCase().contains(keyword) ||
+          course.languageCode.toLowerCase().contains(keyword);
+    }).toList();
+
+    switch (courseSortType) {
+      case "az":
+        filtered.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+        break;
+      case "za":
+        filtered.sort((a, b) => b.title.toLowerCase().compareTo(a.title.toLowerCase()));
+        break;
+      case "cardsDesc":
+        filtered.sort((a, b) => b.cardCount.compareTo(a.cardCount));
+        break;
+      case "cardsAsc":
+        filtered.sort((a, b) => a.cardCount.compareTo(b.cardCount));
+        break;
+      default:
+        break;
+    }
+
+    return filtered;
+  }
+
+  String get courseSortLabel {
+    switch (courseSortType) {
+      case "az":
+        return "A-Z";
+      case "za":
+        return "Z-A";
+      case "cardsDesc":
+        return "Nhiều thẻ";
+      case "cardsAsc":
+        return "Ít thẻ";
+      default:
+        return "Mới nhất";
+    }
+  }
 
   @override
   void initState() {
@@ -365,16 +845,29 @@ class _HomePageState extends State<HomePage> {
     loadCourses();
   }
 
+  @override
+  void dispose() {
+    courseSearchController.dispose();
+    super.dispose();
+  }
+
   Future<void> toggleMenu() async {
-  final nextOpen = !isOpen;
+  if (isOpen) {
+    closeMenu();
+    return;
+  }
+
+  await openMenu();
+}
+
+Future<void> openMenu() async {
+  if (isOpen) return;
 
   setState(() {
-    isOpen = nextOpen;
+    isOpen = true;
   });
 
-  if (nextOpen) {
-    await loadCourses();
-  }
+  await loadCourses();
 }
 
  
@@ -388,7 +881,7 @@ class _HomePageState extends State<HomePage> {
   final result = await Navigator.push(
     context,
     MaterialPageRoute(
-      builder: (_) => const CreateCoursePage(),
+      builder: (_) => CreateCoursePage(),
     ),
   );
 
@@ -427,6 +920,26 @@ Future<void> openReviewPractice([CourseListItem? course]) async {
       ),
     ),
   );
+}
+
+
+Future<void> openStatistics() async {
+  await Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (_) => StatisticsPage(),
+    ),
+  );
+}
+
+Future<void> openSettingsPage() async {
+  await Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (_) => SettingsPage(),
+    ),
+  );
+  if (mounted) setState(() {});
 }
 
 Future<void> openFlashCards([CourseListItem? course]) async {
@@ -485,6 +998,7 @@ Future<void> loadCourses() async {
       LEFT JOIN cards 
         ON cards.courseId = c.id 
         AND cards.deletedAt IS NULL
+        AND cards.isHidden = 0
       WHERE c.deletedAt IS NULL
       GROUP BY c.id, c.title, c.languageCode
       ORDER BY COALESCE(c.updatedAt, c.createdAt) DESC
@@ -515,17 +1029,7 @@ Future<void> loadCourses() async {
   }
 }
 void showHomeMessage(String text) {
-  final messenger = ScaffoldMessenger.of(context);
-  messenger.hideCurrentSnackBar();
-
-  messenger.showSnackBar(
-    SnackBar(
-      content: Text(text),
-      backgroundColor: AppColors.border,
-      behavior: SnackBarBehavior.floating,
-      duration: const Duration(seconds: 2),
-    ),
-  );
+  showAppToast(context, text);
 }
 
 String? validateCourseTitle(String value) {
@@ -568,72 +1072,246 @@ Future<bool> isDuplicateCourseTitle({
   return rows.isNotEmpty;
 }
 
+String languageNameFromCode(String code) {
+  switch (code) {
+    case "zh-CN":
+      return "Tiếng Trung Giản thể (Simplified Chinese)";
+    case "en-US":
+      return "Tiếng Anh (English)";
+    case "de-DE":
+      return "Tiếng Đức (German)";
+    case "ja-JP":
+      return "Tiếng Nhật (Japanese)";
+    case "ko-KR":
+      return "Tiếng Hàn (Korean)";
+    case "vi-VN":
+      return "Tiếng Việt (Vietnamese)";
+    default:
+      return "Tiếng Trung Phồn thể (Traditional Chinese)";
+  }
+}
+
+String languageCodeFromName(String languageName) {
+  if (languageName.contains("Giản thể")) return "zh-CN";
+  if (languageName.contains("Anh")) return "en-US";
+  if (languageName.contains("Đức")) return "de-DE";
+  if (languageName.contains("Nhật")) return "ja-JP";
+  if (languageName.contains("Hàn")) return "ko-KR";
+  if (languageName.contains("Việt")) return "vi-VN";
+  return "zh-TW";
+}
+
+List<DropdownMenuItem<String>> buildLanguageItems() {
+  return [
+    DropdownMenuItem(
+      value: "Tiếng Trung Phồn thể (Traditional Chinese)",
+      child: Text("Tiếng Trung Phồn thể"),
+    ),
+    DropdownMenuItem(
+      value: "Tiếng Trung Giản thể (Simplified Chinese)",
+      child: Text("Tiếng Trung Giản thể"),
+    ),
+    DropdownMenuItem(
+      value: "Tiếng Anh (English)",
+      child: Text("Tiếng Anh"),
+    ),
+    DropdownMenuItem(
+      value: "Tiếng Đức (German)",
+      child: Text("Tiếng Đức"),
+    ),
+    DropdownMenuItem(
+      value: "Tiếng Nhật (Japanese)",
+      child: Text("Tiếng Nhật"),
+    ),
+    DropdownMenuItem(
+      value: "Tiếng Hàn (Korean)",
+      child: Text("Tiếng Hàn"),
+    ),
+    DropdownMenuItem(
+      value: "Tiếng Việt (Vietnamese)",
+      child: Text("Tiếng Việt"),
+    ),
+  ];
+}
+
 Future<void> openEditCourseDialog(CourseListItem course) async {
   final controller = TextEditingController(text: course.title);
+  String selectedLanguage = languageNameFromCode(course.languageCode);
 
   await showDialog(
     context: context,
     builder: (dialogContext) {
-      return AlertDialog(
-        title: const Text("Đổi tên"),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLength: 80,
-          decoration: const InputDecoration(
-            labelText: "Tên học phần",
-            border: OutlineInputBorder(),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(dialogContext);
-            },
-            child: const Text("Hủy"),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              final newTitle = controller.text.trim();
-
-              final error = validateCourseTitle(newTitle);
-              if (error != null) {
-                showHomeMessage(error);
-                return;
-              }
-
-              final duplicated = await isDuplicateCourseTitle(
-                title: newTitle,
-                ignoreCourseId: course.id,
-              );
-
-              if (duplicated) {
-                showHomeMessage("Tên học phần đã tồn tại");
-                return;
-              }
-
-              final db = await AppDatabase.instance.database;
-              final now = DateTime.now().toIso8601String();
-
-              await db.update(
-                'courses',
-                {
-                  'title': newTitle,
-                  'updatedAt': now,
+      return StatefulBuilder(
+        builder: (context, dialogSetState) {
+          return AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(22),
+              side: BorderSide(color: AppColors.border, width: 1.2),
+            ),
+            title: Text(
+              "Sửa học phần",
+              style: TextStyle(
+                color: AppColors.text,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            content: SizedBox(
+              width: 420,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextField(
+                    controller: controller,
+                    autofocus: true,
+                    maxLength: 80,
+                    decoration: InputDecoration(
+                      labelText: "Tên học phần",
+                      filled: true,
+                      fillColor: AppColors.panel2,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                  ),
+                  SizedBox(height: 12),
+                  Text(
+                    "Ngôn ngữ học phần",
+                    style: TextStyle(
+                      color: AppColors.text,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  SizedBox(height: 8),
+                  Container(
+                    height: 50,
+                    padding: EdgeInsets.symmetric(horizontal: 14),
+                    decoration: BoxDecoration(
+                      color: AppColors.panel2,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        value: selectedLanguage,
+                        isExpanded: true,
+                        dropdownColor: Colors.white,
+                        iconEnabledColor: AppColors.border,
+                        style: TextStyle(
+                          color: AppColors.text,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                        ),
+                        items: buildLanguageItems(),
+                        onChanged: (value) {
+                          if (value == null) return;
+                          dialogSetState(() {
+                            selectedLanguage = value;
+                          });
+                        },
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(dialogContext);
                 },
-                where: 'id = ? AND deletedAt IS NULL',
-                whereArgs: [course.id],
-              );
+                child: Text("Hủy"),
+              ),
+              ElevatedButton(
+                onPressed: () async {
+                  final newTitle = controller.text.trim();
 
-              if (!mounted) return;
+                  final error = validateCourseTitle(newTitle);
+                  if (error != null) {
+                    showHomeMessage(error);
+                    return;
+                  }
 
-              Navigator.pop(dialogContext);
-              await loadCourses();
-              showHomeMessage("Đã sửa học phần");
-            },
-            child: const Text("Lưu"),
-          ),
-        ],
+                  final duplicated = await isDuplicateCourseTitle(
+                    title: newTitle,
+                    ignoreCourseId: course.id,
+                  );
+
+                  if (duplicated) {
+                    showHomeMessage("Tên học phần đã tồn tại");
+                    return;
+                  }
+
+                  final db = await AppDatabase.instance.database;
+                  final now = DateTime.now().toIso8601String();
+                  final oldLanguageCode = course.languageCode;
+                  final newLanguageCode = languageCodeFromName(selectedLanguage);
+                  final languageChanged = oldLanguageCode != newLanguageCode;
+
+                  await db.update(
+                    'courses',
+                    {
+                      'title': newTitle,
+                      'languageName': selectedLanguage,
+                      'languageCode': newLanguageCode,
+                      'updatedAt': now,
+                    },
+                    where: 'id = ? AND deletedAt IS NULL',
+                    whereArgs: [course.id],
+                  );
+
+                  if (languageChanged) {
+                    showHomeMessage("Đang tạo lại âm thanh cho ngôn ngữ mới...");
+
+                    final cardRows = await db.query(
+                      'cards',
+                      where: 'courseId = ? AND deletedAt IS NULL AND isHidden = 0',
+                      whereArgs: [course.id],
+                      orderBy: 'position ASC, id ASC',
+                    );
+
+                    final items = cardRows.map((row) {
+                      return FlashCardItem(
+                        term: row['term']?.toString() ?? '',
+                        definition: row['definition']?.toString() ?? '',
+                        pronunciation: row['pronunciation']?.toString() ?? '',
+                      );
+                    }).toList();
+
+                    await TtsAudioCache.instance.deleteCourseAudioCache(
+                      courseId: course.id,
+                    );
+
+                    await TtsAudioCache.instance.prepareCourseAudio(
+                      items: items,
+                      languageCode: newLanguageCode,
+                      courseId: course.id,
+                    );
+                  }
+
+                  if (!mounted) return;
+
+                  Navigator.pop(dialogContext);
+                  await loadCourses();
+                  showHomeMessage(
+                    languageChanged
+                        ? "Đã đổi ngôn ngữ và tạo lại âm thanh"
+                        : "Đã sửa học phần",
+                  );
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.green,
+                  foregroundColor: AppColors.buttonInk,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    side: BorderSide(color: AppColors.border),
+                  ),
+                ),
+                child: Text("Lưu"),
+              ),
+            ],
+          );
+        },
       );
     },
   );
@@ -646,14 +1324,14 @@ Future<void> confirmDeleteCourse(CourseListItem course) async {
     context: context,
     builder: (dialogContext) {
       return AlertDialog(
-        title: const Text("Xóa học phần"),
+        title: Text("Xóa học phần"),
         content: Text("Bạn có chắc muốn xóa \"${course.title}\" không?"),
         actions: [
           TextButton(
             onPressed: () {
               Navigator.pop(dialogContext, false);
             },
-            child: const Text("Hủy"),
+            child: Text("Hủy"),
           ),
           ElevatedButton(
             onPressed: () {
@@ -663,7 +1341,7 @@ Future<void> confirmDeleteCourse(CourseListItem course) async {
               backgroundColor: Colors.red,
               foregroundColor: Colors.white,
             ),
-            child: const Text("Xóa"),
+            child: Text("Xóa"),
           ),
         ],
       );
@@ -674,20 +1352,57 @@ Future<void> confirmDeleteCourse(CourseListItem course) async {
 
   try {
     final db = await AppDatabase.instance.database;
-    final now = DateTime.now().toIso8601String();
 
-    await db.update(
-      'courses',
-      {
-        'deletedAt': now,
-        'updatedAt': now,
-      },
-      where: 'id = ? AND deletedAt IS NULL',
-      whereArgs: [course.id],
+    await TtsAudioCache.instance.deleteCourseAudioCache(
+      courseId: course.id,
     );
 
+    await db.transaction((txn) async {
+      await txn.delete(
+        'study_results',
+        where:
+            'sessionId IN (SELECT id FROM study_sessions WHERE courseId = ?) OR cardId IN (SELECT id FROM cards WHERE courseId = ?)',
+        whereArgs: [course.id, course.id],
+      );
+      await txn.delete(
+        'study_sessions',
+        where: 'courseId = ?',
+        whereArgs: [course.id],
+      );
+      await txn.delete(
+        'review_states',
+        where: 'cardId IN (SELECT id FROM cards WHERE courseId = ?)',
+        whereArgs: [course.id],
+      );
+      await txn.delete(
+        'card_examples',
+        where: 'cardId IN (SELECT id FROM cards WHERE courseId = ?)',
+        whereArgs: [course.id],
+      );
+      await txn.delete(
+        'cards',
+        where: 'courseId = ?',
+        whereArgs: [course.id],
+      );
+      await txn.delete(
+        'course_tags',
+        where: 'courseId = ?',
+        whereArgs: [course.id],
+      );
+      await txn.delete(
+        'import_exports',
+        where: 'courseId = ?',
+        whereArgs: [course.id],
+      );
+      await txn.delete(
+        'courses',
+        where: 'id = ?',
+        whereArgs: [course.id],
+      );
+    });
+
     await loadCourses();
-    showHomeMessage("Đã xóa học phần");
+    showHomeMessage("Đã xóa học phần khỏi app và DB");
   } catch (e) {
     showHomeMessage("Xóa thất bại");
     debugPrint("DELETE COURSE ERROR: $e");
@@ -697,44 +1412,68 @@ Future<void> confirmDeleteCourse(CourseListItem course) async {
   Widget build(BuildContext context) {
     return Scaffold(
       extendBody: true,
-      body: Stack(
+      body: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onHorizontalDragStart: (details) {
+          _homeDragStartX = details.globalPosition.dx;
+          _openedByEdgeSwipe = false;
+        },
+        onHorizontalDragUpdate: (details) async {
+          final isEdgeSwipe = _homeDragStartX <= 38;
+          final dragRightEnough = details.delta.dx > 4;
+          final distanceEnough = details.globalPosition.dx - _homeDragStartX > 24;
+
+          if (!isOpen && !_openedByEdgeSwipe && isEdgeSwipe && dragRightEnough && distanceEnough) {
+            _openedByEdgeSwipe = true;
+            await openMenu();
+          }
+        },
+        onHorizontalDragEnd: (details) async {
+          final velocity = details.primaryVelocity ?? 0;
+          if (velocity > 260 && !isOpen && _homeDragStartX <= 90) {
+            await openMenu();
+          } else if (velocity < -260 && isOpen) {
+            closeMenu();
+          }
+        },
+        child: Stack(
         children: [
           Container(
-            color: Colors.white,
+            color: AppColors.bg,
             child: SafeArea(
               child: Padding(
-                padding: const EdgeInsets.only(bottom: 110),
+                padding: EdgeInsets.only(bottom: 110),
                 child: Center(
                   child: SingleChildScrollView(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Big3DButton(
-                          text: "Tạo Học Phần",
+                          text: "Tạo Cards",
                           icon: Icons.create,
                           color: AppColors.yellow,
                           onTap: openCreateCourse,
                         ),
-                        const SizedBox(height: 28),
+                        SizedBox(height: 28),
                         Big3DButton(
                           text: "Flash Card",
                           icon: Icons.style_outlined,
                           color: AppColors.red,
                           onTap: openFlashCards,
                         ),
-                        const SizedBox(height: 28),
+                        SizedBox(height: 28),
                         Big3DButton(
                           text: "Ôn Tập",
                           icon: Icons.school,
                           color: AppColors.green,
                           onTap: openReviewPractice,
                         ),
-                        const SizedBox(height: 28),
+                        SizedBox(height: 28),
                         Big3DButton(
-                          text: "Cài Đặt",
-                          icon: Icons.settings,
+                          text: "Thống Kê",
+                          icon: Icons.insights_rounded,
                           color: AppColors.blue,
-                          onTap: () {},
+                          onTap: openStatistics,
                         ),
                       ],
                     ),
@@ -747,55 +1486,172 @@ Future<void> confirmDeleteCourse(CourseListItem course) async {
           IgnorePointer(
   ignoring: !isOpen,
   child: AnimatedOpacity(
-    duration: const Duration(milliseconds: 320),
+    duration: Duration(milliseconds: 320),
     curve: Curves.easeOutCubic,
     opacity: isOpen ? 1 : 0,
     child: GestureDetector(
       onTap: closeMenu,
       child: Container(
-        color: Colors.black.withOpacity(0.25),
+        color: AppColors.overlay,
       ),
     ),
   ),
 ),
           AnimatedPositioned(
-  duration: const Duration(milliseconds: 360),
+  duration: Duration(milliseconds: 360),
   curve: Curves.easeOutCubic,
   left: isOpen ? 0 : -280,
   top: 0,
   bottom: 0,
   child: AnimatedOpacity(
-    duration: const Duration(milliseconds: 220),
+    duration: Duration(milliseconds: 220),
     curve: Curves.easeOut,
     opacity: isOpen ? 1 : 0.98,
     child: Container(
               width: 260,
-              color: Colors.white,
+              color: AppColors.panel,
               child: SafeArea(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Container(
-                      height: 75,
                       width: double.infinity,
-                      color: Colors.black,
-                      padding: const EdgeInsets.all(16),
-                      child: const Text(
-                        "List Card",
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
+                      padding: EdgeInsets.fromLTRB(14, 16, 14, 14),
+                      decoration: BoxDecoration(
+                        color: AppColors.border,
+                        borderRadius: BorderRadius.only(
+                          bottomRight: Radius.circular(24),
                         ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(Icons.style_outlined, color: Colors.white, size: 26),
+                              SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  "List Card",
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 24,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          SizedBox(height: 12),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: SizedBox(
+                                  height: 42,
+                                  child: TextField(
+                                    controller: courseSearchController,
+                                    onChanged: (_) => setState(() {}),
+                                    style: TextStyle(
+                                      color: AppColors.text,
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 13,
+                                    ),
+                                    decoration: InputDecoration(
+                                      hintText: "Tìm học phần...",
+                                      hintStyle: TextStyle(
+                                        color: AppColors.muted.withOpacity(0.75),
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                      prefixIcon: Icon(
+                                        Icons.search,
+                                        size: 20,
+                                        color: AppColors.border,
+                                      ),
+                                      filled: true,
+                                      fillColor: AppColors.panel,
+                                      contentPadding: EdgeInsets.zero,
+                                      border: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(14),
+                                        borderSide: BorderSide(
+                                          color: AppColors.border,
+                                          width: 1.2,
+                                        ),
+                                      ),
+                                      enabledBorder: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(14),
+                                        borderSide: BorderSide(
+                                          color: AppColors.border,
+                                          width: 1.2,
+                                        ),
+                                      ),
+                                      focusedBorder: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(14),
+                                        borderSide: BorderSide(
+                                          color: AppColors.green,
+                                          width: 2,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              SizedBox(width: 8),
+                              SizedBox(
+                                width: 48,
+                                height: 42,
+                                child: PopupMenuButton<String>(
+                                  tooltip: "Sắp xếp học phần",
+                                  initialValue: courseSortType,
+                                  onSelected: (value) {
+                                    setState(() {
+                                      courseSortType = value;
+                                    });
+                                  },
+                                  itemBuilder: (_) => [
+                                    PopupMenuItem(value: "updatedDesc", child: Text("Mới nhất")),
+                                    PopupMenuItem(value: "az", child: Text("A-Z")),
+                                    PopupMenuItem(value: "za", child: Text("Z-A")),
+                                    PopupMenuItem(value: "cardsDesc", child: Text("Nhiều thẻ nhất")),
+                                    PopupMenuItem(value: "cardsAsc", child: Text("Ít thẻ nhất")),
+                                  ],
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      color: AppColors.yellow,
+                                      borderRadius: BorderRadius.circular(14),
+                                      border: Border.all(
+                                        color: Colors.white,
+                                        width: 1.2,
+                                      ),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black,
+                                          offset: Offset(0, 3),
+                                          blurRadius: 0,
+                                        ),
+                                      ],
+                                    ),
+                                    child: Icon(
+                                      Icons.tune_rounded,
+                                      color: AppColors.border,
+                                      size: 23,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                       ),
                     ),
                     Expanded(
   child: isLoadingCourses
-      ? const Center(
+      ? Center(
           child: CircularProgressIndicator(),
         )
       : courses.isEmpty
-          ? const Center(
+          ? Center(
               child: Text(
                 "Chưa có học phần nào",
                 style: TextStyle(
@@ -805,86 +1661,127 @@ Future<void> confirmDeleteCourse(CourseListItem course) async {
                 ),
               ),
             )
-          : ListView.separated(
-              padding: EdgeInsets.zero,
-              itemCount: courses.length,
-              separatorBuilder: (_, __) => const Divider(height: 1),
-              itemBuilder: (context, index) {
-                final course = courses[index];
-
-                final isSelected = selectedHomeCourse?.id == course.id;
-
-                return ListTile(
-                  selected: isSelected,
-                  selectedTileColor: AppColors.yellow.withOpacity(0.18),
-                  leading: Icon(
-                    isSelected ? Icons.check_circle : Icons.menu_book,
-                    color: AppColors.border,
-                  ),
-                  title: Text(
-                    course.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: AppColors.text,
+          : visibleCourses.isEmpty
+              ? Center(
+                  child: Text(
+                    "Không tìm thấy học phần",
+                    style: TextStyle(
+                      color: AppColors.muted,
+                      fontSize: 15,
                       fontWeight: FontWeight.w800,
                     ),
                   ),
-                  subtitle: Text(
-                    "${course.cardCount} thẻ • ${course.languageCode}",
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  trailing: PopupMenuButton<String>(
-                    onSelected: (value) {
-                      if (value == "edit") {
-                        openEditCourseDialog(course);
-                      }
+                )
+              : ListView.separated(
+              padding: EdgeInsets.fromLTRB(0, 8, 0, 8),
+              itemCount: visibleCourses.length,
+              separatorBuilder: (_, __) => SizedBox(height: 2),
+              itemBuilder: (context, index) {
+                final course = visibleCourses[index];
 
-                      if (value == "delete") {
-                        confirmDeleteCourse(course);
-                      }
+                final isSelected = selectedHomeCourse?.id == course.id;
+
+                return Padding(
+                  padding: EdgeInsets.fromLTRB(10, 6, 10, 6),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(18),
+                    onTap: () {
+                      setState(() {
+                        selectedHomeCourse = course;
+                      });
                     },
-                    itemBuilder: (_) => const [
-                      PopupMenuItem(
-                        value: "edit",
-                        child: Row(
-                          children: [
-                            Icon(Icons.edit, size: 18),
-                            SizedBox(width: 8),
-                            Text("Sửa"),
-                          ],
-                        ),
+                    child: AnimatedContainer(
+                      duration: Duration(milliseconds: 220),
+                      curve: Curves.easeOutCubic,
+                      padding: EdgeInsets.fromLTRB(14, 12, 8, 12),
+                      decoration: BoxDecoration(
+                        color: isSelected ? AppColors.green : AppColors.panel2,
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(color: AppColors.border, width: 1.25),
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppColors.border.withOpacity(isSelected ? 1 : 0.18),
+                            offset: Offset(0, isSelected ? 4 : 2),
+                            blurRadius: 0,
+                          ),
+                        ],
                       ),
-                      PopupMenuItem(
-                        value: "delete",
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.delete,
-                              size: 18,
-                              color: Colors.red,
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  course.title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: AppColors.text,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                                SizedBox(height: 4),
+                                Text(
+                                  "${course.cardCount} thẻ • ${course.languageCode}",
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: AppColors.text.withOpacity(0.72),
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
                             ),
-                            SizedBox(width: 8),
-                            Text("Xóa"),
-                          ],
-                        ),
+                          ),
+                          PopupMenuButton<String>(
+                            onSelected: (value) {
+                              if (value == "edit") {
+                                openEditCourseDialog(course);
+                              }
+
+                              if (value == "delete") {
+                                confirmDeleteCourse(course);
+                              }
+                            },
+                            itemBuilder: (_) => [
+                              PopupMenuItem(
+                                value: "edit",
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.edit, size: 18),
+                                    SizedBox(width: 8),
+                                    Text("Sửa"),
+                                  ],
+                                ),
+                              ),
+                              PopupMenuItem(
+                                value: "delete",
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.delete,
+                                      size: 18,
+                                      color: Colors.red,
+                                    ),
+                                    SizedBox(width: 8),
+                                    Text("Xóa"),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
-                  onTap: () {
-                    setState(() {
-                      selectedHomeCourse = course;
-                    });
-                    closeMenu();
-                    openFlashCards(course);
-                  },
                 );
               },
             ),
 ),
 Padding(
-  padding: const EdgeInsets.all(12),
+  padding: EdgeInsets.all(12),
   child: Row(
     children: [
       Expanded(
@@ -892,14 +1789,14 @@ Padding(
           height: 46,
           child: ElevatedButton.icon(
             onPressed: openCreateCourse,
-            icon: const Icon(Icons.add),
-            label: const Text("Thêm học phần"),
+            icon: Icon(Icons.add),
+            label: Text("Thêm học phần"),
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.yellow,
-              foregroundColor: AppColors.border,
+              foregroundColor: AppColors.buttonInk,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
-                side: const BorderSide(
+                side: BorderSide(
                   color: AppColors.border,
                   width: 1.3,
                 ),
@@ -909,7 +1806,7 @@ Padding(
         ),
       ),
 
-      const SizedBox(width: 8),
+      SizedBox(width: 8),
 
       SizedBox(
         width: 52,
@@ -922,13 +1819,13 @@ Padding(
             padding: EdgeInsets.zero,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
-              side: const BorderSide(
+              side: BorderSide(
                 color: AppColors.border,
                 width: 1.3,
               ),
             ),
           ),
-          child: const Icon(Icons.menu),
+          child: Icon(Icons.menu),
         ),
       ),
     ],
@@ -947,11 +1844,11 @@ Padding(
   child: IgnorePointer(
     ignoring: isOpen,
     child: AnimatedSlide(
-      duration: const Duration(milliseconds: 520),
+      duration: Duration(milliseconds: 520),
       curve: Curves.easeOutBack,
-      offset: isOpen ? const Offset(0, 1.35) : Offset.zero,
+      offset: isOpen ? Offset(0, 1.35) : Offset.zero,
       child: AnimatedOpacity(
-        duration: const Duration(milliseconds: 260),
+        duration: Duration(milliseconds: 260),
         curve: Curves.easeOut,
         opacity: isOpen ? 0 : 1,
         child: ClipRRect(
@@ -964,16 +1861,16 @@ Padding(
             child: Container(
               height: 70,
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.65),
+                color: AppColors.panel.withOpacity(0.78),
                 borderRadius: BorderRadius.circular(28),
                 border: Border.all(
-                  color: Colors.white.withOpacity(0.4),
+                  color: AppColors.panel.withOpacity(0.55),
                 ),
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black.withOpacity(0.08),
                     blurRadius: 20,
-                    offset: const Offset(0, 8),
+                    offset: Offset(0, 8),
                   ),
                 ],
               ),
@@ -982,34 +1879,34 @@ Padding(
                 children: [
                   IconButton(
                     onPressed: toggleMenu,
-                    icon: const Icon(
+                    icon: Icon(
                       Icons.menu,
                       size: 30,
-                      color: Colors.grey,
+                      color: AppColors.muted,
                     ),
                   ),
                   IconButton(
                     onPressed: () {},
-                    icon: const Icon(
+                    icon: Icon(
                       Icons.home,
                       size: 30,
-                      color: Colors.black,
+                      color: AppColors.text,
                     ),
                   ),
                   IconButton(
-                    onPressed: () {},
-                    icon: const Icon(
-                      Icons.settings,
+                    onPressed: openSettingsPage,
+                    icon: Icon(
+                      Icons.settings_rounded,
                       size: 30,
-                      color: Colors.grey,
+                      color: AppColors.muted,
                     ),
                   ),
                   IconButton(
                     onPressed: () {},
-                    icon: const Icon(
+                    icon: Icon(
                       Icons.person_outline,
                       size: 30,
-                      color: Colors.grey,
+                      color: AppColors.muted,
                     ),
                   ),
                 ],
@@ -1023,12 +1920,1655 @@ Padding(
 ),
         ],
       ),
+      ),
     );
   }
 }
 
+
+
+class BackupManager {
+  BackupManager._();
+
+  static Future<Directory> _backupRoot() async {
+    final docDir = await getApplicationDocumentsDirectory();
+    final dir = Directory('${docDir.path}/flashcard_backups');
+    if (!await dir.exists()) await dir.create(recursive: true);
+    return dir;
+  }
+
+  static String _stamp() {
+    final n = DateTime.now();
+    String two(int v) => v.toString().padLeft(2, '0');
+    return '${n.year}${two(n.month)}${two(n.day)}_${two(n.hour)}${two(n.minute)}${two(n.second)}';
+  }
+
+  static Future<String> exportAll() async {
+    final db = await AppDatabase.instance.database;
+    await db.rawQuery('PRAGMA wal_checkpoint(FULL)');
+
+    final root = await _backupRoot();
+    final backupDir = Directory('${root.path}/backup_${_stamp()}');
+    await backupDir.create(recursive: true);
+
+    final dbPath = await getDatabasesPath();
+    final dbFile = File('$dbPath/list_card.db');
+    if (await dbFile.exists()) {
+      await dbFile.copy('${backupDir.path}/list_card.db');
+    }
+
+    final docDir = await getApplicationDocumentsDirectory();
+    final audioDir = Directory('${docDir.path}/tts_cache');
+    if (await audioDir.exists()) {
+      await _copyDirectory(audioDir, Directory('${backupDir.path}/tts_cache'));
+    }
+
+    await File('${backupDir.path}/README.txt').writeAsString(
+      'Flashcard backup\n'
+      'Tao luc: ${DateTime.now().toIso8601String()}\n\n'
+      'Muon giu du lieu khi app mat chung chi: copy ca thu muc Documents cua app, hoac giu thu muc flashcard_backups nay.\n'
+      'Backup gom list_card.db va tts_cache audio.\n',
+    );
+
+    await db.insert(
+      'import_exports',
+      {
+        'type': 'export',
+        'fileName': backupDir.uri.pathSegments.isNotEmpty ? backupDir.uri.pathSegments.last : 'backup',
+        'filePath': backupDir.path,
+        'format': 'folder',
+        'courseId': null,
+        'status': 'success',
+        'message': 'Export toàn bộ học phần kèm audio',
+        'createdAt': DateTime.now().toIso8601String(),
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+
+    final zipFile = await zipBackupDirectory(backupDir);
+
+    await db.insert(
+      'import_exports',
+      {
+        'type': 'export',
+        'fileName': zipFile.uri.pathSegments.isNotEmpty ? zipFile.uri.pathSegments.last : 'backup.zip',
+        'filePath': zipFile.path,
+        'format': 'zip',
+        'courseId': null,
+        'status': 'success',
+        'message': 'Export file zip toàn bộ học phần kèm audio',
+        'createdAt': DateTime.now().toIso8601String(),
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+
+    await shareBackupZip(zipFile);
+    return zipFile.path;
+  }
+
+  static Future<File> zipBackupDirectory(Directory backupDir) async {
+    final zipPath = '${backupDir.path}.zip';
+    final zipFile = File(zipPath);
+    if (await zipFile.exists()) {
+      await zipFile.delete();
+    }
+
+    final encoder = ZipFileEncoder();
+    encoder.create(zipPath);
+    encoder.addDirectory(backupDir, includeDirName: false);
+    encoder.close();
+
+    return zipFile;
+  }
+
+  static Future<void> shareBackupZip(File zipFile) async {
+    if (kIsWeb) return;
+
+    if (Platform.isIOS || Platform.isAndroid) {
+      await Share.shareXFiles(
+        [XFile(zipFile.path)],
+        subject: 'FlashCard Backup',
+        text: 'Backup FlashCard gồm toàn bộ học phần, database và audio.',
+      );
+      return;
+    }
+
+    await openFolderIfPossible(zipFile.parent.path);
+  }
+
+
+  static Future<void> openFolderIfPossible(String path) async {
+    try {
+      if (kIsWeb) return;
+      if (Platform.isWindows) {
+        await Process.run('explorer', [path]);
+      } else if (Platform.isMacOS) {
+        await Process.run('open', [path]);
+      } else if (Platform.isLinux) {
+        await Process.run('xdg-open', [path]);
+      }
+    } catch (_) {}
+  }
+
+  static Future<String> importLatest() async {
+    final root = await _backupRoot();
+    if (!await root.exists()) {
+      throw Exception('Chưa có thư mục backup');
+    }
+
+    final backups = await root
+        .list()
+        .where((e) => e is Directory && e.path.split(Platform.pathSeparator).last.startsWith('backup_'))
+        .cast<Directory>()
+        .toList();
+
+    if (backups.isEmpty) {
+      throw Exception('Chưa có bản export nào để import');
+    }
+
+    backups.sort((a, b) => b.path.compareTo(a.path));
+    final latest = backups.first;
+    final sourceDb = File('${latest.path}/list_card.db');
+    if (!await sourceDb.exists()) {
+      throw Exception('Backup không có file list_card.db');
+    }
+
+    await AppDatabase.instance.close();
+    final dbPath = await getDatabasesPath();
+    await sourceDb.copy('$dbPath/list_card.db');
+
+    final docDir = await getApplicationDocumentsDirectory();
+    final targetAudio = Directory('${docDir.path}/tts_cache');
+    if (await targetAudio.exists()) await targetAudio.delete(recursive: true);
+
+    final sourceAudio = Directory('${latest.path}/tts_cache');
+    if (await sourceAudio.exists()) {
+      await _copyDirectory(sourceAudio, targetAudio);
+    }
+
+    final db = await AppDatabase.instance.database;
+    await db.insert(
+      'import_exports',
+      {
+        'type': 'import',
+        'fileName': latest.uri.pathSegments.isNotEmpty ? latest.uri.pathSegments.last : 'backup',
+        'filePath': latest.path,
+        'format': 'folder',
+        'courseId': null,
+        'status': 'success',
+        'message': 'Import toàn bộ học phần kèm audio',
+        'createdAt': DateTime.now().toIso8601String(),
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+
+    await openFolderIfPossible(latest.path);
+    return latest.path;
+  }
+
+  static Future<String> appDataPath() async {
+    final docDir = await getApplicationDocumentsDirectory();
+    return docDir.path;
+  }
+
+  static Future<void> _copyDirectory(Directory source, Directory target) async {
+    if (!await target.exists()) await target.create(recursive: true);
+    await for (final entity in source.list(recursive: false)) {
+      final name = entity.path.split(Platform.pathSeparator).last;
+      final newPath = '${target.path}${Platform.pathSeparator}$name';
+      if (entity is File) {
+        await entity.copy(newPath);
+      } else if (entity is Directory) {
+        await _copyDirectory(entity, Directory(newPath));
+      }
+    }
+  }
+}
+
+class SettingsPage extends StatefulWidget {
+  SettingsPage({super.key});
+
+  @override
+  State<SettingsPage> createState() => _SettingsPageState();
+}
+
+class _SettingsPageState extends State<SettingsPage> {
+  String themeMode = 'light';
+  bool busy = false;
+  String appPath = '';
+  String message = '';
+
+  final Map<String, String> colorNames = {
+    'bg': 'Nền app',
+    'panel': 'Nền card',
+    'panel2': 'Nền phụ',
+    'border': 'Viền / chữ đậm',
+    'text': 'Chữ chính',
+    'muted': 'Chữ phụ',
+    'yellow': 'Nút tạo học phần',
+    'green': 'Nút ôn tập / đúng',
+    'red': 'Nút Flash Card / sai',
+    'blue': 'Nút thống kê / phụ',
+  };
+
+  final List<Color> presets = [
+    Color(0xffeef1f4),
+    Color(0xffffffff),
+    Color(0xff183153),
+    Color(0xff1f3b63),
+    Color(0xff6d7890),
+    Color(0xfff5c400),
+    Color(0xff8ee88b),
+    Color(0xffff9f9f),
+    Color(0xffa1a7fb),
+    Color(0xff111827),
+    Color(0xff1f2937),
+    Color(0xff78e08f),
+    Color(0xffffb020),
+    Color(0xff38bdf8),
+    Color(0xfff472b6),
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    loadSettings();
+  }
+
+  Future<void> loadSettings() async {
+    final mode = await AppSettingsStore.getString('appearance.themeMode') ?? 'light';
+    final path = await BackupManager.appDataPath();
+    if (!mounted) return;
+    setState(() {
+      themeMode = mode;
+      appPath = path;
+    });
+  }
+
+  Future<void> changeThemeMode(String value) async {
+    await AppSettingsStore.setString('appearance.themeMode', value);
+    await AppColors.load(context: context);
+    AppThemeController.instance.bump();
+    if (!mounted) return;
+    setState(() => themeMode = value);
+  }
+
+  Future<void> runTask(Future<String> Function() task, String doneText) async {
+    if (busy) return;
+    setState(() {
+      busy = true;
+      message = '';
+    });
+    try {
+      final path = await task();
+      if (!mounted) return;
+      setState(() => message = '$doneText\n$path');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => message = 'Lỗi: $e');
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: EdgeInsets.fromLTRB(16, 14, 16, 28),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  _roundIconButton(
+                    icon: Icons.arrow_back_rounded,
+                    onTap: () => Navigator.pop(context, true),
+                  ),
+                  SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Cài Đặt',
+                      style: TextStyle(
+                        color: AppColors.text,
+                        fontSize: 26,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                  _roundIconButton(
+                    icon: Icons.restart_alt_rounded,
+                    onTap: () async {
+                      await AppColors.resetColors(context: context);
+                      if (mounted) setState(() {});
+                    },
+                  ),
+                ],
+              ),
+              SizedBox(height: 16),
+              _sectionCard(
+                title: 'Giao diện',
+                icon: Icons.dark_mode_rounded,
+                child: Column(
+                  children: [
+                    _modeTile('system', 'Theo điện thoại', Icons.phone_iphone_rounded),
+                    _modeTile('light', 'Sáng', Icons.light_mode_rounded),
+                    _modeTile('dark', 'Tối', Icons.nightlight_round),
+                  ],
+                ),
+              ),
+              SizedBox(height: 14),
+              _sectionCard(
+                title: 'Export / Import toàn bộ app',
+                icon: Icons.folder_zip_rounded,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Export sẽ tạo backup .zip gồm list_card.db và thư mục audio tts_cache. Trên iPhone/Android sẽ tự mở bảng chia sẻ, có AirDrop nếu thiết bị hỗ trợ.',
+                      style: TextStyle(color: AppColors.muted, fontWeight: FontWeight.w700, height: 1.35),
+                    ),
+                    SizedBox(height: 12),
+                    _pathBox(appPath),
+                    SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _actionButton(
+                            text: 'Backup',
+                            icon: Icons.ios_share_rounded,
+                            color: AppColors.green,
+                            onTap: () => runTask(BackupManager.exportAll, 'Đã export xong'),
+                          ),
+                        ),
+                        SizedBox(width: 10),
+                        Expanded(
+                          child: _actionButton(
+                            text: 'Import',
+                            icon: Icons.download_rounded,
+                            color: AppColors.yellow,
+                            onTap: () => runTask(BackupManager.importLatest, 'Đã import xong, hãy mở lại app nếu dữ liệu chưa refresh'),
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (busy) ...[
+                      SizedBox(height: 12),
+                      LinearProgressIndicator(color: AppColors.green, backgroundColor: AppColors.panel2),
+                    ],
+                    if (message.isNotEmpty) ...[
+                      SizedBox(height: 12),
+                      _pathBox(message),
+                    ],
+                  ],
+                ),
+              ),
+              SizedBox(height: 14),
+              _sectionCard(
+                title: 'Chỉnh màu toàn bộ giao diện',
+                icon: Icons.palette_rounded,
+                child: Column(
+                  children: colorNames.entries.map((entry) => _colorRow(entry.key, entry.value)).toList(),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _roundIconButton({required IconData icon, required VoidCallback onTap}) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        width: 46,
+        height: 46,
+        decoration: BoxDecoration(
+          color: AppColors.panel,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.border, width: 1.3),
+          boxShadow: [BoxShadow(color: AppColors.border.withOpacity(0.14), blurRadius: 10, offset: Offset(0, 5))],
+        ),
+        child: Icon(icon, color: AppColors.border),
+      ),
+    );
+  }
+
+  Widget _sectionCard({required String title, required IconData icon, required Widget child}) {
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.panel,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: AppColors.border, width: 1.4),
+        boxShadow: [BoxShadow(color: AppColors.border.withOpacity(0.20), blurRadius: 0, offset: Offset(0, 5))],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: AppColors.green,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppColors.border, width: 1.2),
+                ),
+                child: Icon(icon, color: AppColors.border),
+              ),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  title,
+                  style: TextStyle(color: AppColors.text, fontSize: 18, fontWeight: FontWeight.w900),
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: 14),
+          child,
+        ],
+      ),
+    );
+  }
+
+  Widget _modeTile(String value, String text, IconData icon) {
+    final active = themeMode == value;
+    return InkWell(
+      onTap: () => changeThemeMode(value),
+      borderRadius: BorderRadius.circular(16),
+      child: AnimatedContainer(
+        duration: Duration(milliseconds: 180),
+        margin: EdgeInsets.only(bottom: 8),
+        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        decoration: BoxDecoration(
+          color: active ? AppColors.green : AppColors.panel2,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.border, width: active ? 1.6 : 1),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: AppColors.border),
+            SizedBox(width: 10),
+            Expanded(child: Text(text, style: TextStyle(color: AppColors.text, fontWeight: FontWeight.w900))),
+            if (active) Icon(Icons.check_circle_rounded, color: AppColors.border),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _actionButton({required String text, required IconData icon, required Color color, required VoidCallback onTap}) {
+    return InkWell(
+      onTap: busy ? null : onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        height: 56,
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.border, width: 1.3),
+          boxShadow: [BoxShadow(color: AppColors.border.withOpacity(0.35), blurRadius: 0, offset: Offset(0, 5))],
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: AppColors.border),
+            SizedBox(width: 7),
+            Flexible(child: Text(text, textAlign: TextAlign.center, style: TextStyle(color: AppColors.text, fontWeight: FontWeight.w900))),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _pathBox(String text) {
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.panel2,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.border.withOpacity(0.45)),
+      ),
+      child: SelectableText(
+        text,
+        style: TextStyle(color: AppColors.text, fontSize: 12, fontWeight: FontWeight.w700),
+      ),
+    );
+  }
+
+  Widget _colorRow(String key, String label) {
+    final current = AppColors.getByKey(key);
+    return Container(
+      margin: EdgeInsets.only(bottom: 13),
+      padding: EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.panel2,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border.withOpacity(0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: current,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: AppColors.border, width: 1.2),
+                ),
+              ),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text(label, style: TextStyle(color: AppColors.text, fontWeight: FontWeight.w900)),
+              ),
+              Text('#${current.value.toRadixString(16).padLeft(8, '0').substring(2).toUpperCase()}', style: TextStyle(color: AppColors.muted, fontWeight: FontWeight.w800)),
+            ],
+          ),
+          SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: presets.map((color) {
+              return InkWell(
+                onTap: () async {
+                  await AppColors.saveColor(key, color);
+                  if (mounted) setState(() {});
+                },
+                borderRadius: BorderRadius.circular(999),
+                child: Container(
+                  width: 30,
+                  height: 30,
+                  decoration: BoxDecoration(
+                    color: color,
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: color.value == current.value ? AppColors.text : AppColors.border.withOpacity(0.35),
+                      width: color.value == current.value ? 2.4 : 1,
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class StatisticsData {
+  final int totalCourses;
+  final int totalCards;
+  final int masteredCards;
+  final int needReviewCards;
+  final int favoriteCards;
+  final int totalSessions;
+  final int totalCorrect;
+  final int totalWrong;
+  final int totalAnswered;
+  final List<CourseStatisticsItem> courseItems;
+  final List<ReviewDueItem> dueItems;
+
+  StatisticsData({
+    required this.totalCourses,
+    required this.totalCards,
+    required this.masteredCards,
+    required this.needReviewCards,
+    required this.favoriteCards,
+    required this.totalSessions,
+    required this.totalCorrect,
+    required this.totalWrong,
+    required this.totalAnswered,
+    required this.courseItems,
+    required this.dueItems,
+  });
+
+  int get completionPercent {
+    if (totalCards <= 0) return 0;
+    return ((masteredCards / totalCards) * 100).round().clamp(0, 100).toInt();
+  }
+
+  int get accuracyPercent {
+    final sum = totalCorrect + totalWrong;
+    if (sum <= 0) return 0;
+    return ((totalCorrect / sum) * 100).round().clamp(0, 100).toInt();
+  }
+}
+
+class CourseStatisticsItem {
+  final int id;
+  final String title;
+  final String languageCode;
+  final int totalCards;
+  final int masteredCards;
+  final int correctCount;
+  final int wrongCount;
+  final int sessionCount;
+
+  CourseStatisticsItem({
+    required this.id,
+    required this.title,
+    required this.languageCode,
+    required this.totalCards,
+    required this.masteredCards,
+    required this.correctCount,
+    required this.wrongCount,
+    required this.sessionCount,
+  });
+
+  int get progressPercent {
+    if (totalCards <= 0) return 0;
+    return ((masteredCards / totalCards) * 100).round().clamp(0, 100).toInt();
+  }
+}
+
+class ReviewDueItem {
+  final String term;
+  final String definition;
+  final String courseTitle;
+  final int level;
+
+  ReviewDueItem({
+    required this.term,
+    required this.definition,
+    required this.courseTitle,
+    required this.level,
+  });
+}
+
+class StatisticsPage extends StatefulWidget {
+  StatisticsPage({super.key});
+
+  @override
+  State<StatisticsPage> createState() => _StatisticsPageState();
+}
+
+class _StatisticsPageState extends State<StatisticsPage> {
+  late Future<StatisticsData> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = loadStatistics();
+  }
+
+  int _asInt(Object? value) {
+    if (value == null) return 0;
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value.toString()) ?? 0;
+  }
+
+  Future<void> _purgeSoftDeletedCourses(Database db) async {
+    final rows = await db.query(
+      'courses',
+      columns: ['id'],
+      where: 'deletedAt IS NOT NULL',
+    );
+
+    if (rows.isEmpty) return;
+
+    final ids = rows
+        .map((row) => _asInt(row['id']))
+        .where((id) => id > 0)
+        .toList();
+
+    if (ids.isEmpty) return;
+
+    await db.transaction((txn) async {
+      for (final courseId in ids) {
+        await txn.delete(
+          'study_results',
+          where:
+              'sessionId IN (SELECT id FROM study_sessions WHERE courseId = ?) OR cardId IN (SELECT id FROM cards WHERE courseId = ?)',
+          whereArgs: [courseId, courseId],
+        );
+        await txn.delete(
+          'study_sessions',
+          where: 'courseId = ?',
+          whereArgs: [courseId],
+        );
+        await txn.delete(
+          'review_states',
+          where: 'cardId IN (SELECT id FROM cards WHERE courseId = ?)',
+          whereArgs: [courseId],
+        );
+        await txn.delete(
+          'card_examples',
+          where: 'cardId IN (SELECT id FROM cards WHERE courseId = ?)',
+          whereArgs: [courseId],
+        );
+        await txn.delete(
+          'cards',
+          where: 'courseId = ?',
+          whereArgs: [courseId],
+        );
+        await txn.delete(
+          'course_tags',
+          where: 'courseId = ?',
+          whereArgs: [courseId],
+        );
+        await txn.delete(
+          'import_exports',
+          where: 'courseId = ?',
+          whereArgs: [courseId],
+        );
+        await txn.delete(
+          'courses',
+          where: 'id = ?',
+          whereArgs: [courseId],
+        );
+      }
+    });
+
+    for (final courseId in ids) {
+      await TtsAudioCache.instance.deleteCourseAudioCache(courseId: courseId);
+    }
+  }
+
+  Future<StatisticsData> loadStatistics() async {
+    final db = await AppDatabase.instance.database;
+    await _purgeSoftDeletedCourses(db);
+    final now = DateTime.now().toIso8601String();
+
+    final overviewRows = await db.rawQuery('''
+      SELECT
+        (SELECT COUNT(*) FROM courses WHERE deletedAt IS NULL) AS totalCourses,
+        (SELECT COUNT(*)
+          FROM cards ca
+          INNER JOIN courses c ON c.id = ca.courseId
+          WHERE ca.deletedAt IS NULL AND ca.isHidden = 0 AND c.deletedAt IS NULL
+        ) AS totalCards,
+        (SELECT COUNT(*)
+          FROM cards ca
+          INNER JOIN courses c ON c.id = ca.courseId
+          INNER JOIN review_states rs ON rs.cardId = ca.id
+          WHERE ca.deletedAt IS NULL AND ca.isHidden = 0 AND c.deletedAt IS NULL AND COALESCE(rs.level, 0) >= 1
+        ) AS masteredCards,
+        (SELECT COUNT(*)
+          FROM cards ca
+          INNER JOIN courses c ON c.id = ca.courseId
+          LEFT JOIN review_states rs ON rs.cardId = ca.id
+          WHERE ca.deletedAt IS NULL
+            AND ca.isHidden = 0
+            AND c.deletedAt IS NULL
+            AND (rs.id IS NULL OR COALESCE(rs.level, 0) < 1 OR rs.nextReviewAt IS NULL OR rs.nextReviewAt <= ?)
+        ) AS needReviewCards,
+        (SELECT COUNT(*)
+          FROM cards ca
+          INNER JOIN courses c ON c.id = ca.courseId
+          WHERE ca.deletedAt IS NULL AND ca.isHidden = 0 AND ca.isFavorite = 1 AND c.deletedAt IS NULL
+        ) AS favoriteCards,
+        (SELECT COUNT(*)
+          FROM study_sessions ss
+          INNER JOIN courses c ON c.id = ss.courseId
+          WHERE c.deletedAt IS NULL
+        ) AS totalSessions,
+        (SELECT COALESCE(SUM(ss.correctCount), 0)
+          FROM study_sessions ss
+          INNER JOIN courses c ON c.id = ss.courseId
+          WHERE c.deletedAt IS NULL
+        ) AS totalCorrect,
+        (SELECT COALESCE(SUM(ss.wrongCount), 0)
+          FROM study_sessions ss
+          INNER JOIN courses c ON c.id = ss.courseId
+          WHERE c.deletedAt IS NULL
+        ) AS totalWrong,
+        (SELECT COUNT(*)
+          FROM study_results sr
+          INNER JOIN cards ca ON ca.id = sr.cardId
+          INNER JOIN courses c ON c.id = ca.courseId
+          WHERE ca.deletedAt IS NULL AND c.deletedAt IS NULL
+        ) AS totalAnswered
+    ''', [now]);
+
+    final overview = overviewRows.isEmpty ? <String, Object?>{} : overviewRows.first;
+
+    final courseRows = await db.rawQuery('''
+      SELECT
+        c.id,
+        c.title,
+        c.languageCode,
+        COUNT(ca.id) AS totalCards,
+        COALESCE(SUM(CASE WHEN COALESCE(rs.level, 0) >= 1 THEN 1 ELSE 0 END), 0) AS masteredCards,
+        COALESCE(SUM(rs.correctCount), 0) AS correctCount,
+        COALESCE(SUM(rs.wrongCount), 0) AS wrongCount,
+        (SELECT COUNT(*) FROM study_sessions ss WHERE ss.courseId = c.id) AS sessionCount
+      FROM courses c
+      LEFT JOIN cards ca
+        ON ca.courseId = c.id
+        AND ca.deletedAt IS NULL
+        AND ca.isHidden = 0
+      LEFT JOIN review_states rs ON rs.cardId = ca.id
+      WHERE c.deletedAt IS NULL
+      GROUP BY c.id, c.title, c.languageCode
+      ORDER BY COALESCE(c.updatedAt, c.createdAt) DESC
+    ''');
+
+    final dueRows = await db.rawQuery('''
+      SELECT
+        ca.term,
+        ca.definition,
+        c.title AS courseTitle,
+        COALESCE(rs.level, 0) AS level,
+        rs.nextReviewAt
+      FROM cards ca
+      INNER JOIN courses c ON c.id = ca.courseId
+      LEFT JOIN review_states rs ON rs.cardId = ca.id
+      WHERE ca.deletedAt IS NULL
+        AND ca.isHidden = 0
+        AND c.deletedAt IS NULL
+        AND (rs.id IS NULL OR COALESCE(rs.level, 0) < 1 OR rs.nextReviewAt IS NULL OR rs.nextReviewAt <= ?)
+      ORDER BY
+        CASE WHEN rs.nextReviewAt IS NULL THEN 0 ELSE 1 END,
+        rs.nextReviewAt ASC,
+        ca.position ASC,
+        ca.id ASC
+      LIMIT 12
+    ''', [now]);
+
+    return StatisticsData(
+      totalCourses: _asInt(overview['totalCourses']),
+      totalCards: _asInt(overview['totalCards']),
+      masteredCards: _asInt(overview['masteredCards']),
+      needReviewCards: _asInt(overview['needReviewCards']),
+      favoriteCards: _asInt(overview['favoriteCards']),
+      totalSessions: _asInt(overview['totalSessions']),
+      totalCorrect: _asInt(overview['totalCorrect']),
+      totalWrong: _asInt(overview['totalWrong']),
+      totalAnswered: _asInt(overview['totalAnswered']),
+      courseItems: courseRows.map((row) {
+        return CourseStatisticsItem(
+          id: _asInt(row['id']),
+          title: row['title']?.toString() ?? '',
+          languageCode: row['languageCode']?.toString() ?? '',
+          totalCards: _asInt(row['totalCards']),
+          masteredCards: _asInt(row['masteredCards']),
+          correctCount: _asInt(row['correctCount']),
+          wrongCount: _asInt(row['wrongCount']),
+          sessionCount: _asInt(row['sessionCount']),
+        );
+      }).toList(),
+      dueItems: dueRows.map((row) {
+        return ReviewDueItem(
+          term: row['term']?.toString() ?? '',
+          definition: row['definition']?.toString() ?? '',
+          courseTitle: row['courseTitle']?.toString() ?? '',
+          level: _asInt(row['level']),
+        );
+      }).toList(),
+    );
+  }
+
+  void reloadStatistics() {
+    setState(() {
+      _future = loadStatistics();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      body: SafeArea(
+        child: FutureBuilder<StatisticsData>(
+          future: _future,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return Center(
+                child: CircularProgressIndicator(color: AppColors.border),
+              );
+            }
+
+            if (snapshot.hasError) {
+              return _buildError(snapshot.error.toString());
+            }
+
+            final data = snapshot.data;
+            if (data == null) return _buildError('Không có dữ liệu thống kê');
+
+            return RefreshIndicator(
+              onRefresh: () async => reloadStatistics(),
+              color: AppColors.border,
+              child: CustomScrollView(
+                physics: AlwaysScrollableScrollPhysics(),
+                slivers: [
+                  SliverToBoxAdapter(child: _buildHeader(data)),
+                  SliverPadding(
+                    padding: EdgeInsets.fromLTRB(18, 0, 18, 24),
+                    sliver: SliverList(
+                      delegate: SliverChildListDelegate([
+                        SizedBox(height: 16),
+                        _buildOverviewGrid(data),
+                        SizedBox(height: 16),
+                        _buildChartPanel(data),
+                        SizedBox(height: 16),
+                        _buildCourseProgress(data),
+                        SizedBox(height: 16),
+                        _buildDueCards(data),
+                        SizedBox(height: 24),
+                      ]),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildError(String text) {
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.all(18),
+        child: Column(
+          children: [
+            _buildTopBar(),
+            Spacer(),
+            Container(
+              width: double.infinity,
+              padding: EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: AppColors.panel,
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: AppColors.border, width: 1.4),
+                boxShadow: [
+                  BoxShadow(color: AppColors.border, offset: Offset(0, 5), blurRadius: 0),
+                ],
+              ),
+              child: Column(
+                children: [
+                  Icon(Icons.warning_amber_rounded, color: AppColors.red, size: 42),
+                  SizedBox(height: 10),
+                  Text(
+                    'Không tải được thống kê',
+                    style: TextStyle(
+                      color: AppColors.text,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    text,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: AppColors.muted, fontWeight: FontWeight.w700),
+                  ),
+                  SizedBox(height: 14),
+                  ElevatedButton.icon(
+                    onPressed: reloadStatistics,
+                    icon: Icon(Icons.refresh_rounded),
+                    label: Text('Thử lại'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.yellow,
+                      foregroundColor: AppColors.buttonInk,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        side: BorderSide(color: AppColors.border),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Spacer(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeader(StatisticsData data) {
+    return Container(
+      margin: EdgeInsets.fromLTRB(18, 16, 18, 0),
+      padding: EdgeInsets.fromLTRB(16, 14, 16, 18),
+      decoration: BoxDecoration(
+        color: AppColors.border,
+        borderRadius: BorderRadius.circular(28),
+        boxShadow: [
+          BoxShadow(color: Colors.black, offset: Offset(0, 5), blurRadius: 0),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildTopBar(onDark: true),
+          SizedBox(height: 18),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              SizedBox(
+                width: 112,
+                height: 112,
+                child: CustomPaint(
+                  painter: StatisticsDonutPainter(
+                    percent: data.completionPercent / 100,
+                    backgroundColor: Colors.white.withOpacity(0.18),
+                    progressColor: AppColors.green,
+                    strokeWidth: 13,
+                  ),
+                  child: Center(
+                    child: Text(
+                      '${data.completionPercent}%',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 25,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Bảng thống kê',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 25,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    SizedBox(height: 6),
+                    Text(
+                      data.totalCards == 0
+                          ? 'Chưa có thẻ để thống kê'
+                          : '${data.masteredCards}/${data.totalCards} thẻ đã ghi nhớ',
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.78),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    SizedBox(height: 12),
+                    _buildMiniHeaderPill(
+                      icon: Icons.local_fire_department_rounded,
+                      text: '${data.needReviewCards} thẻ cần ôn',
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTopBar({bool onDark = false}) {
+    final color = onDark ? Colors.white : AppColors.text;
+    return Row(
+      children: [
+        InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: () => Navigator.pop(context),
+          child: Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: onDark ? Colors.white.withOpacity(0.13) : Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: onDark ? Colors.white.withOpacity(0.25) : AppColors.border),
+            ),
+            child: Icon(Icons.arrow_back_rounded, color: color),
+          ),
+        ),
+        SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            'Thống Kê',
+            style: TextStyle(
+              color: color,
+              fontSize: 22,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ),
+        InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: reloadStatistics,
+          child: Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: onDark ? Colors.white.withOpacity(0.13) : Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: onDark ? Colors.white.withOpacity(0.25) : AppColors.border),
+            ),
+            child: Icon(Icons.refresh_rounded, color: color),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMiniHeaderPill({required IconData icon, required String text}) {
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.14),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: Colors.white.withOpacity(0.22)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: AppColors.yellow),
+          SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              text,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOverviewGrid(StatisticsData data) {
+    return GridView.count(
+      crossAxisCount: 2,
+      childAspectRatio: 1.42,
+      crossAxisSpacing: 12,
+      mainAxisSpacing: 12,
+      padding: EdgeInsets.zero,
+      shrinkWrap: true,
+      physics: NeverScrollableScrollPhysics(),
+      children: [
+        _buildStatCard('Học phần', data.totalCourses.toString(), Icons.folder_copy_rounded, AppColors.yellow),
+        _buildStatCard('Tổng thẻ', data.totalCards.toString(), Icons.style_rounded, AppColors.red),
+        _buildStatCard('Đã nhớ', data.masteredCards.toString(), Icons.check_circle_rounded, AppColors.green),
+        _buildStatCard('Buổi học', data.totalSessions.toString(), Icons.event_note_rounded, AppColors.blue),
+      ],
+    );
+  }
+
+  Widget _buildStatCard(String label, String value, IconData icon, Color color) {
+    return Container(
+      padding: EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.panel,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: AppColors.border, width: 1.35),
+        boxShadow: [
+          BoxShadow(color: AppColors.border, offset: Offset(0, 4), blurRadius: 0),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: color,
+              borderRadius: BorderRadius.circular(15),
+              border: Border.all(color: AppColors.border, width: 1.2),
+            ),
+            child: Icon(icon, color: AppColors.border, size: 23),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                value,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: AppColors.text,
+                  fontSize: 28,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: AppColors.muted,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildChartPanel(StatisticsData data) {
+    final correct = data.totalCorrect;
+    final wrong = data.totalWrong;
+    final maxValue = math.max(1, math.max(correct, wrong));
+
+    return Container(
+      padding: EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.panel,
+        borderRadius: BorderRadius.circular(26),
+        border: Border.all(color: AppColors.border, width: 1.35),
+        boxShadow: [
+          BoxShadow(color: AppColors.border, offset: Offset(0, 5), blurRadius: 0),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: AppColors.green,
+                  borderRadius: BorderRadius.circular(15),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Icon(Icons.query_stats_rounded, color: AppColors.border),
+              ),
+              SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Kết quả luyện tập',
+                      style: TextStyle(
+                        color: AppColors.text,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      'Độ chính xác ${data.accuracyPercent}% • ${data.totalAnswered} lượt trả lời',
+                      style: TextStyle(
+                        color: AppColors.muted,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: 16),
+          _buildBarRow('Đúng', correct, maxValue, AppColors.green),
+          SizedBox(height: 12),
+          _buildBarRow('Sai', wrong, maxValue, AppColors.red),
+          SizedBox(height: 16),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: LinearProgressIndicator(
+              value: data.accuracyPercent / 100,
+              minHeight: 14,
+              backgroundColor: AppColors.bg,
+              color: AppColors.green,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBarRow(String label, int value, int maxValue, Color color) {
+    final widthFactor = (value / maxValue).clamp(0.04, 1.0).toDouble();
+    return Row(
+      children: [
+        SizedBox(
+          width: 46,
+          child: Text(
+            label,
+            style: TextStyle(
+              color: AppColors.text,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ),
+        Expanded(
+          child: Stack(
+            children: [
+              Container(
+                height: 28,
+                decoration: BoxDecoration(
+                  color: AppColors.bg,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.border.withOpacity(0.25)),
+                ),
+              ),
+              FractionallySizedBox(
+                widthFactor: widthFactor,
+                child: Container(
+                  height: 28,
+                  decoration: BoxDecoration(
+                    color: color,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppColors.border, width: 1.1),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        SizedBox(width: 10),
+        SizedBox(
+          width: 42,
+          child: Text(
+            value.toString(),
+            textAlign: TextAlign.right,
+            style: TextStyle(
+              color: AppColors.text,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCourseProgress(StatisticsData data) {
+    return Container(
+      padding: EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.panel,
+        borderRadius: BorderRadius.circular(26),
+        border: Border.all(color: AppColors.border, width: 1.35),
+        boxShadow: [
+          BoxShadow(color: AppColors.border, offset: Offset(0, 5), blurRadius: 0),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Tiến độ từng học phần',
+            style: TextStyle(
+              color: AppColors.text,
+              fontSize: 18,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          SizedBox(height: 12),
+          if (data.courseItems.isEmpty)
+            _buildEmptyBox('Chưa có học phần nào')
+          else
+            ...data.courseItems.take(8).map(_buildCourseProgressItem),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCourseProgressItem(CourseStatisticsItem item) {
+    return Container(
+      margin: EdgeInsets.only(bottom: 12),
+      padding: EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.panel2,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.border.withOpacity(0.5)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  item.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppColors.text,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              Container(
+                padding: EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                decoration: BoxDecoration(
+                  color: AppColors.yellow,
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Text(
+                  '${item.progressPercent}%',
+                  style: TextStyle(
+                    color: AppColors.border,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: 6),
+          Text(
+            '${item.masteredCards}/${item.totalCards} thẻ nhớ • ${item.sessionCount} buổi • ${item.languageCode}',
+            style: TextStyle(
+              color: AppColors.muted,
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          SizedBox(height: 9),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: LinearProgressIndicator(
+              value: item.progressPercent / 100,
+              minHeight: 12,
+              backgroundColor: Colors.white,
+              color: AppColors.green,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDueCards(StatisticsData data) {
+    return Container(
+      padding: EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.panel,
+        borderRadius: BorderRadius.circular(26),
+        border: Border.all(color: AppColors.border, width: 1.35),
+        boxShadow: [
+          BoxShadow(color: AppColors.border, offset: Offset(0, 5), blurRadius: 0),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.replay_circle_filled_rounded, color: AppColors.border),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Thẻ cần ôn lại',
+                  style: TextStyle(
+                    color: AppColors.text,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: 12),
+          if (data.dueItems.isEmpty)
+            _buildEmptyBox('Chưa có thẻ cần ôn, quá ổn')
+          else
+            ...data.dueItems.map(_buildDueItem),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDueItem(ReviewDueItem item) {
+    return Container(
+      margin: EdgeInsets.only(bottom: 10),
+      padding: EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.border.withOpacity(0.45)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: item.level >= 2 ? AppColors.yellow : AppColors.red,
+              borderRadius: BorderRadius.circular(15),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: Center(
+              child: Text(
+                'L${item.level}',
+                style: TextStyle(
+                  color: AppColors.border,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 12,
+                ),
+              ),
+            ),
+          ),
+          SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  item.term,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppColors.text,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                SizedBox(height: 3),
+                Text(
+                  '${item.definition} • ${item.courseTitle}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppColors.muted,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyBox(String text) {
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.symmetric(horizontal: 14, vertical: 18),
+      decoration: BoxDecoration(
+        color: AppColors.panel2,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.border.withOpacity(0.35)),
+      ),
+      child: Text(
+        text,
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          color: AppColors.muted,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+  }
+}
+
+class StatisticsDonutPainter extends CustomPainter {
+  final double percent;
+  final Color backgroundColor;
+  final Color progressColor;
+  final double strokeWidth;
+
+  StatisticsDonutPainter({
+    required this.percent,
+    required this.backgroundColor,
+    required this.progressColor,
+    required this.strokeWidth,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = math.min(size.width, size.height) / 2 - strokeWidth / 2;
+    final rect = Rect.fromCircle(center: center, radius: radius);
+
+    final bgPaint = Paint()
+      ..color = backgroundColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth
+      ..strokeCap = StrokeCap.round;
+
+    final progressPaint = Paint()
+      ..color = progressColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth
+      ..strokeCap = StrokeCap.round;
+
+    canvas.drawCircle(center, radius, bgPaint);
+    canvas.drawArc(
+      rect,
+      -math.pi / 2,
+      math.pi * 2 * percent.clamp(0.0, 1.0).toDouble(),
+      false,
+      progressPaint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant StatisticsDonutPainter oldDelegate) {
+    return oldDelegate.percent != percent ||
+        oldDelegate.backgroundColor != backgroundColor ||
+        oldDelegate.progressColor != progressColor ||
+        oldDelegate.strokeWidth != strokeWidth;
+  }
+}
+
 class CreateCoursePage extends StatefulWidget {
-  const CreateCoursePage({super.key});
+  CreateCoursePage({super.key});
 
   @override
   State<CreateCoursePage> createState() => _CreateCoursePageState();
@@ -1053,6 +3593,50 @@ class _CreateCoursePageState extends State<CreateCoursePage> {
   List<FlashCardItem> previewItems = [];
 
   @override
+  void initState() {
+    super.initState();
+    loadCreateCourseSettings();
+  }
+
+  Future<void> loadCreateCourseSettings() async {
+    final savedTermSep = await AppSettingsStore.getString('create.termSeparatorType');
+    final savedCardSep = await AppSettingsStore.getString('create.cardSeparatorType');
+    final savedCustomTermSep = await AppSettingsStore.getString('create.customTermSeparator');
+    final savedCustomCardSep = await AppSettingsStore.getString('create.customCardSeparator');
+    final savedLanguage = await AppSettingsStore.getString('create.selectedLanguage');
+
+    if (!mounted) return;
+
+    setState(() {
+      if (savedTermSep != null && savedTermSep.isNotEmpty) {
+        termSeparatorType = savedTermSep == 'comma' ? 'underscore' : savedTermSep;
+      }
+      if (savedCardSep != null && savedCardSep.isNotEmpty) {
+        cardSeparatorType = savedCardSep;
+      }
+      if (savedCustomTermSep != null) {
+        customTermSepController.text = savedCustomTermSep;
+      }
+      if (savedCustomCardSep != null) {
+        customCardSepController.text = savedCustomCardSep;
+      }
+      if (savedLanguage != null && savedLanguage.isNotEmpty) {
+        selectedLanguage = savedLanguage;
+      }
+    });
+  }
+
+  Future<void> saveCreateCourseSettings() async {
+    await Future.wait([
+      AppSettingsStore.setString('create.termSeparatorType', termSeparatorType),
+      AppSettingsStore.setString('create.cardSeparatorType', cardSeparatorType),
+      AppSettingsStore.setString('create.customTermSeparator', customTermSepController.text),
+      AppSettingsStore.setString('create.customCardSeparator', customCardSepController.text),
+      AppSettingsStore.setString('create.selectedLanguage', selectedLanguage),
+    ]);
+  }
+
+  @override
   void dispose() {
     titleController.dispose();
     dataController.dispose();
@@ -1063,7 +3647,7 @@ class _CreateCoursePageState extends State<CreateCoursePage> {
 
   String getTermSeparator() {
     if (termSeparatorType == "tab") return "\t";
-    if (termSeparatorType == "comma") return ",";
+    if (termSeparatorType == "underscore") return "_";
     return customTermSepController.text;
   }
 
@@ -1305,14 +3889,7 @@ ParsedDefinition parseDefinitionAndPronunciation(String raw) {
 
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text("Đã lưu học phần: $title (${items.length} thẻ)"),
-        backgroundColor: AppColors.border,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+    showMessage("Đã lưu học phần: $title (${items.length} thẻ)");
 
     // Lưu xong tự quay về Home
     Navigator.pop(context, true);
@@ -1322,20 +3899,8 @@ ParsedDefinition parseDefinitionAndPronunciation(String raw) {
   }
 }
   void showMessage(String text) {
-  final messenger = ScaffoldMessenger.of(context);
-
-  // Xóa thông báo cũ ngay lập tức
-  messenger.hideCurrentSnackBar();
-
-  messenger.showSnackBar(
-    SnackBar(
-      content: Text(text),
-      backgroundColor: AppColors.border,
-      behavior: SnackBarBehavior.floating,
-      duration: const Duration(seconds: 2),
-    ),
-  );
-}
+    showAppToast(context, text);
+  }
 
   void openSettingPopup() {
     showModalBottomSheet(
@@ -1351,8 +3916,8 @@ ParsedDefinition parseDefinitionAndPronunciation(String raw) {
             }
 
             return Container(
-              margin: const EdgeInsets.all(14),
-              padding: const EdgeInsets.all(16),
+              margin: EdgeInsets.all(14),
+              padding: EdgeInsets.all(16),
               decoration: BoxDecoration(
                 color: AppColors.panel,
                 borderRadius: BorderRadius.circular(22),
@@ -1360,7 +3925,7 @@ ParsedDefinition parseDefinitionAndPronunciation(String raw) {
                   color: AppColors.border,
                   width: 1.4,
                 ),
-                boxShadow: const [
+                boxShadow: [
                   BoxShadow(
                     color: AppColors.border,
                     offset: Offset(0, 7),
@@ -1381,13 +3946,13 @@ ParsedDefinition parseDefinitionAndPronunciation(String raw) {
                     children: [
                       Row(
                         children: [
-                          const Icon(
+                          Icon(
                             Icons.settings,
                             color: AppColors.border,
                             size: 26,
                           ),
-                          const SizedBox(width: 10),
-                          const Expanded(
+                          SizedBox(width: 10),
+                          Expanded(
                             child: Text(
                               "Tùy chỉnh học phần",
                               style: TextStyle(
@@ -1399,36 +3964,40 @@ ParsedDefinition parseDefinitionAndPronunciation(String raw) {
                           ),
                           IconButton(
                             onPressed: () => Navigator.pop(context),
-                            icon: const Icon(Icons.close),
+                            icon: Icon(Icons.close),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 16),
+                      SizedBox(height: 16),
 
                       CompactSelectBox(
                         title: "GIỮA THUẬT NGỮ VÀ ĐỊNH NGHĨA",
                         value: termSeparatorType,
-                        items: const [
+                        items: [
                           CompactSelectItem(value: "tab", label: "Tab"),
-                          CompactSelectItem(value: "comma", label: "Phẩy ,"),
+                          CompactSelectItem(value: "underscore", label: "Gạch dưới _"),
                           CompactSelectItem(value: "custom", label: "Tùy chỉnh"),
                         ],
                         onChanged: (value) {
-                          termSeparatorType = value;
+                          termSeparatorType = value == "comma" ? "underscore" : value;
+                          saveCreateCourseSettings();
                           refresh();
                         },
                         customController: customTermSepController,
                         customHint: "vd: |",
                         showCustomInput: termSeparatorType == "custom",
-                        onCustomChanged: (_) => refresh(),
+                        onCustomChanged: (_) {
+                          saveCreateCourseSettings();
+                          refresh();
+                        },
                       ),
 
-                      const SizedBox(height: 14),
+                      SizedBox(height: 14),
 
                       CompactSelectBox(
                         title: "GIỮA CÁC THẺ",
                         value: cardSeparatorType,
-                        items: const [
+                        items: [
                           CompactSelectItem(value: "newline", label: "Dòng mới"),
                           CompactSelectItem(
                               value: "semicolon", label: "Chấm phẩy ;"),
@@ -1436,25 +4005,30 @@ ParsedDefinition parseDefinitionAndPronunciation(String raw) {
                         ],
                         onChanged: (value) {
                           cardSeparatorType = value;
+                          saveCreateCourseSettings();
                           refresh();
                         },
                         customController: customCardSepController,
                         customHint: "vd: ###",
                         showCustomInput: cardSeparatorType == "custom",
-                        onCustomChanged: (_) => refresh(),
+                        onCustomChanged: (_) {
+                          saveCreateCourseSettings();
+                          refresh();
+                        },
                       ),
 
-                      const SizedBox(height: 14),
+                      SizedBox(height: 14),
 
                       buildLanguageSetting(modalSetState),
 
-                      const SizedBox(height: 18),
+                      SizedBox(height: 18),
 
                       BigPopupButton(
                         text: "Xong",
                         icon: Icons.check,
                         color: AppColors.green,
                         onTap: () {
+                          saveCreateCourseSettings();
                           Navigator.pop(context);
                         },
                       ),
@@ -1471,7 +4045,7 @@ ParsedDefinition parseDefinitionAndPronunciation(String raw) {
 
   Widget buildLanguageSetting(StateSetter modalSetState) {
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: AppColors.panel2,
         borderRadius: BorderRadius.circular(16),
@@ -1480,11 +4054,11 @@ ParsedDefinition parseDefinitionAndPronunciation(String raw) {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SectionTitle("NGÔN NGỮ HỌC PHẦN"),
-          const SizedBox(height: 10),
+          SectionTitle("NGÔN NGỮ HỌC PHẦN"),
+          SizedBox(height: 10),
           Container(
             height: 48,
-            padding: const EdgeInsets.symmetric(horizontal: 14),
+            padding: EdgeInsets.symmetric(horizontal: 14),
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(12),
@@ -1496,12 +4070,12 @@ ParsedDefinition parseDefinitionAndPronunciation(String raw) {
                 isExpanded: true,
                 dropdownColor: Colors.white,
                 iconEnabledColor: AppColors.border,
-                style: const TextStyle(
+                style: TextStyle(
                   color: AppColors.text,
                   fontSize: 14,
                   fontWeight: FontWeight.w800,
                 ),
-                items: const [
+                items: [
                   DropdownMenuItem(
                     value: "Tiếng Trung Phồn thể (Traditional Chinese)",
                     child: Text("Tiếng Trung Phồn thể"),
@@ -1526,12 +4100,17 @@ ParsedDefinition parseDefinitionAndPronunciation(String raw) {
                     value: "Tiếng Hàn (Korean)",
                     child: Text("Tiếng Hàn"),
                   ),
+                  DropdownMenuItem(
+                    value: "Tiếng Việt (Vietnamese)",
+                    child: Text("Tiếng Việt"),
+                  ),
                 ],
                 onChanged: (value) {
                   if (value == null) return;
                   modalSetState(() {
                     selectedLanguage = value;
                   });
+                  saveCreateCourseSettings();
                   setState(() {});
                 },
               ),
@@ -1552,20 +4131,20 @@ ParsedDefinition parseDefinitionAndPronunciation(String raw) {
             buildTopBar(),
             Expanded(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(12, 12, 12, 22),
+                padding: EdgeInsets.fromLTRB(12, 12, 12, 22),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const SectionTitle(
+                    SectionTitle(
                       "NHẬP DỮ LIỆU",
                     ),
-                    const SizedBox(height: 8),
+                    SizedBox(height: 8),
                     buildDataInput(),
 
                     if (showPreview) ...[
-                      const SizedBox(height: 16),
+                      SizedBox(height: 16),
                       buildPreviewTitle(),
-                      const SizedBox(height: 8),
+                      SizedBox(height: 8),
                       buildPreviewBox(),
                     ],
                   ],
@@ -1580,7 +4159,7 @@ ParsedDefinition parseDefinitionAndPronunciation(String raw) {
 
   Widget buildTopBar() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
+      padding: EdgeInsets.fromLTRB(10, 10, 10, 8),
       child: Row(
         children: [
           SmallIcon3DButton(
@@ -1588,7 +4167,7 @@ ParsedDefinition parseDefinitionAndPronunciation(String raw) {
             color: AppColors.red,
             onTap: () => Navigator.pop(context),
           ),
-          const SizedBox(width: 8),
+          SizedBox(width: 8),
           Expanded(
             child: LightInput(
               controller: titleController,
@@ -1596,19 +4175,19 @@ ParsedDefinition parseDefinitionAndPronunciation(String raw) {
               height: 48,
             ),
           ),
-          const SizedBox(width: 8),
+          SizedBox(width: 8),
           SmallIcon3DButton(
             icon: Icons.settings,
             color: AppColors.blue,
             onTap: openSettingPopup,
           ),
-          const SizedBox(width: 8),
+          SizedBox(width: 8),
           SmallIcon3DButton(
             icon: Icons.visibility,
             color: AppColors.yellow,
             onTap: updatePreview,
           ),
-          const SizedBox(width: 8),
+          SizedBox(width: 8),
           SmallIcon3DButton(
             icon: Icons.save,
             color: AppColors.green,
@@ -1629,7 +4208,7 @@ ParsedDefinition parseDefinitionAndPronunciation(String raw) {
           color: AppColors.border,
           width: 1.4,
         ),
-        boxShadow: const [
+        boxShadow: [
           BoxShadow(
             color: AppColors.border,
             offset: Offset(0, 7),
@@ -1647,14 +4226,14 @@ ParsedDefinition parseDefinitionAndPronunciation(String raw) {
         maxLines: null,
         expands: true,
         textAlignVertical: TextAlignVertical.top,
-        style: const TextStyle(
+        style: TextStyle(
           color: AppColors.text,
           fontSize: 15,
           height: 1.6,
           fontFamily: "monospace",
           fontWeight: FontWeight.w600,
         ),
-        decoration: const InputDecoration(
+        decoration: InputDecoration(
           border: InputBorder.none,
           contentPadding: EdgeInsets.all(16),
           hintText: "Từ 1\tĐịnh nghĩa 1\nTừ 2\tĐịnh nghĩa 2\nTừ 3\tĐịnh nghĩa 3",
@@ -1670,8 +4249,8 @@ ParsedDefinition parseDefinitionAndPronunciation(String raw) {
   Widget buildPreviewTitle() {
     return Row(
       children: [
-        const SectionTitle("XEM TRƯỚC"),
-        const SizedBox(width: 8),
+        SectionTitle("XEM TRƯỚC"),
+        SizedBox(width: 8),
         Container(
           width: 26,
           height: 7,
@@ -1687,8 +4266,8 @@ ParsedDefinition parseDefinitionAndPronunciation(String raw) {
   Widget buildPreviewBox() {
     return Container(
       width: double.infinity,
-      constraints: const BoxConstraints(minHeight: 230),
-      padding: const EdgeInsets.all(14),
+      constraints: BoxConstraints(minHeight: 230),
+      padding: EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: AppColors.panel,
         borderRadius: BorderRadius.circular(16),
@@ -1696,7 +4275,7 @@ ParsedDefinition parseDefinitionAndPronunciation(String raw) {
           color: AppColors.border,
           width: 1.4,
         ),
-        boxShadow: const [
+        boxShadow: [
           BoxShadow(
             color: AppColors.border,
             offset: Offset(0, 7),
@@ -1705,7 +4284,7 @@ ParsedDefinition parseDefinitionAndPronunciation(String raw) {
         ],
       ),
       child: previewItems.isEmpty
-          ? const Center(
+          ? Center(
               child: Text(
                 "Chưa có dữ liệu xem trước",
                 style: TextStyle(
@@ -1720,8 +4299,8 @@ ParsedDefinition parseDefinitionAndPronunciation(String raw) {
                 final item = previewItems[index];
 
                 return Container(
-                  margin: const EdgeInsets.only(bottom: 10),
-                  padding: const EdgeInsets.all(14),
+                  margin: EdgeInsets.only(bottom: 10),
+                  padding: EdgeInsets.all(14),
                   decoration: BoxDecoration(
                     color: AppColors.panel2,
                     borderRadius: BorderRadius.circular(14),
@@ -1738,7 +4317,7 @@ ParsedDefinition parseDefinitionAndPronunciation(String raw) {
                           color: AppColors.yellow,
                           borderRadius: BorderRadius.circular(9),
                           border: Border.all(color: AppColors.border),
-                          boxShadow: const [
+                          boxShadow: [
                             BoxShadow(
                               color: AppColors.border,
                               offset: Offset(0, 3),
@@ -1748,29 +4327,29 @@ ParsedDefinition parseDefinitionAndPronunciation(String raw) {
                         ),
                         child: Text(
                           "${index + 1}",
-                          style: const TextStyle(
+                          style: TextStyle(
                             color: AppColors.border,
                             fontWeight: FontWeight.w900,
                           ),
                         ),
                       ),
-                      const SizedBox(width: 12),
+                      SizedBox(width: 12),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
                               item.term,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 color: AppColors.text,
                                 fontSize: 16,
                                 fontWeight: FontWeight.w900,
                               ),
                             ),
-                            const SizedBox(height: 6),
+                            SizedBox(height: 6),
                             Text(
                               item.definition,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 color: AppColors.muted,
                                 fontSize: 14,
                                 height: 1.4,
@@ -1798,7 +4377,7 @@ class StudyCardItem {
   final String pronunciation;
   final bool isFavorite;
 
-  const StudyCardItem({
+  StudyCardItem({
     required this.id,
     required this.courseId,
     required this.term,
@@ -1841,6 +4420,7 @@ class ProgressUndoItem {
   final bool previousCompletion;
   final bool known;
   final Map<String, Object?>? previousReviewState;
+  final int? studyResultId;
 
   ProgressUndoItem({
     required this.cardId,
@@ -1848,6 +4428,7 @@ class ProgressUndoItem {
     required this.previousCompletion,
     required this.known,
     required this.previousReviewState,
+    required this.studyResultId,
   });
 }
 
@@ -1855,7 +4436,7 @@ class FlashCardsPage extends StatefulWidget {
   final int courseId;
   final String courseTitle;
 
-  const FlashCardsPage({
+  FlashCardsPage({
     super.key,
     required this.courseId,
     required this.courseTitle,
@@ -1892,6 +4473,8 @@ bool isDraggingCard = false;
 
   int progressKnownCount = 0;
   int progressUnknownCount = 0;
+  int? _studySessionId;
+  bool _studySessionFinished = true;
 
   // lịch sử để undo khi bật tiến độ
   final List<ProgressUndoItem> _progressHistory = [];
@@ -1916,12 +4499,12 @@ bool isDraggingCard = false;
 
     flipController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 220),
+      duration: Duration(milliseconds: 220),
     );
 
     ghostController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 600),
+      duration: Duration(milliseconds: 600),
     );
 
     loadInitialData();
@@ -1929,18 +4512,128 @@ bool isDraggingCard = false;
 
   @override
   void dispose() {
+    _finishStudySession();
     flipController.dispose();
     ghostController.dispose();
     super.dispose();
   }
 
   Future<void> loadInitialData() async {
+    await loadFlashSettings();
     setState(() {
       isLoading = true;
       selectedCourseId = widget.courseId;
     });
 
     await loadCardsForCourse(widget.courseId);
+  }
+
+  Future<void> loadFlashSettings() async {
+    final savedStarredOnly = await AppSettingsStore.getBool('flash.starredOnly');
+    final savedShuffle = await AppSettingsStore.getBool('flash.shuffleEnabled');
+    final savedProgress = await AppSettingsStore.getBool('flash.progressTracking');
+
+    if (!mounted) return;
+
+    setState(() {
+      starredOnly = savedStarredOnly ?? starredOnly;
+      shuffleEnabled = savedShuffle ?? shuffleEnabled;
+      progressTracking = savedProgress ?? progressTracking;
+    });
+  }
+
+  Future<void> saveFlashSettings() async {
+    await Future.wait([
+      AppSettingsStore.setBool('flash.starredOnly', starredOnly),
+      AppSettingsStore.setBool('flash.shuffleEnabled', shuffleEnabled),
+      AppSettingsStore.setBool('flash.progressTracking', progressTracking),
+    ]);
+  }
+
+  Future<void> _startStudySessionIfNeeded() async {
+    if (!progressTracking || selectedCourseId == null || visibleOrder.isEmpty) return;
+
+    await _finishStudySession();
+
+    final db = await AppDatabase.instance.database;
+    final now = DateTime.now().toIso8601String();
+
+    _studySessionId = await db.insert('study_sessions', {
+      'courseId': selectedCourseId,
+      'mode': 'flashcard_progress',
+      'totalCards': visibleOrder.length,
+      'correctCount': 0,
+      'wrongCount': 0,
+      'startedAt': now,
+      'endedAt': null,
+    });
+    _studySessionFinished = false;
+  }
+
+  Future<void> _finishStudySession() async {
+    final sessionId = _studySessionId;
+    if (sessionId == null || _studySessionFinished) return;
+
+    try {
+      final db = await AppDatabase.instance.database;
+      await db.update(
+        'study_sessions',
+        {
+          'correctCount': progressKnownCount,
+          'wrongCount': progressUnknownCount,
+          'endedAt': DateTime.now().toIso8601String(),
+        },
+        where: 'id = ?',
+        whereArgs: [sessionId],
+      );
+      _studySessionFinished = true;
+    } catch (e) {
+      debugPrint('FINISH FLASH SESSION ERROR: $e');
+    }
+  }
+
+  Future<int?> _insertFlashStudyResult({
+    required StudyCardItem card,
+    required bool known,
+  }) async {
+    final sessionId = _studySessionId;
+    if (sessionId == null || _studySessionFinished) return null;
+
+    try {
+      final db = await AppDatabase.instance.database;
+      return await db.insert('study_results', {
+        'sessionId': sessionId,
+        'cardId': card.id,
+        'answerText': known ? 'known' : 'unknown',
+        'isCorrect': known ? 1 : 0,
+        'responseTimeMs': null,
+        'reviewedAt': DateTime.now().toIso8601String(),
+      });
+    } catch (e) {
+      debugPrint('INSERT FLASH RESULT ERROR: $e');
+      return null;
+    }
+  }
+
+  Future<void> _deleteFlashStudyResult(int? resultId, bool known) async {
+    final sessionId = _studySessionId;
+    if (resultId == null || sessionId == null) return;
+
+    try {
+      final db = await AppDatabase.instance.database;
+      await db.delete('study_results', where: 'id = ?', whereArgs: [resultId]);
+      await db.update(
+        'study_sessions',
+        {
+          'correctCount': progressKnownCount,
+          'wrongCount': progressUnknownCount,
+        },
+        where: 'id = ?',
+        whereArgs: [sessionId],
+      );
+    } catch (e) {
+      debugPrint('DELETE FLASH RESULT ERROR: $e');
+    }
   }
 
   Future<void> loadCardsForCourse(int? courseId) async {
@@ -1997,6 +4690,8 @@ bool isDraggingCard = false;
         rebuildVisibleOrder(resetPosition: true);
         isLoading = false;
       });
+
+      await _startStudySessionIfNeeded();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -2090,6 +4785,7 @@ bool isDraggingCard = false;
     final previousPos = currentPos;
     final previousCompletion = showCompletion;
     final previousReviewState = await markCurrentCard(known);
+    final studyResultId = await _insertFlashStudyResult(card: card, known: known);
     final nextPos = currentPos + 1;
     final isDone = nextPos >= visibleOrder.length;
 
@@ -2104,6 +4800,7 @@ bool isDraggingCard = false;
           previousCompletion: previousCompletion,
           known: known,
           previousReviewState: previousReviewState,
+          studyResultId: studyResultId,
         ),
       );
 
@@ -2126,7 +4823,9 @@ bool isDraggingCard = false;
       }
     });
 
-    if (!isDone) {
+    if (isDone) {
+      await _finishStudySession();
+    } else {
       ghostController.forward();
     }
 
@@ -2275,7 +4974,7 @@ bool isDraggingCard = false;
               controller: controller,
               maxLines: maxLines,
               minLines: maxLines,
-              style: const TextStyle(
+              style: TextStyle(
                 color: AppColors.text,
                 fontSize: 15,
                 fontWeight: FontWeight.w800,
@@ -2284,8 +4983,8 @@ bool isDraggingCard = false;
                 labelText: label,
                 prefixIcon: Icon(icon, color: AppColors.border, size: 21),
                 filled: true,
-                fillColor: Colors.white,
-                contentPadding: const EdgeInsets.symmetric(
+                fillColor: AppColors.panel,
+                contentPadding: EdgeInsets.symmetric(
                   horizontal: 14,
                   vertical: 14,
                 ),
@@ -2298,7 +4997,7 @@ bool isDraggingCard = false;
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(16),
-                  borderSide: const BorderSide(
+                  borderSide: BorderSide(
                     color: AppColors.border,
                     width: 1.8,
                   ),
@@ -2308,14 +5007,14 @@ bool isDraggingCard = false;
           }
 
           return Dialog(
-            insetPadding: const EdgeInsets.symmetric(horizontal: 22),
+            insetPadding: EdgeInsets.symmetric(horizontal: 22),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(26),
             ),
             child: Container(
-              padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+              padding: EdgeInsets.fromLTRB(18, 18, 18, 16),
               decoration: BoxDecoration(
-                color: const Color(0xfff6f1fb),
+                color: Color(0xfff6f1fb),
                 borderRadius: BorderRadius.circular(26),
                 border: Border.all(
                   color: AppColors.border.withOpacity(0.14),
@@ -2329,7 +5028,7 @@ bool isDraggingCard = false;
                   children: [
                     Row(
                       children: [
-                        const Expanded(
+                        Expanded(
                           child: Text(
                             "Sửa thẻ",
                             style: TextStyle(
@@ -2341,52 +5040,52 @@ bool isDraggingCard = false;
                         ),
                         IconButton(
                           onPressed: () => Navigator.pop(dialogContext),
-                          icon: const Icon(
+                          icon: Icon(
                             Icons.close_rounded,
                             color: AppColors.border,
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 12),
+                    SizedBox(height: 12),
                     editInput(
                       controller: termController,
                       label: "Thuật ngữ",
                       icon: Icons.text_fields_rounded,
                     ),
-                    const SizedBox(height: 12),
+                    SizedBox(height: 12),
                     editInput(
                       controller: definitionController,
                       label: "Định nghĩa",
                       icon: Icons.menu_book_rounded,
                       maxLines: 3,
                     ),
-                    const SizedBox(height: 12),
+                    SizedBox(height: 12),
                     editInput(
                       controller: pronunciationController,
                       label: "Phiên âm",
                       icon: Icons.record_voice_over_rounded,
                     ),
                     if (errorText != null) ...[
-                      const SizedBox(height: 10),
+                      SizedBox(height: 10),
                       Text(
                         errorText!,
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: Color(0xffb3261e),
                           fontWeight: FontWeight.w800,
                         ),
                       ),
                     ],
-                    const SizedBox(height: 18),
+                    SizedBox(height: 18),
                     Row(
                       children: [
                         Expanded(
                           child: OutlinedButton(
                             onPressed: () => Navigator.pop(dialogContext),
                             style: OutlinedButton.styleFrom(
-                              foregroundColor: AppColors.border,
-                              padding: const EdgeInsets.symmetric(vertical: 13),
-                              side: const BorderSide(
+                              foregroundColor: AppColors.buttonInk,
+                              padding: EdgeInsets.symmetric(vertical: 13),
+                              side: BorderSide(
                                 color: AppColors.border,
                                 width: 1.3,
                               ),
@@ -2394,13 +5093,13 @@ bool isDraggingCard = false;
                                 borderRadius: BorderRadius.circular(16),
                               ),
                             ),
-                            child: const Text(
+                            child: Text(
                               "Hủy",
                               style: TextStyle(fontWeight: FontWeight.w900),
                             ),
                           ),
                         ),
-                        const SizedBox(width: 12),
+                        SizedBox(width: 12),
                         Expanded(
                           child: ElevatedButton(
                             onPressed: () {
@@ -2435,18 +5134,18 @@ bool isDraggingCard = false;
                             },
                             style: ElevatedButton.styleFrom(
                               backgroundColor: AppColors.yellow,
-                              foregroundColor: AppColors.border,
-                              padding: const EdgeInsets.symmetric(vertical: 13),
+                              foregroundColor: AppColors.buttonInk,
+                              padding: EdgeInsets.symmetric(vertical: 13),
                               elevation: 0,
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(16),
-                                side: const BorderSide(
+                                side: BorderSide(
                                   color: AppColors.border,
                                   width: 1.3,
                                 ),
                               ),
                             ),
-                            child: const Text(
+                            child: Text(
                               "Lưu",
                               style: TextStyle(fontWeight: FontWeight.w900),
                             ),
@@ -2518,6 +5217,7 @@ bool isDraggingCard = false;
       rebuildVisibleOrder(resetPosition: true);
       resetFlip();
     });
+    saveFlashSettings();
   }
 
   void toggleStarredOnly() {
@@ -2526,18 +5226,33 @@ bool isDraggingCard = false;
       rebuildVisibleOrder(resetPosition: true);
       resetFlip();
     });
+    saveFlashSettings();
   }
 
-  void toggleProgressMode() {
+  Future<void> toggleProgressMode() async {
+    final nextValue = !progressTracking;
+
+    if (!nextValue) {
+      await _finishStudySession();
+    }
+
     setState(() {
-      progressTracking = !progressTracking;
+      progressTracking = nextValue;
       progressKnownCount = 0;
       progressUnknownCount = 0;
       _progressHistory.clear();
+      _sessionUnknownCardIds.clear();
     });
+
+    await saveFlashSettings();
+
+    if (progressTracking) {
+      await _startStudySessionIfNeeded();
+    }
   }
 
-  void restartStudy() {
+  Future<void> restartStudy() async {
+  await _finishStudySession();
   setState(() {
     currentPos = 0;
     showCompletion = false;
@@ -2548,8 +5263,9 @@ bool isDraggingCard = false;
     rebuildVisibleOrder(resetPosition: true);
     resetFlip();
   });
+  await _startStudySessionIfNeeded();
 }
-void restartUnknownCards() {
+Future<void> restartUnknownCards() async {
   if (_sessionUnknownCardIds.isEmpty) {
     showFlashMessage("Không có thẻ chưa thuộc để học lại");
     return;
@@ -2568,6 +5284,8 @@ void restartUnknownCards() {
     return;
   }
 
+  await _finishStudySession();
+
   setState(() {
     visibleOrder = unknownIndices;
     currentPos = 0;
@@ -2579,6 +5297,7 @@ void restartUnknownCards() {
     isFlipped = false;
     flipController.value = 0;
   });
+  await _startStudySessionIfNeeded();
 }
 
 Future<void> resetMemorizedCards() async {
@@ -2610,6 +5329,9 @@ Future<void> resetMemorizedCards() async {
       flipController.value = 0;
     });
 
+    await _finishStudySession();
+    await _startStudySessionIfNeeded();
+
     showFlashMessage("Đã đặt lại thẻ ghi nhớ");
   } catch (e) {
     showFlashMessage("Không đặt lại được thẻ ghi nhớ");
@@ -2618,6 +5340,7 @@ Future<void> resetMemorizedCards() async {
 }
 
 void exitFlashCards() {
+  _finishStudySession();
   Navigator.pop(context, true);
 }
   Future<void> undoLastCard() async {
@@ -2662,6 +5385,8 @@ void exitFlashCards() {
       isFlipped = false;
     });
 
+    await _deleteFlashStudyResult(undoItem.studyResultId, undoItem.known);
+
     flipController.value = 0;
   }
 
@@ -2686,17 +5411,7 @@ void exitFlashCards() {
   }
 
   void showFlashMessage(String text) {
-    final messenger = ScaffoldMessenger.of(context);
-    messenger.hideCurrentSnackBar();
-
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(text),
-        backgroundColor: AppColors.border,
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 2),
-      ),
-    );
+    showAppToast(context, text);
   }
 
   void openSettingsSheet() {
@@ -2712,7 +5427,7 @@ void exitFlashCards() {
               required VoidCallback onTap,
             }) {
               return Padding(
-                padding: const EdgeInsets.only(bottom: 12),
+                padding: EdgeInsets.only(bottom: 12),
                 child: InkWell(
                   onTap: () {
                     onTap();
@@ -2720,7 +5435,7 @@ void exitFlashCards() {
                   },
                   borderRadius: BorderRadius.circular(16),
                   child: Container(
-                    padding: const EdgeInsets.all(14),
+                    padding: EdgeInsets.all(14),
                     decoration: BoxDecoration(
                       color: AppColors.panel2,
                       borderRadius: BorderRadius.circular(16),
@@ -2731,17 +5446,17 @@ void exitFlashCards() {
                         Expanded(
                           child: Text(
                             title,
-                            style: const TextStyle(
+                            style: TextStyle(
                               color: AppColors.text,
                               fontWeight: FontWeight.w800,
                             ),
                           ),
                         ),
                         AnimatedContainer(
-                          duration: const Duration(milliseconds: 200),
+                          duration: Duration(milliseconds: 200),
                           width: 48,
                           height: 26,
-                          padding: const EdgeInsets.all(3),
+                          padding: EdgeInsets.all(3),
                           decoration: BoxDecoration(
                             color: value ? AppColors.border : AppColors.muted,
                             borderRadius: BorderRadius.circular(99),
@@ -2751,7 +5466,7 @@ void exitFlashCards() {
                           child: Container(
                             width: 20,
                             height: 20,
-                            decoration: const BoxDecoration(
+                            decoration: BoxDecoration(
                               color: Colors.white,
                               shape: BoxShape.circle,
                             ),
@@ -2765,8 +5480,8 @@ void exitFlashCards() {
             }
 
             return Container(
-              padding: const EdgeInsets.fromLTRB(18, 14, 18, 24),
-              decoration: const BoxDecoration(
+              padding: EdgeInsets.fromLTRB(18, 14, 18, 24),
+              decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
               ),
@@ -2778,13 +5493,13 @@ void exitFlashCards() {
                     Container(
                       width: 44,
                       height: 5,
-                      margin: const EdgeInsets.only(bottom: 16),
+                      margin: EdgeInsets.only(bottom: 16),
                       decoration: BoxDecoration(
                         color: AppColors.border.withOpacity(0.18),
                         borderRadius: BorderRadius.circular(99),
                       ),
                     ),
-                    const Text(
+                    Text(
                       "Cài đặt Flash Card",
                       style: TextStyle(
                         color: AppColors.text,
@@ -2792,7 +5507,7 @@ void exitFlashCards() {
                         fontWeight: FontWeight.w900,
                       ),
                     ),
-                    const SizedBox(height: 18),
+                    SizedBox(height: 18),
                     settingRow(
                       title: "Chỉ học thẻ đã gắn sao",
                       value: starredOnly,
@@ -2809,7 +5524,7 @@ void exitFlashCards() {
                       onTap: toggleProgressMode,
                     ),
                     if (progressTracking) ...[
-                      const SizedBox(height: 12),
+                      SizedBox(height: 12),
                       InkWell(
                         onTap: () {
                           restartStudy();
@@ -2817,7 +5532,7 @@ void exitFlashCards() {
                         },
                         borderRadius: BorderRadius.circular(16),
                         child: Container(
-                          padding: const EdgeInsets.all(14),
+                          padding: EdgeInsets.all(14),
                           decoration: BoxDecoration(
                             color: AppColors.panel2,
                             borderRadius: BorderRadius.circular(16),
@@ -2827,8 +5542,8 @@ void exitFlashCards() {
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               Icon(Icons.refresh, color: AppColors.border, size: 20),
-                              const SizedBox(width: 8),
-                              const Text(
+                              SizedBox(width: 8),
+                              Text(
                                 "Bắt đầu lại",
                                 style: TextStyle(
                                   color: AppColors.text,
@@ -2858,12 +5573,12 @@ void exitFlashCards() {
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          title: const Text("Xóa thẻ"),
+          title: Text("Xóa thẻ"),
           content: Text("Xóa thẻ \"${card.term}\"?"),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(dialogContext, false),
-              child: const Text("Hủy"),
+              child: Text("Hủy"),
             ),
             ElevatedButton(
               onPressed: () => Navigator.pop(dialogContext, true),
@@ -2871,7 +5586,7 @@ void exitFlashCards() {
                 backgroundColor: Colors.red,
                 foregroundColor: Colors.white,
               ),
-              child: const Text("Xóa"),
+              child: Text("Xóa"),
             ),
           ],
         );
@@ -2916,7 +5631,7 @@ void exitFlashCards() {
                 buildTopBar(),
                 Expanded(
                   child: isLoading
-                      ? const Center(
+                      ? Center(
                           child: CircularProgressIndicator(
                             color: AppColors.border,
                           ),
@@ -2936,7 +5651,7 @@ void exitFlashCards() {
                                       children: [
                                         Expanded(
                                           child: Padding(
-                                            padding: const EdgeInsets.fromLTRB(
+                                            padding: EdgeInsets.fromLTRB(
                                               18,
                                               16,
                                               18,
@@ -2971,24 +5686,24 @@ void exitFlashCards() {
 
   Widget buildTopBar() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
+      padding: EdgeInsets.fromLTRB(14, 12, 14, 8),
       child: Row(
         children: [
           SmallIcon3DButton(
             icon: Icons.arrow_back,
-            color: Colors.white,
+            color: AppColors.panel,
             onTap: () => Navigator.pop(context, true),
           ),
-          const SizedBox(width: 12),
+          SizedBox(width: 12),
           Expanded(
             child: Container(
               height: 50,
-              padding: const EdgeInsets.symmetric(horizontal: 14),
+              padding: EdgeInsets.symmetric(horizontal: 14),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: AppColors.panel,
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(color: AppColors.border, width: 1.4),
-                boxShadow: const [
+                boxShadow: [
                   BoxShadow(
                     color: AppColors.border,
                     offset: Offset(0, 4),
@@ -2998,14 +5713,14 @@ void exitFlashCards() {
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.menu_book, color: AppColors.border, size: 20),
-                  const SizedBox(width: 8),
+                  Icon(Icons.menu_book, color: AppColors.border, size: 20),
+                  SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       widget.courseTitle,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: AppColors.text,
                         fontWeight: FontWeight.w900,
                         fontSize: 15,
@@ -3016,10 +5731,10 @@ void exitFlashCards() {
               ),
             ),
           ),
-          const SizedBox(width: 12),
+          SizedBox(width: 12),
           SmallIcon3DButton(
             icon: Icons.settings,
-            color: Colors.white,
+            color: AppColors.panel,
             onTap: openSettingsSheet,
           ),
         ],
@@ -3033,15 +5748,15 @@ void exitFlashCards() {
   }) {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(22),
+        padding: EdgeInsets.all(22),
         child: Container(
           width: double.infinity,
-          padding: const EdgeInsets.all(22),
+          padding: EdgeInsets.all(22),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: AppColors.panel,
             borderRadius: BorderRadius.circular(22),
             border: Border.all(color: AppColors.border, width: 1.5),
-            boxShadow: const [
+            boxShadow: [
               BoxShadow(
                 color: AppColors.border,
                 offset: Offset(0, 8),
@@ -3052,22 +5767,22 @@ void exitFlashCards() {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.style_outlined, size: 54, color: AppColors.border),
-              const SizedBox(height: 14),
+              Icon(Icons.style_outlined, size: 54, color: AppColors.border),
+              SizedBox(height: 14),
               Text(
                 title,
                 textAlign: TextAlign.center,
-                style: const TextStyle(
+                style: TextStyle(
                   color: AppColors.text,
                   fontSize: 22,
                   fontWeight: FontWeight.w900,
                 ),
               ),
-              const SizedBox(height: 8),
+              SizedBox(height: 8),
               Text(
                 message,
                 textAlign: TextAlign.center,
-                style: const TextStyle(
+                style: TextStyle(
                   color: AppColors.muted,
                   fontSize: 15,
                   height: 1.35,
@@ -3101,11 +5816,11 @@ void exitFlashCards() {
 
 Widget buildPeekCard() {
   if (!isDraggingCard || cardDragDx.abs() < 1) {
-    return const SizedBox.shrink();
+    return SizedBox.shrink();
   }
 
   final peekCard = getPeekCard();
-  if (peekCard == null) return const SizedBox.shrink();
+  if (peekCard == null) return SizedBox.shrink();
 
   final dragPercent = (cardDragDx.abs() / 180).clamp(0.0, 1.0);
 
@@ -3140,7 +5855,7 @@ Future<void> finishSwipeCard(int delta) async {
     cardDragDx = endDx;
   });
 
-  await Future.delayed(const Duration(milliseconds: 180));
+  await Future.delayed(Duration(milliseconds: 180));
   if (!mounted) return;
 
   setState(() {
@@ -3206,7 +5921,7 @@ Future<void> finishSwipeCard(int delta) async {
     child: AnimatedContainer(
       duration: isDraggingCard
           ? Duration.zero
-          : const Duration(milliseconds: 180),
+          : Duration(milliseconds: 180),
       curve: Curves.easeOutBack,
       transformAlignment: Alignment.center,
       transform: Matrix4.identity()
@@ -3259,10 +5974,10 @@ Future<void> finishSwipeCard(int delta) async {
       width: double.infinity,
       height: double.infinity,
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.panel,
         borderRadius: BorderRadius.circular(22),
         border: Border.all(color: AppColors.border, width: 1.5),
-        boxShadow: const [
+        boxShadow: [
           BoxShadow(
             color: AppColors.border,
             offset: Offset(0, 8),
@@ -3280,11 +5995,11 @@ Future<void> finishSwipeCard(int delta) async {
         child: Column(
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(14, 10, 10, 6),
+              padding: EdgeInsets.fromLTRB(14, 10, 10, 6),
               child: Row(
                 children: [
                   Container(
-                    padding: const EdgeInsets.symmetric(
+                    padding: EdgeInsets.symmetric(
                       horizontal: 11,
                       vertical: 7,
                     ),
@@ -3295,14 +6010,14 @@ Future<void> finishSwipeCard(int delta) async {
                     ),
                     child: Text(
                       label,
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: AppColors.border,
                         fontWeight: FontWeight.w900,
                         fontSize: 13,
                       ),
                     ),
                   ),
-                  const Spacer(),
+                  Spacer(),
                   buildCardIcon(Icons.edit, openEditCardDialog),
                   buildCardIcon(Icons.volume_up_outlined, playCurrentCardAudio),
                   buildCardIcon(Icons.mic_none, openMicOverlay),
@@ -3318,7 +6033,7 @@ Future<void> finishSwipeCard(int delta) async {
             Expanded(
               child: Center(
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  padding: EdgeInsets.symmetric(horizontal: 24),
                   child: Text(
                     mainText.isEmpty ? "Chưa có thẻ" : mainText,
                     textAlign: TextAlign.center,
@@ -3334,18 +6049,18 @@ Future<void> finishSwipeCard(int delta) async {
               ),
             ),
             AnimatedSwitcher(
-              duration: const Duration(milliseconds: 180),
+              duration: Duration(milliseconds: 180),
               child: subText.trim().isEmpty
-                  ? const SizedBox(height: 48)
+                  ? SizedBox(height: 48)
                   : Container(
                       key: ValueKey(subText),
                       height: 56,
                       alignment: Alignment.center,
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      padding: EdgeInsets.symmetric(horizontal: 20),
                       child: Text(
                         subText,
                         textAlign: TextAlign.center,
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: AppColors.muted,
                           fontSize: 18,
                           fontWeight: FontWeight.w700,
@@ -3376,7 +6091,7 @@ Future<void> finishSwipeCard(int delta) async {
           child: Icon(
             icon,
             size: 21,
-            color: active ? const Color(0xffffb020) : AppColors.border,
+            color: active ? Color(0xffffb020) : AppColors.border,
           ),
         ),
       ),
@@ -3389,7 +6104,7 @@ Future<void> finishSwipeCard(int delta) async {
         animation: ghostController,
         builder: (context, child) {
           final t = ghostController.value;
-          if (t == 0 || t == 1) return const SizedBox.shrink();
+          if (t == 0 || t == 1) return SizedBox.shrink();
 
           final direction = ghostReverse ? 1.0 : -1.0;
           final dx = direction * (60 + 760 * t);
@@ -3417,7 +6132,7 @@ Future<void> finishSwipeCard(int delta) async {
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(22),
                       border: Border.all(color: AppColors.border, width: 1.3),
-                      boxShadow: const [
+                      boxShadow: [
                         BoxShadow(
                           color: Color(0x26000000),
                           offset: Offset(0, 8),
@@ -3428,7 +6143,7 @@ Future<void> finishSwipeCard(int delta) async {
                     child: Text(
                       ghostText,
                       textAlign: TextAlign.center,
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: AppColors.text,
                         fontSize: 44,
                         fontWeight: FontWeight.w700,
@@ -3448,22 +6163,22 @@ Future<void> finishSwipeCard(int delta) async {
   return Positioned.fill(
     child: Container(
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.97),
+        color: AppColors.panel.withOpacity(0.98),
         borderRadius: BorderRadius.circular(22),
         border: Border.all(color: AppColors.border, width: 1.5),
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 18),
+        padding: EdgeInsets.symmetric(horizontal: 18),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(
+            Icon(
               Icons.celebration_outlined,
               size: 64,
               color: AppColors.border,
             ),
-            const SizedBox(height: 14),
-            const Text(
+            SizedBox(height: 14),
+            Text(
               "Hoàn thành bộ thẻ",
               textAlign: TextAlign.center,
               style: TextStyle(
@@ -3472,19 +6187,19 @@ Future<void> finishSwipeCard(int delta) async {
                 fontWeight: FontWeight.w900,
               ),
             ),
-            const SizedBox(height: 8),
+            SizedBox(height: 8),
             Text(
               progressTracking
                   ? "Đã thuộc $progressKnownCount thẻ, chưa thuộc $progressUnknownCount thẻ."
                   : "Bạn đã đi hết $displayTotal thẻ.",
               textAlign: TextAlign.center,
-              style: const TextStyle(
+              style: TextStyle(
                 color: AppColors.muted,
                 fontSize: 16,
                 fontWeight: FontWeight.w700,
               ),
             ),
-            const SizedBox(height: 24),
+            SizedBox(height: 24),
             Wrap(
               alignment: WrapAlignment.center,
               spacing: 10,
@@ -3531,12 +6246,12 @@ Widget buildFinishButton({
   return GestureDetector(
     onTap: onTap,
     child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
+      padding: EdgeInsets.symmetric(horizontal: 13, vertical: 11),
       decoration: BoxDecoration(
         color: color,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: AppColors.border, width: 1.4),
-        boxShadow: const [
+        boxShadow: [
           BoxShadow(
             color: AppColors.border,
             offset: Offset(0, 3),
@@ -3548,10 +6263,10 @@ Widget buildFinishButton({
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(icon, size: 18, color: AppColors.border),
-          const SizedBox(width: 6),
+          SizedBox(width: 6),
           Text(
             text,
-            style: const TextStyle(
+            style: TextStyle(
               color: AppColors.border,
               fontWeight: FontWeight.w900,
               fontSize: 13,
@@ -3565,16 +6280,16 @@ Widget buildFinishButton({
   Widget buildBottomBar() {
     return Container(
       height: 86,
-      padding: const EdgeInsets.fromLTRB(14, 8, 14, 14),
+      padding: EdgeInsets.fromLTRB(14, 8, 14, 14),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.92),
+        color: AppColors.panel.withOpacity(0.94),
         border: Border(
           top: BorderSide(color: AppColors.border.withOpacity(0.12)),
         ),
       ),
       child: Row(
         children: [
-          const Spacer(),
+          Spacer(),
           buildRoundNavButton(
             icon: progressTracking ? Icons.close : Icons.chevron_left,
             onTap: showCompletion
@@ -3582,7 +6297,7 @@ Widget buildFinishButton({
     : progressTracking
         ? () => moveCard(-1)
         : (canPrev ? () => moveCard(-1) : null),
-            color: progressTracking ? AppColors.red : Colors.white,
+            color: progressTracking ? AppColors.red : AppColors.panel,
           ),
           Container(
             width: 76,
@@ -3591,7 +6306,7 @@ Widget buildFinishButton({
               progressTracking
                   ? "✓$progressKnownCount  ✕$progressUnknownCount\n$displayIndex / $displayTotal"
                   : "$displayIndex / $displayTotal",
-              style: const TextStyle(
+              style: TextStyle(
                 color: AppColors.text,
                 fontWeight: FontWeight.w900,
               ),
@@ -3600,9 +6315,9 @@ Widget buildFinishButton({
           buildRoundNavButton(
             icon: progressTracking ? Icons.check : Icons.chevron_right,
             onTap: showCompletion ? null : () => moveCard(1),
-            color: progressTracking ? AppColors.green : Colors.white,
+            color: progressTracking ? AppColors.green : AppColors.panel,
           ),
-          const Spacer(),
+          Spacer(),
           if (progressTracking)
             Opacity(
               opacity: _progressHistory.isNotEmpty ? 1.0 : 0.28,
@@ -3612,10 +6327,10 @@ Widget buildFinishButton({
                   width: 44,
                   height: 44,
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: AppColors.panel,
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(color: AppColors.border, width: 1.4),
-                    boxShadow: const [
+                    boxShadow: [
                       BoxShadow(
                         color: AppColors.border,
                         offset: Offset(0, 3),
@@ -3623,7 +6338,7 @@ Widget buildFinishButton({
                       ),
                     ],
                   ),
-                  child: const Icon(
+                  child: Icon(
                     Icons.undo_rounded,
                     color: AppColors.border,
                     size: 22,
@@ -3632,7 +6347,7 @@ Widget buildFinishButton({
               ),
             )
           else
-            const SizedBox(width: 44),
+            SizedBox(width: 44),
         ],
       ),
     );
@@ -3654,7 +6369,7 @@ Widget buildFinishButton({
             color: color,
             shape: BoxShape.circle,
             border: Border.all(color: AppColors.border, width: 1.4),
-            boxShadow: const [
+            boxShadow: [
               BoxShadow(
                 color: AppColors.border,
                 offset: Offset(0, 4),
@@ -3677,7 +6392,7 @@ Widget buildFinishButton({
       onPressed: onTap,
       icon: Icon(
         icon,
-        color: active ? const Color(0xffffb020) : AppColors.border,
+        color: active ? Color(0xffffb020) : AppColors.border,
       ),
     );
   }
@@ -3690,7 +6405,7 @@ class ReviewPracticePage extends StatefulWidget {
   final int courseId;
   final String courseTitle;
 
-  const ReviewPracticePage({
+  ReviewPracticePage({
     super.key,
     required this.courseId,
     required this.courseTitle,
@@ -3703,6 +6418,8 @@ class ReviewPracticePage extends StatefulWidget {
 class _ReviewPracticePageState extends State<ReviewPracticePage> {
   final math.Random _random = math.Random();
   final TextEditingController _essayController = TextEditingController();
+  final ScrollController _mcScrollController = ScrollController();
+  final Map<int, GlobalKey> _questionKeys = {};
 
   List<StudyCardItem> _cards = [];
   List<StudyCardItem> _quizCards = [];
@@ -3719,6 +6436,12 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
   bool _finished = false;
   int _questionLimit = 0;
   int _currentEssayIndex = 0;
+  int? _studySessionId;
+  bool _studySessionFinished = true;
+  DateTime? _sessionStartedAt;
+  DateTime _essayQuestionStartedAt = DateTime.now();
+  final Set<int> _recordedResultCardIds = {};
+  final Map<int, DateTime> _cardStartedAtMap = {};
 
   int get _total => _quizCards.length;
   int get _done => _answeredCards.length;
@@ -3733,12 +6456,15 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
 
   @override
   void dispose() {
+    _finishStudySession();
     _essayController.dispose();
+    _mcScrollController.dispose();
     super.dispose();
   }
 
   Future<void> _loadCards() async {
     try {
+      await _loadReviewSettings();
       final db = await AppDatabase.instance.database;
       final rows = await db.query(
         'cards',
@@ -3751,7 +6477,11 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
 
       setState(() {
         _cards = rows.map((e) => StudyCardItem.fromMap(e)).toList();
-        _questionLimit = _cards.length;
+        _questionLimit = _cards.isEmpty
+            ? 0
+            : (_questionLimit <= 0
+                ? _cards.length
+                : _questionLimit.clamp(1, _cards.length).toInt());
         _isLoading = false;
       });
 
@@ -3768,17 +6498,178 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
     }
   }
 
-  void _showMessage(String text) {
-    final messenger = ScaffoldMessenger.of(context);
-    messenger.hideCurrentSnackBar();
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(text),
-        backgroundColor: AppColors.border,
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 2),
-      ),
+  Future<void> _loadReviewSettings() async {
+    final savedMultipleChoice = await AppSettingsStore.getBool('review.multipleChoice');
+    final savedEssay = await AppSettingsStore.getBool('review.essay');
+    final savedAnswerByDefinition = await AppSettingsStore.getBool('review.answerByDefinition');
+    final savedQuestionLimit = await AppSettingsStore.getInt('review.questionLimit');
+
+    if (!mounted) return;
+
+    setState(() {
+      _multipleChoice = savedMultipleChoice ?? _multipleChoice;
+      _essay = savedEssay ?? _essay;
+
+      if (!_multipleChoice && !_essay) {
+        _multipleChoice = true;
+      }
+      if (_multipleChoice && _essay) {
+        _essay = false;
+      }
+
+      _answerByDefinition = savedAnswerByDefinition ?? _answerByDefinition;
+      if (savedQuestionLimit != null && savedQuestionLimit > 0) {
+        _questionLimit = savedQuestionLimit;
+      }
+    });
+  }
+
+  Future<void> _saveReviewSettings() async {
+    await Future.wait([
+      AppSettingsStore.setBool('review.multipleChoice', _multipleChoice),
+      AppSettingsStore.setBool('review.essay', _essay),
+      AppSettingsStore.setBool('review.answerByDefinition', _answerByDefinition),
+      AppSettingsStore.setInt('review.questionLimit', _questionLimit),
+    ]);
+  }
+
+  Future<void> _startStudySession({required String mode, required int totalCards}) async {
+    await _finishStudySession();
+
+    final db = await AppDatabase.instance.database;
+    final now = DateTime.now();
+    _sessionStartedAt = now;
+
+    _studySessionId = await db.insert('study_sessions', {
+      'courseId': widget.courseId,
+      'mode': mode,
+      'totalCards': totalCards,
+      'correctCount': 0,
+      'wrongCount': 0,
+      'startedAt': now.toIso8601String(),
+      'endedAt': null,
+    });
+
+    _studySessionFinished = false;
+    _recordedResultCardIds.clear();
+    _cardStartedAtMap
+      ..clear()
+      ..addEntries(_quizCards.map((card) => MapEntry(card.id, now)));
+  }
+
+  Future<void> _finishStudySession() async {
+    final sessionId = _studySessionId;
+    if (sessionId == null || _studySessionFinished) return;
+
+    try {
+      final db = await AppDatabase.instance.database;
+      await db.update(
+        'study_sessions',
+        {
+          'correctCount': _correct,
+          'wrongCount': _wrong,
+          'endedAt': DateTime.now().toIso8601String(),
+        },
+        where: 'id = ?',
+        whereArgs: [sessionId],
+      );
+      _studySessionFinished = true;
+    } catch (e) {
+      debugPrint('FINISH REVIEW SESSION ERROR: $e');
+    }
+  }
+
+  Future<void> _markReviewStateForCard({
+    required int cardId,
+    required bool isCorrect,
+  }) async {
+    final db = await AppDatabase.instance.database;
+    final now = DateTime.now().toIso8601String();
+
+    final rows = await db.query(
+      'review_states',
+      where: 'cardId = ?',
+      whereArgs: [cardId],
+      limit: 1,
     );
+
+    if (rows.isEmpty) {
+      await db.insert('review_states', {
+        'cardId': cardId,
+        'level': isCorrect ? 1 : 0,
+        'easeFactor': 2.5,
+        'intervalDays': isCorrect ? 1 : 0,
+        'repetitionCount': 1,
+        'correctCount': isCorrect ? 1 : 0,
+        'wrongCount': isCorrect ? 0 : 1,
+        'lastReviewedAt': now,
+        'nextReviewAt': now,
+        'createdAt': now,
+        'updatedAt': now,
+      });
+      return;
+    }
+
+    final row = rows.first;
+    await db.update(
+      'review_states',
+      {
+        'level': isCorrect ? 1 : 0,
+        'repetitionCount': (row['repetitionCount'] as int? ?? 0) + 1,
+        'correctCount': (row['correctCount'] as int? ?? 0) + (isCorrect ? 1 : 0),
+        'wrongCount': (row['wrongCount'] as int? ?? 0) + (isCorrect ? 0 : 1),
+        'lastReviewedAt': now,
+        'updatedAt': now,
+      },
+      where: 'cardId = ?',
+      whereArgs: [cardId],
+    );
+  }
+
+  Future<void> _recordStudyResult({
+    required StudyCardItem card,
+    required String answerText,
+    required bool isCorrect,
+  }) async {
+    final sessionId = _studySessionId;
+    if (sessionId == null || _studySessionFinished) return;
+    if (_recordedResultCardIds.contains(card.id)) return;
+
+    final now = DateTime.now();
+    final startedAt = _cardStartedAtMap[card.id] ?? _essayQuestionStartedAt;
+    final responseMs = now.difference(startedAt).inMilliseconds.clamp(0, 2147483647);
+
+    try {
+      final db = await AppDatabase.instance.database;
+      await db.insert('study_results', {
+        'sessionId': sessionId,
+        'cardId': card.id,
+        'answerText': answerText,
+        'isCorrect': isCorrect ? 1 : 0,
+        'responseTimeMs': responseMs,
+        'reviewedAt': now.toIso8601String(),
+      });
+
+      await _markReviewStateForCard(cardId: card.id, isCorrect: isCorrect);
+
+      _recordedResultCardIds.add(card.id);
+
+      await db.update(
+        'study_sessions',
+        {
+          'correctCount': _correctMap.values.where((e) => e).length,
+          'wrongCount': _answeredCards.length - _correctMap.values.where((e) => e).length,
+        },
+        where: 'id = ?',
+        whereArgs: [sessionId],
+      );
+    } catch (e) {
+      debugPrint('INSERT REVIEW RESULT ERROR: $e');
+    }
+  }
+
+  void _showMessage(String text) {
+    showAppToast(context, text);
   }
 
   String _promptOf(StudyCardItem card) {
@@ -3786,7 +6677,8 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
   }
 
   String _subPromptOf(StudyCardItem card) {
-    return _answerByDefinition ? card.pronunciation : card.pronunciation;
+    // Ôn tập/kiểm tra không hiện phiên âm trong câu hỏi.
+    return '';
   }
 
   String _answerOf(StudyCardItem card) {
@@ -3794,11 +6686,8 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
   }
 
   String _optionLabelOf(StudyCardItem card) {
-    final value = _answerOf(card);
-    if (_answerByDefinition && card.pronunciation.trim().isNotEmpty) {
-      return '$value (${card.pronunciation.trim()})';
-    }
-    return value;
+    // Đáp án trắc nghiệm chỉ hiện nội dung đáp án, không kèm phiên âm.
+    return _answerOf(card);
   }
 
   String _normalizeAnswer(String value) {
@@ -3828,29 +6717,46 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
     return options;
   }
 
-  void _startQuiz() {
+  Future<void> _startQuiz() async {
     if (_cards.isEmpty) return;
 
     final copied = List<StudyCardItem>.from(_cards)..shuffle(_random);
     final limit = _questionLimit.clamp(1, _cards.length).toInt();
     final selected = copied.take(limit).toList();
+    final now = DateTime.now();
 
     setState(() {
       _quizCards = selected;
       _choiceMap = {
         for (final card in selected) card.id: _buildChoices(card),
       };
+      _questionKeys
+        ..clear()
+        ..addEntries(
+          selected.map((card) => MapEntry(card.id, GlobalKey())),
+        );
       _answeredCards.clear();
       _correctMap.clear();
       _selectedAnswerMap.clear();
+      _recordedResultCardIds.clear();
+      _cardStartedAtMap
+        ..clear()
+        ..addEntries(selected.map((card) => MapEntry(card.id, now)));
       _finished = false;
       _showSetup = false;
       _currentEssayIndex = 0;
+      _essayQuestionStartedAt = now;
       _essayController.clear();
     });
+
+    await _startStudySession(
+      mode: _multipleChoice ? 'review_multiple_choice' : 'review_essay',
+      totalCards: selected.length,
+    );
   }
 
-  void _restart() {
+  Future<void> _restart() async {
+    await _finishStudySession();
     setState(() {
       _showSetup = true;
       _finished = false;
@@ -3858,8 +6764,8 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
     _openSetupSheet();
   }
 
-  void _answerCard(StudyCardItem card, String selected) {
-    if (_answeredCards.contains(card.id)) return;
+  Future<void> _answerCard(StudyCardItem card, String selected) async {
+    if (_answeredCards.contains(card.id) || _finished) return;
 
     final correctText = _optionLabelOf(card);
     final isCorrect = _normalizeAnswer(selected) == _normalizeAnswer(correctText);
@@ -3868,17 +6774,310 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
       _answeredCards.add(card.id);
       _correctMap[card.id] = isCorrect;
       _selectedAnswerMap[card.id] = selected;
-      if (_done >= _total) _finished = true;
     });
 
-    if (_finished) _showResultSheet();
+    await _recordStudyResult(
+      card: card,
+      answerText: selected,
+      isCorrect: isCorrect,
+    );
+
+    _scrollToNextUnanswered(card);
   }
 
-  void _skipCard(StudyCardItem card) {
-    _answerCard(card, '');
+  Future<void> _skipCard(StudyCardItem card) async {
+    await _answerCard(card, '');
   }
 
-  void _submitEssay() {
+  void _scrollToNextUnanswered(StudyCardItem currentCard) {
+    final currentIndex = _quizCards.indexWhere((e) => e.id == currentCard.id);
+    if (currentIndex < 0) return;
+
+    final nextIndex = _quizCards.indexWhere(
+      (e) => !_answeredCards.contains(e.id),
+      currentIndex + 1,
+    );
+
+    if (nextIndex < 0) return;
+    _scrollToQuestion(_quizCards[nextIndex].id);
+  }
+
+  void _scrollToFirstWrong() {
+    StudyCardItem? wrongCard;
+
+    for (final card in _quizCards) {
+      if (_correctMap[card.id] != true) {
+        wrongCard = card;
+        break;
+      }
+    }
+
+    if (wrongCard == null) return;
+    _scrollToQuestion(wrongCard.id);
+  }
+
+  List<StudyCardItem> get _wrongReviewCards {
+    return _quizCards.where((card) => _correctMap[card.id] != true).toList();
+  }
+
+  void _openWrongReviewFromResult() {
+    final wrongCards = _wrongReviewCards;
+    if (wrongCards.isEmpty) {
+      _showMessage('Không có câu sai để xem lại');
+      return;
+    }
+
+    Navigator.pop(context);
+    final firstWrong = wrongCards.first;
+    final firstWrongIndex = _quizCards.indexWhere((e) => e.id == firstWrong.id);
+
+    setState(() {
+      if (_essay && !_multipleChoice && firstWrongIndex >= 0) {
+        _currentEssayIndex = firstWrongIndex;
+        _essayController.clear();
+      }
+    });
+
+    _showWrongReviewSheet(initialIndex: 0);
+  }
+
+  Future<void> _showWrongReviewSheet({int initialIndex = 0}) async {
+    final wrongCards = _wrongReviewCards;
+    if (wrongCards.isEmpty) return;
+
+    var reviewIndex = initialIndex.clamp(0, wrongCards.length - 1).toInt();
+
+    await showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            final wrongCard = wrongCards[reviewIndex];
+            final realIndex = _quizCards.indexWhere((e) => e.id == wrongCard.id);
+            final yourAnswer = (_selectedAnswerMap[wrongCard.id] ?? '').trim();
+            final correctAnswer = _answerOf(wrongCard).trim();
+
+            void moveReview(int delta) {
+              final nextIndex = (reviewIndex + delta).clamp(0, wrongCards.length - 1).toInt();
+              if (nextIndex == reviewIndex) return;
+
+              setSheetState(() {
+                reviewIndex = nextIndex;
+              });
+
+              final nextCard = wrongCards[nextIndex];
+              final nextRealIndex = _quizCards.indexWhere((e) => e.id == nextCard.id);
+              if (_essay && !_multipleChoice && nextRealIndex >= 0) {
+                setState(() {
+                  _currentEssayIndex = nextRealIndex;
+                  _essayController.clear();
+                });
+              }
+            }
+
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 16,
+                right: 16,
+                top: 16,
+                bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+              ),
+              child: Center(
+                child: Container(
+                  constraints: BoxConstraints(maxWidth: 760),
+                  padding: EdgeInsets.fromLTRB(18, 16, 18, 16),
+                  decoration: BoxDecoration(
+                    color: Color(0xfff6f1fb),
+                    borderRadius: BorderRadius.circular(26),
+                    border: Border.all(color: AppColors.border, width: 1.4),
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppColors.border,
+                        offset: Offset(0, 7),
+                        blurRadius: 0,
+                      ),
+                      BoxShadow(
+                        color: Color(0x26000000),
+                        offset: Offset(0, 18),
+                        blurRadius: 28,
+                      ),
+                    ],
+                  ),
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Câu sai ${reviewIndex + 1}/${wrongCards.length}',
+                                    style: TextStyle(
+                                      color: AppColors.muted,
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w900,
+                                    ),
+                                  ),
+                                  SizedBox(height: 3),
+                                  Text(
+                                    realIndex >= 0 ? 'Câu ${realIndex + 1}/$_total' : 'Xem lại câu sai',
+                                    style: TextStyle(
+                                      color: AppColors.text,
+                                      fontSize: 22,
+                                      fontWeight: FontWeight.w900,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            IconButton(
+                              onPressed: () => Navigator.pop(sheetContext),
+                              icon: Icon(Icons.close_rounded, color: AppColors.border),
+                            ),
+                          ],
+                        ),
+                        SizedBox(height: 14),
+                        Text(
+                          _answerByDefinition ? 'Thuật ngữ' : 'Định nghĩa',
+                          style: TextStyle(
+                            color: AppColors.muted,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        SizedBox(height: 8),
+                        Container(
+                          width: double.infinity,
+                          padding: EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(18),
+                            border: Border.all(color: AppColors.border.withOpacity(0.5), width: 1.2),
+                          ),
+                          child: Text(
+                            _promptOf(wrongCard),
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: AppColors.text,
+                              fontSize: _promptOf(wrongCard).length > 22 ? 24 : 30,
+                              fontWeight: FontWeight.w900,
+                              height: 1.15,
+                            ),
+                          ),
+                        ),
+                        SizedBox(height: 14),
+                        Text(
+                          'Bạn trả lời',
+                          style: TextStyle(
+                            color: AppColors.muted,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        SizedBox(height: 8),
+                        _reviewAnswerBox(
+                          text: yourAnswer.isEmpty ? 'Đã bỏ qua' : yourAnswer,
+                          icon: yourAnswer.isEmpty ? Icons.skip_next_rounded : Icons.close_rounded,
+                          color: AppColors.red,
+                        ),
+                        SizedBox(height: 12),
+                        Text(
+                          'Đáp án đúng',
+                          style: TextStyle(
+                            color: AppColors.muted,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        SizedBox(height: 8),
+                        _reviewAnswerBox(
+                          text: correctAnswer.isEmpty ? 'Chưa có đáp án' : correctAnswer,
+                          icon: Icons.check_rounded,
+                          color: AppColors.green,
+                        ),
+                        SizedBox(height: 16),
+                        Row(
+                          children: [
+                            SizedBox(
+                              width: 54,
+                              child: _outlineButton(
+                                text: '',
+                                icon: Icons.chevron_left_rounded,
+                                onTap: reviewIndex <= 0 ? () {} : () => moveReview(-1),
+                              ),
+                            ),
+                            Spacer(),
+                            _statChip(text: '${reviewIndex + 1}/${wrongCards.length}', color: AppColors.blue),
+                            Spacer(),
+                            SizedBox(
+                              width: 54,
+                              child: _outlineButton(
+                                text: '',
+                                icon: Icons.chevron_right_rounded,
+                                onTap: reviewIndex >= wrongCards.length - 1 ? () {} : () => moveReview(1),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _scrollToQuestion(int cardId) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final context = _questionKeys[cardId]?.currentContext;
+      if (context == null) return;
+
+      Scrollable.ensureVisible(
+        context,
+        duration: Duration(milliseconds: 520),
+        curve: Curves.easeOutCubic,
+        alignment: 0.08,
+      );
+    });
+  }
+
+  Future<void> _submitMultipleChoice() async {
+    if (_quizCards.isEmpty) return;
+
+    final skippedCards = <StudyCardItem>[];
+
+    setState(() {
+      for (final card in _quizCards) {
+        if (!_answeredCards.contains(card.id)) {
+          skippedCards.add(card);
+          _answeredCards.add(card.id);
+          _correctMap[card.id] = false;
+          _selectedAnswerMap[card.id] = '';
+        }
+      }
+      _finished = true;
+    });
+
+    for (final card in skippedCards) {
+      await _recordStudyResult(
+        card: card,
+        answerText: '',
+        isCorrect: false,
+      );
+    }
+
+    await _finishStudySession();
+    _scrollToFirstWrong();
+  }
+
+  Future<void> _submitEssay() async {
     if (_quizCards.isEmpty) return;
     final card = _quizCards[_currentEssayIndex];
     final typed = _essayController.text.trim();
@@ -3891,6 +7090,7 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
     final correct = _normalizeAnswer(_answerOf(card));
     final answer = _normalizeAnswer(typed);
     final ok = answer == correct;
+    final wasLast = _currentEssayIndex + 1 >= _quizCards.length;
 
     setState(() {
       _answeredCards.add(card.id);
@@ -3898,14 +7098,24 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
       _selectedAnswerMap[card.id] = typed;
       _essayController.clear();
 
-      if (_currentEssayIndex + 1 >= _quizCards.length) {
+      if (wasLast) {
         _finished = true;
       } else {
         _currentEssayIndex++;
+        _essayQuestionStartedAt = DateTime.now();
       }
     });
 
-    if (_finished) _showResultSheet();
+    await _recordStudyResult(
+      card: card,
+      answerText: typed,
+      isCorrect: ok,
+    );
+
+    if (_finished) {
+      await _finishStudySession();
+      _showResultSheet();
+    }
   }
 
   Future<void> _openSetupSheet() async {
@@ -3924,11 +7134,30 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
           builder: (context, setSheetState) {
             void setMode({bool? mc, bool? essay}) {
               setSheetState(() {
-                localMc = mc ?? localMc;
-                localEssay = essay ?? localEssay;
-                if (!localMc && !localEssay) {
-                  localEssay = true;
+                if (mc == true) {
+                  localMc = true;
+                  localEssay = false;
+                  return;
                 }
+
+                if (essay == true) {
+                  localEssay = true;
+                  localMc = false;
+                  return;
+                }
+
+                if (mc == false && localEssay) {
+                  localMc = false;
+                  return;
+                }
+
+                if (essay == false && localMc) {
+                  localEssay = false;
+                  return;
+                }
+
+                localMc = true;
+                localEssay = false;
               });
             }
 
@@ -3940,13 +7169,13 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
               ),
               child: Center(
                 child: Container(
-                  constraints: const BoxConstraints(maxWidth: 560),
-                  padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+                  constraints: BoxConstraints(maxWidth: 560),
+                  padding: EdgeInsets.fromLTRB(18, 18, 18, 16),
                   decoration: BoxDecoration(
-                    color: const Color(0xfff6f1fb),
+                    color: Color(0xfff6f1fb),
                     borderRadius: BorderRadius.circular(26),
                     border: Border.all(color: AppColors.border, width: 1.4),
-                    boxShadow: const [
+                    boxShadow: [
                       BoxShadow(
                         color: AppColors.border,
                         offset: Offset(0, 7),
@@ -3973,14 +7202,14 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
                                   widget.courseTitle,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     color: AppColors.muted,
                                     fontWeight: FontWeight.w900,
                                     fontSize: 13,
                                   ),
                                 ),
-                                const SizedBox(height: 3),
-                                const Text(
+                                SizedBox(height: 3),
+                                Text(
                                   'Thiết lập ôn tập',
                                   style: TextStyle(
                                     color: AppColors.text,
@@ -3993,11 +7222,11 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
                           ),
                           IconButton(
                             onPressed: () => Navigator.pop(sheetContext),
-                            icon: const Icon(Icons.close_rounded, color: AppColors.border),
+                            icon: Icon(Icons.close_rounded, color: AppColors.border),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 16),
+                      SizedBox(height: 16),
                       _setupRow(
                         label: 'Câu hỏi tối đa ${_cards.length}',
                         child: _numberStepper(
@@ -4007,12 +7236,12 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
                           onChanged: (value) => setSheetState(() => localLimit = value),
                         ),
                       ),
-                      const SizedBox(height: 12),
+                      SizedBox(height: 12),
                       _setupRow(
                         label: 'Trả lời bằng',
                         child: Container(
                           height: 48,
-                          padding: const EdgeInsets.symmetric(horizontal: 14),
+                          padding: EdgeInsets.symmetric(horizontal: 14),
                           decoration: BoxDecoration(
                             color: Colors.white,
                             borderRadius: BorderRadius.circular(16),
@@ -4022,8 +7251,8 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
                             child: DropdownButton<bool>(
                               value: localAnswerByDefinition,
                               isExpanded: true,
-                              icon: const Icon(Icons.keyboard_arrow_down_rounded),
-                              items: const [
+                              icon: Icon(Icons.keyboard_arrow_down_rounded),
+                              items: [
                                 DropdownMenuItem(value: true, child: Text('Tiếng Việt')),
                                 DropdownMenuItem(value: false, child: Text('Thuật ngữ')),
                               ],
@@ -4035,7 +7264,7 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
                           ),
                         ),
                       ),
-                      const SizedBox(height: 14),
+                      SizedBox(height: 14),
                       Divider(color: AppColors.border.withOpacity(0.18)),
                       _switchTile(
                         text: 'Trắc nghiệm 4 đáp án',
@@ -4047,7 +7276,7 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
                         value: localEssay,
                         onChanged: (v) => setMode(essay: v),
                       ),
-                      const SizedBox(height: 14),
+                      SizedBox(height: 14),
                       Align(
                         alignment: Alignment.centerRight,
                         child: _solidButton(
@@ -4058,9 +7287,13 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
                             setState(() {
                               _questionLimit = localLimit;
                               _multipleChoice = localMc;
-                              _essay = localEssay;
+                              _essay = !localMc && localEssay;
+                              if (!_multipleChoice && !_essay) {
+                                _multipleChoice = true;
+                              }
                               _answerByDefinition = localAnswerByDefinition;
                             });
+                            _saveReviewSettings();
                             Navigator.pop(sheetContext);
                             _startQuiz();
                           },
@@ -4084,16 +7317,16 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
       isScrollControlled: true,
       builder: (context) {
         return Padding(
-          padding: const EdgeInsets.all(16),
+          padding: EdgeInsets.all(16),
           child: Center(
             child: Container(
-              constraints: const BoxConstraints(maxWidth: 460),
-              padding: const EdgeInsets.all(18),
+              constraints: BoxConstraints(maxWidth: 460),
+              padding: EdgeInsets.all(18),
               decoration: BoxDecoration(
-                color: const Color(0xfff6f1fb),
+                color: Color(0xfff6f1fb),
                 borderRadius: BorderRadius.circular(26),
                 border: Border.all(color: AppColors.border, width: 1.4),
-                boxShadow: const [
+                boxShadow: [
                   BoxShadow(
                     color: AppColors.border,
                     offset: Offset(0, 7),
@@ -4104,9 +7337,9 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.emoji_events_outlined, color: AppColors.border, size: 54),
-                  const SizedBox(height: 10),
-                  const Text(
+                  Icon(Icons.emoji_events_outlined, color: AppColors.border, size: 54),
+                  SizedBox(height: 10),
+                  Text(
                     'Kết quả ôn tập',
                     style: TextStyle(
                       color: AppColors.text,
@@ -4114,17 +7347,29 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
                       fontWeight: FontWeight.w900,
                     ),
                   ),
-                  const SizedBox(height: 12),
+                  SizedBox(height: 12),
                   Row(
                     children: [
                       Expanded(child: _resultBox('Đúng', '$_correct', AppColors.green)),
-                      const SizedBox(width: 10),
+                      SizedBox(width: 10),
                       Expanded(child: _resultBox('Sai', '$_wrong', AppColors.red)),
-                      const SizedBox(width: 10),
+                      SizedBox(width: 10),
                       Expanded(child: _resultBox('Tổng', '$_total', AppColors.blue)),
                     ],
                   ),
-                  const SizedBox(height: 18),
+                  SizedBox(height: 14),
+                  if (_essay && !_multipleChoice && _wrong > 0) ...[
+                    SizedBox(
+                      width: double.infinity,
+                      child: _solidButton(
+                        text: 'Xem lại câu sai',
+                        icon: Icons.fact_check_rounded,
+                        color: AppColors.blue,
+                        onTap: _openWrongReviewFromResult,
+                      ),
+                    ),
+                    SizedBox(height: 12),
+                  ],
                   Row(
                     children: [
                       Expanded(
@@ -4137,7 +7382,7 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
                           },
                         ),
                       ),
-                      const SizedBox(width: 10),
+                      SizedBox(width: 10),
                       Expanded(
                         child: _solidButton(
                           text: 'Ôn lại',
@@ -4166,7 +7411,7 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
         final narrow = constraints.maxWidth < 430;
         final labelWidget = Text(
           label,
-          style: const TextStyle(
+          style: TextStyle(
             color: AppColors.text,
             fontWeight: FontWeight.w900,
             fontSize: 15,
@@ -4178,7 +7423,7 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               labelWidget,
-              const SizedBox(height: 8),
+              SizedBox(height: 8),
               child,
             ],
           );
@@ -4211,13 +7456,13 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
         children: [
           IconButton(
             onPressed: value <= min ? null : () => onChanged(value - 1),
-            icon: const Icon(Icons.remove_rounded),
+            icon: Icon(Icons.remove_rounded),
           ),
           Expanded(
             child: Center(
               child: Text(
                 '$value',
-                style: const TextStyle(
+                style: TextStyle(
                   color: AppColors.text,
                   fontWeight: FontWeight.w900,
                   fontSize: 16,
@@ -4227,7 +7472,7 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
           ),
           IconButton(
             onPressed: value >= max ? null : () => onChanged(value + 1),
-            icon: const Icon(Icons.add_rounded),
+            icon: Icon(Icons.add_rounded),
           ),
         ],
       ),
@@ -4240,13 +7485,13 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
     required ValueChanged<bool> onChanged,
   }) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: EdgeInsets.symmetric(vertical: 4),
       child: Row(
         children: [
           Expanded(
             child: Text(
               text,
-              style: const TextStyle(
+              style: TextStyle(
                 color: AppColors.text,
                 fontWeight: FontWeight.w900,
                 fontSize: 15,
@@ -4274,12 +7519,12 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
       onTap: onTap,
       child: Container(
         height: 50,
-        padding: const EdgeInsets.symmetric(horizontal: 14),
+        padding: EdgeInsets.symmetric(horizontal: 14),
         decoration: BoxDecoration(
           color: color,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: AppColors.border, width: 1.4),
-          boxShadow: const [
+          boxShadow: [
             BoxShadow(
               color: AppColors.border,
               offset: Offset(0, 4),
@@ -4292,12 +7537,12 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(icon, color: AppColors.border, size: 20),
-            const SizedBox(width: 7),
+            SizedBox(width: 7),
             Flexible(
               child: Text(
                 text,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
+                style: TextStyle(
                   color: AppColors.border,
                   fontWeight: FontWeight.w900,
                 ),
@@ -4318,12 +7563,12 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
       onTap: onTap,
       child: Container(
         height: 50,
-        padding: const EdgeInsets.symmetric(horizontal: 14),
+        padding: EdgeInsets.symmetric(horizontal: 14),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: AppColors.border, width: 1.4),
-          boxShadow: const [
+          boxShadow: [
             BoxShadow(
               color: AppColors.border,
               offset: Offset(0, 4),
@@ -4335,26 +7580,62 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(icon, color: AppColors.border, size: 20),
-            const SizedBox(width: 7),
-            Flexible(
-              child: Text(
-                text,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: AppColors.border,
-                  fontWeight: FontWeight.w900,
+            if (text.trim().isNotEmpty) ...[
+              SizedBox(width: 7),
+              Flexible(
+                child: Text(
+                  text,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppColors.border,
+                    fontWeight: FontWeight.w900,
+                  ),
                 ),
               ),
-            ),
+            ],
           ],
         ),
       ),
     );
   }
 
+  Widget _reviewAnswerBox({
+    required String text,
+    required IconData icon,
+    required Color color,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.16),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border.withOpacity(0.45), width: 1.2),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: AppColors.border, size: 23),
+          SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(
+                color: AppColors.text,
+                fontSize: 18,
+                fontWeight: FontWeight.w900,
+                height: 1.25,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _resultBox(String title, String value, Color color) {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12),
+      padding: EdgeInsets.symmetric(vertical: 12),
       decoration: BoxDecoration(
         color: color,
         borderRadius: BorderRadius.circular(18),
@@ -4364,7 +7645,7 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
         children: [
           Text(
             value,
-            style: const TextStyle(
+            style: TextStyle(
               color: AppColors.border,
               fontSize: 22,
               fontWeight: FontWeight.w900,
@@ -4372,7 +7653,7 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
           ),
           Text(
             title,
-            style: const TextStyle(
+            style: TextStyle(
               color: AppColors.border,
               fontWeight: FontWeight.w800,
             ),
@@ -4384,7 +7665,7 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
 
   Widget _statChip({required String text, required Color color}) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         color: color,
         borderRadius: BorderRadius.circular(999),
@@ -4392,7 +7673,7 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
       ),
       child: Text(
         text,
-        style: const TextStyle(
+        style: TextStyle(
           color: AppColors.border,
           fontWeight: FontWeight.w900,
           fontSize: 13,
@@ -4406,16 +7687,17 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
     final selected = _selectedAnswerMap[card.id];
     final correctAnswer = _optionLabelOf(card);
     final isCorrect = _correctMap[card.id] == true;
-    final choices = _choiceMap[card.id] ?? const <String>[];
+    final choices = _choiceMap[card.id] ?? <String>[];
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(16),
+      key: _questionKeys[card.id],
+      margin: EdgeInsets.only(bottom: 16),
+      padding: EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.panel,
         borderRadius: BorderRadius.circular(22),
         border: Border.all(color: AppColors.border, width: 1.4),
-        boxShadow: const [
+        boxShadow: [
           BoxShadow(
             color: AppColors.border,
             offset: Offset(0, 5),
@@ -4434,7 +7716,7 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
           Row(
             children: [
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
                   color: AppColors.blue,
                   borderRadius: BorderRadius.circular(999),
@@ -4442,31 +7724,26 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
                 ),
                 child: Text(
                   '${index + 1}/$_total',
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: AppColors.border,
                     fontWeight: FontWeight.w900,
                     fontSize: 12,
                   ),
                 ),
               ),
-              const Spacer(),
-              if (answered)
-                Icon(
-                  isCorrect ? Icons.check_circle_rounded : Icons.cancel_rounded,
-                  color: AppColors.border,
-                ),
+              Spacer(),
             ],
           ),
-          const SizedBox(height: 14),
+          SizedBox(height: 14),
           Text(
             _answerByDefinition ? 'Thuật ngữ' : 'Định nghĩa',
-            style: const TextStyle(
+            style: TextStyle(
               color: AppColors.muted,
               fontWeight: FontWeight.w900,
               fontSize: 13,
             ),
           ),
-          const SizedBox(height: 8),
+          SizedBox(height: 8),
           Center(
             child: Text(
               _promptOf(card),
@@ -4480,12 +7757,12 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
             ),
           ),
           if (_subPromptOf(card).trim().isNotEmpty) ...[
-            const SizedBox(height: 6),
+            SizedBox(height: 6),
             Center(
               child: Text(
                 _subPromptOf(card),
                 textAlign: TextAlign.center,
-                style: const TextStyle(
+                style: TextStyle(
                   color: AppColors.muted,
                   fontSize: 15,
                   fontWeight: FontWeight.w800,
@@ -4493,8 +7770,8 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
               ),
             ),
           ],
-          const SizedBox(height: 16),
-          const Text(
+          SizedBox(height: 16),
+          Text(
             'Chọn đáp án đúng',
             style: TextStyle(
               color: AppColors.text,
@@ -4502,7 +7779,7 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
               fontSize: 15,
             ),
           ),
-          const SizedBox(height: 10),
+          SizedBox(height: 10),
           LayoutBuilder(
             builder: (context, constraints) {
               final twoCols = constraints.maxWidth >= 520;
@@ -4512,26 +7789,27 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
                 children: choices.map((choice) {
                   final isSelected = selected == choice;
                   final isCorrectChoice = _normalizeAnswer(choice) == _normalizeAnswer(correctAnswer);
-                  Color bg = const Color(0xfff7f9fc);
-                  if (answered && isCorrectChoice) bg = AppColors.green;
-                  if (answered && isSelected && !isCorrectChoice) bg = AppColors.red;
+                  Color bg = Color(0xfff7f9fc);
+                  if (_finished && isCorrectChoice) bg = AppColors.green;
+                  if (_finished && isSelected && !isCorrectChoice) bg = AppColors.red;
+                  if (!_finished && isSelected) bg = AppColors.blue.withOpacity(0.35);
 
                   return SizedBox(
                     width: twoCols ? (constraints.maxWidth - 10) / 2 : constraints.maxWidth,
                     child: GestureDetector(
-                      onTap: answered ? null : () => _answerCard(card, choice),
+                      onTap: (answered || _finished) ? null : () => _answerCard(card, choice),
                       child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 160),
-                        constraints: const BoxConstraints(minHeight: 52),
+                        duration: Duration(milliseconds: 160),
+                        constraints: BoxConstraints(minHeight: 52),
                         alignment: Alignment.center,
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                         decoration: BoxDecoration(
                           color: bg,
                           borderRadius: BorderRadius.circular(16),
                           border: Border.all(color: AppColors.border, width: 1.25),
-                          boxShadow: answered
-                              ? const []
-                              : const [
+                          boxShadow: (answered || _finished)
+                              ? []
+                              : [
                                   BoxShadow(
                                     color: AppColors.border,
                                     offset: Offset(0, 3),
@@ -4542,7 +7820,7 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
                         child: Text(
                           choice,
                           textAlign: TextAlign.center,
-                          style: const TextStyle(
+                          style: TextStyle(
                             color: AppColors.text,
                             fontWeight: FontWeight.w900,
                             fontSize: 14,
@@ -4555,14 +7833,14 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
               );
             },
           ),
-          const SizedBox(height: 12),
+          SizedBox(height: 12),
           Center(
             child: TextButton(
-              onPressed: answered ? null : () => _skipCard(card),
+              onPressed: (answered || _finished) ? null : () => _skipCard(card),
               child: Text(
-                answered && !isCorrect ? 'Đáp án: $correctAnswer' : 'Bạn không biết?',
+                _finished && answered && !isCorrect ? 'Đáp án: $correctAnswer' : 'Bạn không biết?',
                 textAlign: TextAlign.center,
-                style: const TextStyle(
+                style: TextStyle(
                   color: AppColors.border,
                   fontWeight: FontWeight.w900,
                 ),
@@ -4580,15 +7858,15 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
 
     return Center(
       child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(16, 18, 16, 100),
+        padding: EdgeInsets.fromLTRB(16, 18, 16, 100),
         child: Container(
-          constraints: const BoxConstraints(maxWidth: 720),
-          padding: const EdgeInsets.all(18),
+          constraints: BoxConstraints(maxWidth: 720),
+          padding: EdgeInsets.all(18),
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(24),
             border: Border.all(color: AppColors.border, width: 1.4),
-            boxShadow: const [
+            boxShadow: [
               BoxShadow(
                 color: AppColors.border,
                 offset: Offset(0, 6),
@@ -4602,21 +7880,18 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
               Row(
                 children: [
                   _statChip(text: '$displayIndex/$_total', color: AppColors.blue),
-                  const Spacer(),
-                  _statChip(text: 'Đúng $_correct', color: AppColors.green),
-                  const SizedBox(width: 8),
-                  _statChip(text: 'Sai $_wrong', color: AppColors.red),
+                  Spacer(),
                 ],
               ),
-              const SizedBox(height: 24),
+              SizedBox(height: 24),
               Text(
                 _answerByDefinition ? 'Thuật ngữ' : 'Định nghĩa',
-                style: const TextStyle(
+                style: TextStyle(
                   color: AppColors.muted,
                   fontWeight: FontWeight.w900,
                 ),
               ),
-              const SizedBox(height: 8),
+              SizedBox(height: 8),
               Center(
                 child: Text(
                   _promptOf(card),
@@ -4630,11 +7905,11 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
                 ),
               ),
               if (_subPromptOf(card).trim().isNotEmpty) ...[
-                const SizedBox(height: 8),
+                SizedBox(height: 8),
                 Center(
                   child: Text(
                     _subPromptOf(card),
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: AppColors.muted,
                       fontSize: 16,
                       fontWeight: FontWeight.w800,
@@ -4642,12 +7917,12 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
                   ),
                 ),
               ],
-              const SizedBox(height: 24),
+              SizedBox(height: 24),
               TextField(
                 controller: _essayController,
                 minLines: 1,
                 maxLines: 3,
-                style: const TextStyle(
+                style: TextStyle(
                   color: AppColors.text,
                   fontWeight: FontWeight.w900,
                   fontSize: 16,
@@ -4655,43 +7930,57 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
                 decoration: InputDecoration(
                   hintText: _answerByDefinition ? 'Nhập Tiếng Việt' : 'Nhập thuật ngữ',
                   filled: true,
-                  fillColor: const Color(0xfff7f9fc),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
+                  fillColor: Color(0xfff7f9fc),
+                  contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 16),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(18),
-                    borderSide: const BorderSide(color: AppColors.border, width: 1.3),
+                    borderSide: BorderSide(color: AppColors.border, width: 1.3),
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(18),
-                    borderSide: const BorderSide(color: AppColors.border, width: 1.8),
+                    borderSide: BorderSide(color: AppColors.border, width: 1.8),
                   ),
                 ),
                 onSubmitted: (_) => _submitEssay(),
               ),
-              const SizedBox(height: 14),
+              SizedBox(height: 14),
               Row(
                 children: [
                   Expanded(
                     child: _outlineButton(
                       text: 'Bỏ qua',
                       icon: Icons.skip_next_rounded,
-                      onTap: () {
-                        _selectedAnswerMap[card.id] = '';
-                        _correctMap[card.id] = false;
-                        _answeredCards.add(card.id);
-                        if (_currentEssayIndex + 1 >= _quizCards.length) {
-                          setState(() => _finished = true);
-                          _showResultSheet();
-                        } else {
-                          setState(() {
+                      onTap: () async {
+                        final wasLast = _currentEssayIndex + 1 >= _quizCards.length;
+
+                        setState(() {
+                          _selectedAnswerMap[card.id] = '';
+                          _correctMap[card.id] = false;
+                          _answeredCards.add(card.id);
+                          _essayController.clear();
+
+                          if (wasLast) {
+                            _finished = true;
+                          } else {
                             _currentEssayIndex++;
-                            _essayController.clear();
-                          });
+                            _essayQuestionStartedAt = DateTime.now();
+                          }
+                        });
+
+                        await _recordStudyResult(
+                          card: card,
+                          answerText: '',
+                          isCorrect: false,
+                        );
+
+                        if (_finished) {
+                          await _finishStudySession();
+                          _showResultSheet();
                         }
                       },
                     ),
                   ),
-                  const SizedBox(width: 10),
+                  SizedBox(width: 10),
                   Expanded(
                     child: _solidButton(
                       text: 'Tiếp',
@@ -4711,7 +8000,8 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
 
   Widget _buildMultipleChoiceMode() {
     return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(16, 18, 16, 100),
+      controller: _mcScrollController,
+      padding: EdgeInsets.fromLTRB(16, 18, 16, 100),
       itemCount: _quizCards.length,
       itemBuilder: (context, index) => _buildQuestionCard(_quizCards[index], index),
     );
@@ -4720,7 +8010,7 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
-      return const Scaffold(
+      return Scaffold(
         backgroundColor: AppColors.bg,
         body: Center(child: CircularProgressIndicator()),
       );
@@ -4731,16 +8021,16 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
         backgroundColor: AppColors.bg,
         appBar: AppBar(
           backgroundColor: Colors.white,
-          foregroundColor: AppColors.border,
-          title: const Text('Ôn tập'),
+          foregroundColor: AppColors.buttonInk,
+          title: Text('Ôn tập'),
         ),
         body: Center(
           child: Padding(
-            padding: const EdgeInsets.all(20),
+            padding: EdgeInsets.all(20),
             child: Text(
               'Học phần này chưa có thẻ để ôn tập',
               textAlign: TextAlign.center,
-              style: const TextStyle(
+              style: TextStyle(
                 color: AppColors.text,
                 fontWeight: FontWeight.w900,
                 fontSize: 18,
@@ -4760,7 +8050,7 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
               children: [
                 Container(
                   width: double.infinity,
-                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                  padding: EdgeInsets.fromLTRB(14, 12, 14, 12),
                   decoration: BoxDecoration(
                     color: Colors.white.withOpacity(0.9),
                     border: Border(
@@ -4774,14 +8064,14 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
                         color: Colors.white,
                         onTap: () => Navigator.pop(context),
                       ),
-                      const SizedBox(width: 10),
+                      SizedBox(width: 10),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.center,
                           children: [
                             Text(
                               '$_done / ${_total == 0 ? _cards.length : _total}',
-                              style: const TextStyle(
+                              style: TextStyle(
                                 color: AppColors.text,
                                 fontWeight: FontWeight.w900,
                                 fontSize: 28,
@@ -4791,7 +8081,7 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
                               widget.courseTitle,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 color: AppColors.muted,
                                 fontWeight: FontWeight.w800,
                               ),
@@ -4799,7 +8089,7 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
                           ],
                         ),
                       ),
-                      const SizedBox(width: 10),
+                      SizedBox(width: 10),
                       SmallIcon3DButton(
                         icon: Icons.tune_rounded,
                         color: AppColors.yellow,
@@ -4812,15 +8102,15 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
                   child: _showSetup || _quizCards.isEmpty
                       ? Center(
                           child: Padding(
-                            padding: const EdgeInsets.all(22),
+                            padding: EdgeInsets.all(22),
                             child: Container(
-                              constraints: const BoxConstraints(maxWidth: 460),
-                              padding: const EdgeInsets.all(22),
+                              constraints: BoxConstraints(maxWidth: 460),
+                              padding: EdgeInsets.all(22),
                               decoration: BoxDecoration(
                                 color: Colors.white,
                                 borderRadius: BorderRadius.circular(24),
                                 border: Border.all(color: AppColors.border, width: 1.5),
-                                boxShadow: const [
+                                boxShadow: [
                                   BoxShadow(
                                     color: AppColors.border,
                                     offset: Offset(0, 7),
@@ -4831,9 +8121,9 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  const Icon(Icons.school_outlined, color: AppColors.border, size: 56),
-                                  const SizedBox(height: 12),
-                                  const Text(
+                                  Icon(Icons.school_outlined, color: AppColors.border, size: 56),
+                                  SizedBox(height: 12),
+                                  Text(
                                     'Sẵn sàng ôn tập',
                                     style: TextStyle(
                                       color: AppColors.text,
@@ -4841,17 +8131,17 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
                                       fontWeight: FontWeight.w900,
                                     ),
                                   ),
-                                  const SizedBox(height: 8),
+                                  SizedBox(height: 8),
                                   Text(
                                     'Có ${_cards.length} thẻ. Chọn kiểu câu hỏi rồi bắt đầu.',
                                     textAlign: TextAlign.center,
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       color: AppColors.muted,
                                       fontWeight: FontWeight.w700,
                                       height: 1.35,
                                     ),
                                   ),
-                                  const SizedBox(height: 20),
+                                  SizedBox(height: 20),
                                   _solidButton(
                                     text: 'Thiết lập ôn tập',
                                     icon: Icons.tune_rounded,
@@ -4875,7 +8165,7 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
                 right: 14,
                 bottom: 14,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   decoration: BoxDecoration(
                     color: Colors.white.withOpacity(0.86),
                     borderRadius: BorderRadius.circular(22),
@@ -4883,15 +8173,14 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
                   ),
                   child: Row(
                     children: [
-                      _statChip(text: 'Đúng $_correct', color: AppColors.green),
-                      const SizedBox(width: 8),
-                      _statChip(text: 'Sai $_wrong', color: AppColors.red),
-                      const Spacer(),
+                      if (!_finished)
+                        _statChip(text: 'Đã chọn $_done/$_total', color: AppColors.blue),
+                      Spacer(),
                       _solidButton(
                         text: _finished ? 'Xem kết quả' : 'Nộp bài',
                         icon: Icons.flag_rounded,
                         color: AppColors.yellow,
-                        onTap: _showResultSheet,
+                        onTap: _finished ? _showResultSheet : _submitMultipleChoice,
                       ),
                     ],
                   ),
@@ -4986,7 +8275,7 @@ class PronunciationOverlay extends StatefulWidget {
   final String subText;
   final String languageCode;
 
-  const PronunciationOverlay({
+  PronunciationOverlay({
     super.key,
     required this.targetText,
     required this.subText,
@@ -5017,7 +8306,7 @@ class _PronunciationOverlayState extends State<PronunciationOverlay>
     super.initState();
     _pulseController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1200),
+      duration: Duration(milliseconds: 1200),
     );
     _pulseAnim = Tween(begin: 1.0, end: 1.28).animate(
       CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
@@ -5080,7 +8369,7 @@ class _PronunciationOverlayState extends State<PronunciationOverlay>
   Future<void> _micStartAgain() async {
     _micReset();
 
-    await Future.delayed(const Duration(milliseconds: 120));
+    await Future.delayed(Duration(milliseconds: 120));
 
     if (!mounted) return;
 
@@ -5169,8 +8458,8 @@ if (!available) {
 
   await _speech.listen(
     localeId: widget.languageCode.isNotEmpty ? widget.languageCode : 'zh-TW',
-    listenFor: const Duration(seconds: 20),
-    pauseFor: const Duration(seconds: 3),
+    listenFor: Duration(seconds: 20),
+    pauseFor: Duration(seconds: 3),
     partialResults: true,
     cancelOnError: false,
     listenMode: stt.ListenMode.dictation,
@@ -5185,7 +8474,7 @@ if (!available) {
     },
   );
 
-  Future.delayed(const Duration(seconds: 8), () {
+  Future.delayed(Duration(seconds: 8), () {
     if (!mounted) return;
     if (_isRecording && lastWords.isEmpty) {
       _micStop();
@@ -5241,18 +8530,18 @@ if (!available) {
 
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 22, vertical: 36),
+      insetPadding: EdgeInsets.symmetric(horizontal: 22, vertical: 36),
       child: Container(
-        constraints: const BoxConstraints(maxWidth: 420),
-        padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+        constraints: BoxConstraints(maxWidth: 420),
+        padding: EdgeInsets.fromLTRB(18, 18, 18, 16),
         decoration: BoxDecoration(
-          color: const Color(0xfff6f1fb),
+          color: Color(0xfff6f1fb),
           borderRadius: BorderRadius.circular(26),
           border: Border.all(
             color: AppColors.border.withOpacity(0.18),
             width: 1,
           ),
-          boxShadow: const [
+          boxShadow: [
             BoxShadow(
               color: Color(0x33000000),
               offset: Offset(0, 18),
@@ -5267,7 +8556,7 @@ if (!available) {
             children: [
               Row(
                 children: [
-                  const Expanded(
+                  Expanded(
                     child: Text(
                       'Luyện phát âm',
                       style: TextStyle(
@@ -5279,23 +8568,23 @@ if (!available) {
                   ),
                   IconButton(
                     onPressed: () => Navigator.pop(context),
-                    icon: const Icon(
+                    icon: Icon(
                       Icons.close_rounded,
                       color: AppColors.border,
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
+              SizedBox(height: 12),
               if (!_hasResult) ...[
                 Container(
                   width: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 20),
+                  padding: EdgeInsets.symmetric(horizontal: 18, vertical: 20),
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(22),
                     border: Border.all(color: AppColors.border, width: 1.4),
-                    boxShadow: const [
+                    boxShadow: [
                       BoxShadow(
                         color: AppColors.border,
                         offset: Offset(0, 7),
@@ -5311,7 +8600,7 @@ if (!available) {
                   child: Column(
                     children: [
                       Container(
-                        padding: const EdgeInsets.symmetric(
+                        padding: EdgeInsets.symmetric(
                           horizontal: 12,
                           vertical: 7,
                         ),
@@ -5320,7 +8609,7 @@ if (!available) {
                           borderRadius: BorderRadius.circular(99),
                           border: Border.all(color: AppColors.border, width: 1.2),
                         ),
-                        child: const Text(
+                        child: Text(
                           'Nhận diện phát âm',
                           style: TextStyle(
                             color: AppColors.border,
@@ -5329,7 +8618,7 @@ if (!available) {
                           ),
                         ),
                       ),
-                      const SizedBox(height: 14),
+                      SizedBox(height: 14),
                       Text(
                         widget.targetText,
                         textAlign: TextAlign.center,
@@ -5341,20 +8630,20 @@ if (!available) {
                         ),
                       ),
                       if (widget.subText.isNotEmpty) ...[
-                        const SizedBox(height: 8),
+                        SizedBox(height: 8),
                         Text(
                           widget.subText,
                           textAlign: TextAlign.center,
-                          style: const TextStyle(
+                          style: TextStyle(
                             color: AppColors.muted,
                             fontSize: 15,
                             fontWeight: FontWeight.w800,
                           ),
                         ),
                       ],
-                      const SizedBox(height: 18),
+                      SizedBox(height: 18),
                       AnimatedContainer(
-                        duration: const Duration(milliseconds: 180),
+                        duration: Duration(milliseconds: 180),
                         width: _isRecording ? 88 : 76,
                         height: _isRecording ? 88 : 76,
                         alignment: Alignment.center,
@@ -5375,7 +8664,7 @@ if (!available) {
                           builder: (_, __) {
                             return Transform.scale(
                               scale: _isRecording ? _pulseAnim.value.clamp(1.0, 1.12) : 1.0,
-                              child: const Icon(
+                              child: Icon(
                                 Icons.mic_rounded,
                                 color: AppColors.border,
                                 size: 32,
@@ -5384,14 +8673,14 @@ if (!available) {
                           },
                         ),
                       ),
-                      const SizedBox(height: 12),
+                      SizedBox(height: 12),
                       AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 180),
+                        duration: Duration(milliseconds: 180),
                         child: Text(
                           _statusText,
                           key: ValueKey(_statusText),
                           textAlign: TextAlign.center,
-                          style: const TextStyle(
+                          style: TextStyle(
                             color: AppColors.muted,
                             fontSize: 13,
                             fontWeight: FontWeight.w800,
@@ -5403,10 +8692,10 @@ if (!available) {
                 ),
               ],
               if (_hasResult && _wordResults.isNotEmpty) ...[
-                const SizedBox(height: 18),
+                SizedBox(height: 18),
                 Container(
                   width: double.infinity,
-                  padding: const EdgeInsets.all(14),
+                  padding: EdgeInsets.all(14),
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(18),
@@ -5415,7 +8704,7 @@ if (!available) {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
+                      Text(
                         'BẠN NÓI',
                         style: TextStyle(
                           color: AppColors.muted,
@@ -5424,7 +8713,7 @@ if (!available) {
                           letterSpacing: 0.5,
                         ),
                       ),
-                      const SizedBox(height: 8),
+                      SizedBox(height: 8),
                       Wrap(
                         spacing: 5,
                         runSpacing: 6,
@@ -5432,7 +8721,7 @@ if (!available) {
                           return Text(
                             w.text,
                             style: TextStyle(
-                              color: w.ok ? AppColors.text : const Color(0xffc0392b),
+                              color: w.ok ? AppColors.text : Color(0xffc0392b),
                               fontSize: 18,
                               fontWeight: FontWeight.w800,
                             ),
@@ -5444,9 +8733,9 @@ if (!available) {
                 ),
               ],
               if (_hasResult) ...[
-                const SizedBox(height: 14),
+                SizedBox(height: 14),
                 Container(
-                  padding: const EdgeInsets.all(14),
+                  padding: EdgeInsets.all(14),
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(18),
@@ -5455,7 +8744,7 @@ if (!available) {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
+                      Text(
                         'ĐỘ CHÍNH XÁC',
                         style: TextStyle(
                           color: AppColors.muted,
@@ -5464,12 +8753,12 @@ if (!available) {
                           letterSpacing: 0.5,
                         ),
                       ),
-                      const SizedBox(height: 10),
+                      SizedBox(height: 10),
                       ClipRRect(
                         borderRadius: BorderRadius.circular(99),
                         child: TweenAnimationBuilder<double>(
                           tween: Tween(begin: 0, end: _score),
-                          duration: const Duration(milliseconds: 600),
+                          duration: Duration(milliseconds: 600),
                           curve: Curves.easeOut,
                           builder: (_, v, __) => LinearProgressIndicator(
                             value: v,
@@ -5479,11 +8768,11 @@ if (!available) {
                           ),
                         ),
                       ),
-                      const SizedBox(height: 8),
+                      SizedBox(height: 8),
                       Center(
                         child: Text(
                           '$pct%',
-                          style: const TextStyle(
+                          style: TextStyle(
                             color: AppColors.text,
                             fontSize: 28,
                             fontWeight: FontWeight.w900,
@@ -5494,7 +8783,7 @@ if (!available) {
                   ),
                 ),
               ],
-              const SizedBox(height: 18),
+              SizedBox(height: 18),
               Row(
                 children: [
                   if (_hasResult) ...[
@@ -5505,7 +8794,7 @@ if (!available) {
                         onTap: _micReset,
                       ),
                     ),
-                    const SizedBox(width: 10),
+                    SizedBox(width: 10),
                     Expanded(
                       child: _MicButton(
                         label: 'Bắt đầu',
@@ -5537,7 +8826,7 @@ class _MicButton extends StatefulWidget {
   final Color color;
   final VoidCallback onTap;
 
-  const _MicButton({
+  _MicButton({
     required this.label,
     required this.color,
     required this.onTap,
@@ -5558,7 +8847,7 @@ class _MicButtonState extends State<_MicButton> {
       onTapCancel: () => setState(() => isPressed = false),
       onTap: widget.onTap,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 90),
+        duration: Duration(milliseconds: 90),
         curve: Curves.easeOut,
         transform: Matrix4.translationValues(0, isPressed ? 4 : 0, 0),
         height: 48,
@@ -5574,7 +8863,7 @@ class _MicButtonState extends State<_MicButton> {
               blurRadius: 0,
             ),
             BoxShadow(
-              color: const Color(0x18000000),
+              color: Color(0x18000000),
               offset: Offset(0, isPressed ? 4 : 12),
               blurRadius: isPressed ? 6 : 18,
             ),
@@ -5582,7 +8871,7 @@ class _MicButtonState extends State<_MicButton> {
         ),
         child: Text(
           widget.label,
-          style: const TextStyle(
+          style: TextStyle(
             color: AppColors.border,
             fontSize: 15,
             fontWeight: FontWeight.w900,
@@ -5597,13 +8886,13 @@ class _MicButtonState extends State<_MicButton> {
 class SectionTitle extends StatelessWidget {
   final String text;
 
-  const SectionTitle(this.text, {super.key});
+  SectionTitle(this.text, {super.key});
 
   @override
   Widget build(BuildContext context) {
     return Text(
       text,
-      style: const TextStyle(
+      style: TextStyle(
         color: AppColors.text,
         fontSize: 13,
         fontWeight: FontWeight.w900,
@@ -5618,7 +8907,7 @@ class LightInput extends StatelessWidget {
   final String hintText;
   final double height;
 
-  const LightInput({
+  LightInput({
     super.key,
     required this.controller,
     required this.hintText,
@@ -5631,31 +8920,31 @@ class LightInput extends StatelessWidget {
       height: height,
       child: TextField(
         controller: controller,
-        style: const TextStyle(
+        style: TextStyle(
           color: AppColors.text,
           fontSize: 14,
           fontWeight: FontWeight.w800,
         ),
         decoration: InputDecoration(
           hintText: hintText,
-          hintStyle: const TextStyle(
+          hintStyle: TextStyle(
             color: AppColors.muted,
             fontSize: 13,
             fontWeight: FontWeight.w700,
           ),
           filled: true,
-          fillColor: Colors.white,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 14),
+          fillColor: AppColors.panel,
+          contentPadding: EdgeInsets.symmetric(horizontal: 14),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(14),
-            borderSide: const BorderSide(
+            borderSide: BorderSide(
               color: AppColors.border,
               width: 1.4,
             ),
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(14),
-            borderSide: const BorderSide(
+            borderSide: BorderSide(
               color: AppColors.border,
               width: 1.8,
             ),
@@ -5672,7 +8961,7 @@ class MiniInput extends StatelessWidget {
   final bool enabled;
   final ValueChanged<String> onChanged;
 
-  const MiniInput({
+  MiniInput({
     super.key,
     required this.controller,
     required this.hintText,
@@ -5688,31 +8977,31 @@ class MiniInput extends StatelessWidget {
         controller: controller,
         enabled: enabled,
         onChanged: onChanged,
-        style: const TextStyle(
+        style: TextStyle(
           color: AppColors.text,
           fontSize: 14,
           fontWeight: FontWeight.w700,
         ),
         decoration: InputDecoration(
           hintText: hintText,
-          hintStyle: const TextStyle(
+          hintStyle: TextStyle(
             color: AppColors.muted,
             fontSize: 13,
           ),
           filled: true,
-          fillColor: Colors.white,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+          fillColor: AppColors.panel,
+          contentPadding: EdgeInsets.symmetric(horizontal: 12),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: AppColors.border),
+            borderSide: BorderSide(color: AppColors.border),
           ),
           disabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: AppColors.border),
+            borderSide: BorderSide(color: AppColors.border),
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(
+            borderSide: BorderSide(
               color: AppColors.border,
               width: 1.5,
             ),
@@ -5728,7 +9017,7 @@ class SmallIcon3DButton extends StatefulWidget {
   final Color color;
   final VoidCallback onTap;
 
-  const SmallIcon3DButton({
+  SmallIcon3DButton({
     super.key,
     required this.icon,
     required this.color,
@@ -5762,7 +9051,7 @@ class _SmallIcon3DButtonState extends State<SmallIcon3DButton> {
       },
       onTap: widget.onTap,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 90),
+        duration: Duration(milliseconds: 90),
         curve: Curves.easeOut,
         transform: Matrix4.translationValues(0, isPressed ? 4 : 0, 0),
         width: 48,
@@ -5771,7 +9060,7 @@ class _SmallIcon3DButtonState extends State<SmallIcon3DButton> {
           color: widget.color,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
-            color: AppColors.border,
+            color: AppColors.buttonInk,
             width: 1.5,
           ),
           boxShadow: [
@@ -5798,7 +9087,7 @@ class BigPopupButton extends StatefulWidget {
   final Color color;
   final VoidCallback onTap;
 
-  const BigPopupButton({
+  BigPopupButton({
     super.key,
     required this.text,
     required this.icon,
@@ -5833,7 +9122,7 @@ class _BigPopupButtonState extends State<BigPopupButton> {
       },
       onTap: widget.onTap,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 90),
+        duration: Duration(milliseconds: 90),
         transform: Matrix4.translationValues(0, isPressed ? 5 : 0, 0),
         height: 54,
         width: double.infinity,
@@ -5860,10 +9149,10 @@ class _BigPopupButtonState extends State<BigPopupButton> {
               color: AppColors.border,
               size: 24,
             ),
-            const SizedBox(width: 10),
+            SizedBox(width: 10),
             Text(
               widget.text,
-              style: const TextStyle(
+              style: TextStyle(
                 color: AppColors.border,
                 fontSize: 17,
                 fontWeight: FontWeight.w900,
@@ -5882,7 +9171,7 @@ class Big3DButton extends StatefulWidget {
   final Color color;
   final VoidCallback onTap;
 
-  const Big3DButton({
+  Big3DButton({
     super.key,
     required this.text,
     required this.icon,
@@ -5920,7 +9209,7 @@ class _Big3DButtonState extends State<Big3DButton> {
       },
       onTap: widget.onTap,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 90),
+        duration: Duration(milliseconds: 90),
         curve: Curves.easeOut,
         transform: Matrix4.translationValues(
           0,
@@ -5938,38 +9227,52 @@ class _Big3DButtonState extends State<Big3DButton> {
           ),
           boxShadow: [
             BoxShadow(
-              color: AppColors.border,
+              color: AppColors.buttonInk.withOpacity(0.95),
               offset: Offset(0, isPressed ? 1 : 8),
               blurRadius: 0,
             ),
             BoxShadow(
-              color: const Color(0x22000000),
+              color: Color(0x22000000),
               offset: Offset(0, isPressed ? 5 : 18),
               blurRadius: isPressed ? 8 : 28,
             ),
           ],
         ),
-        child: Center(
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                widget.icon,
-                color: AppColors.border,
-                size: 34,
-              ),
-              const SizedBox(width: 14),
-              Text(
-                widget.text,
-                style: const TextStyle(
-                  color: AppColors.border,
-                  fontSize: 22,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0.8,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Positioned(
+              left: 34,
+              top: 0,
+              bottom: 0,
+              child: Center(
+                child: Icon(
+                  widget.icon,
+                  color: AppColors.buttonInk,
+                  size: 34,
                 ),
               ),
-            ],
-          ),
+            ),
+            Center(
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 76),
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    widget.text,
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    style: TextStyle(
+                      color: AppColors.buttonInk,
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.8,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -5980,7 +9283,7 @@ class CompactSelectItem {
   final String value;
   final String label;
 
-  const CompactSelectItem({
+  CompactSelectItem({
     required this.value,
     required this.label,
   });
@@ -5997,7 +9300,7 @@ class CompactSelectBox extends StatelessWidget {
   final bool showCustomInput;
   final ValueChanged<String> onCustomChanged;
 
-  const CompactSelectBox({
+  CompactSelectBox({
     super.key,
     required this.title,
     required this.value,
@@ -6012,7 +9315,7 @@ class CompactSelectBox extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: AppColors.panel2,
         borderRadius: BorderRadius.circular(16),
@@ -6022,7 +9325,7 @@ class CompactSelectBox extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SectionTitle(title),
-          const SizedBox(height: 12),
+          SizedBox(height: 12),
           Wrap(
             spacing: 10,
             runSpacing: 10,
@@ -6032,8 +9335,8 @@ class CompactSelectBox extends StatelessWidget {
               return GestureDetector(
                 onTap: () => onChanged(item.value),
                 child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 120),
-                  padding: const EdgeInsets.symmetric(
+                  duration: Duration(milliseconds: 120),
+                  padding: EdgeInsets.symmetric(
                     horizontal: 15,
                     vertical: 11,
                   ),
@@ -6045,7 +9348,7 @@ class CompactSelectBox extends StatelessWidget {
                       width: 1.4,
                     ),
                     boxShadow: selected
-                        ? const [
+                        ? [
                             BoxShadow(
                               color: AppColors.border,
                               offset: Offset(0, 4),
@@ -6056,7 +9359,7 @@ class CompactSelectBox extends StatelessWidget {
                   ),
                   child: Text(
                     item.label,
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: AppColors.border,
                       fontSize: 14,
                       fontWeight: FontWeight.w900,
@@ -6067,7 +9370,7 @@ class CompactSelectBox extends StatelessWidget {
             }).toList(),
           ),
           if (showCustomInput) ...[
-            const SizedBox(height: 14),
+            SizedBox(height: 14),
             MiniInput(
               controller: customController,
               enabled: true,
@@ -6090,4 +9393,3 @@ class ParsedDefinition {
     required this.pronunciation,
   });
 }
-

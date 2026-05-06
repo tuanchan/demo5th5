@@ -49,7 +49,7 @@
 	<string>Ứng dụng cần nhận diện giọng nói để kiểm tra phát âm.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
-
+	
 	<key>UIFileSharingEnabled</key>
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
