@@ -397,6 +397,38 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
+Future<void> openReviewPractice([CourseListItem? course]) async {
+  CourseListItem? targetCourse = course ?? selectedHomeCourse;
+
+  if (targetCourse == null) {
+    if (courses.isEmpty) {
+      await loadCourses();
+    }
+
+    if (courses.length == 1) {
+      targetCourse = courses.first;
+    }
+  }
+
+  if (targetCourse == null) {
+    setState(() {
+      isOpen = true;
+    });
+    showHomeMessage("Hãy chọn học phần trong danh sách trước");
+    return;
+  }
+
+  await Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (_) => ReviewPracticePage(
+        courseId: targetCourse!.id,
+        courseTitle: targetCourse.title,
+      ),
+    ),
+  );
+}
+
 Future<void> openFlashCards([CourseListItem? course]) async {
   CourseListItem? targetCourse = course ?? selectedHomeCourse;
 
@@ -695,7 +727,7 @@ Future<void> confirmDeleteCourse(CourseListItem course) async {
                           text: "Ôn Tập",
                           icon: Icons.school,
                           color: AppColors.green,
-                          onTap: () {},
+                          onTap: openReviewPractice,
                         ),
                         const SizedBox(height: 28),
                         Big3DButton(
@@ -3653,6 +3685,1226 @@ Widget buildFinishButton({
 
 
 
+
+class ReviewPracticePage extends StatefulWidget {
+  final int courseId;
+  final String courseTitle;
+
+  const ReviewPracticePage({
+    super.key,
+    required this.courseId,
+    required this.courseTitle,
+  });
+
+  @override
+  State<ReviewPracticePage> createState() => _ReviewPracticePageState();
+}
+
+class _ReviewPracticePageState extends State<ReviewPracticePage> {
+  final math.Random _random = math.Random();
+  final TextEditingController _essayController = TextEditingController();
+
+  List<StudyCardItem> _cards = [];
+  List<StudyCardItem> _quizCards = [];
+  Map<int, List<String>> _choiceMap = {};
+  Set<int> _answeredCards = {};
+  Map<int, bool> _correctMap = {};
+  Map<int, String> _selectedAnswerMap = {};
+
+  bool _isLoading = true;
+  bool _showSetup = true;
+  bool _multipleChoice = true;
+  bool _essay = false;
+  bool _answerByDefinition = true;
+  bool _finished = false;
+  int _questionLimit = 0;
+  int _currentEssayIndex = 0;
+
+  int get _total => _quizCards.length;
+  int get _done => _answeredCards.length;
+  int get _correct => _correctMap.values.where((e) => e).length;
+  int get _wrong => _done - _correct;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCards();
+  }
+
+  @override
+  void dispose() {
+    _essayController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadCards() async {
+    try {
+      final db = await AppDatabase.instance.database;
+      final rows = await db.query(
+        'cards',
+        where: 'courseId = ? AND deletedAt IS NULL AND isHidden = 0',
+        whereArgs: [widget.courseId],
+        orderBy: 'position ASC, id ASC',
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        _cards = rows.map((e) => StudyCardItem.fromMap(e)).toList();
+        _questionLimit = _cards.length;
+        _isLoading = false;
+      });
+
+      if (_cards.isNotEmpty) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _openSetupSheet();
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      _showMessage('Không tải được thẻ ôn tập');
+      debugPrint('LOAD REVIEW CARDS ERROR: $e');
+    }
+  }
+
+  void _showMessage(String text) {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(text),
+        backgroundColor: AppColors.border,
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  String _promptOf(StudyCardItem card) {
+    return _answerByDefinition ? card.term : card.definition;
+  }
+
+  String _subPromptOf(StudyCardItem card) {
+    return _answerByDefinition ? card.pronunciation : card.pronunciation;
+  }
+
+  String _answerOf(StudyCardItem card) {
+    return _answerByDefinition ? card.definition : card.term;
+  }
+
+  String _optionLabelOf(StudyCardItem card) {
+    final value = _answerOf(card);
+    if (_answerByDefinition && card.pronunciation.trim().isNotEmpty) {
+      return '$value (${card.pronunciation.trim()})';
+    }
+    return value;
+  }
+
+  String _normalizeAnswer(String value) {
+    return normalizeText(value)
+        .replaceAll(RegExp(r'\([^)]*\)'), '')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
+
+  List<String> _buildChoices(StudyCardItem target) {
+    final correct = _optionLabelOf(target);
+    final wrongPool = _cards
+        .where((e) => e.id != target.id)
+        .map(_optionLabelOf)
+        .where((e) => e.trim().isNotEmpty && e.trim() != correct.trim())
+        .toSet()
+        .toList();
+
+    wrongPool.shuffle(_random);
+    final options = <String>[correct, ...wrongPool.take(3)];
+
+    while (options.length < 4) {
+      options.add('Đáp án ${options.length + 1}');
+    }
+
+    options.shuffle(_random);
+    return options;
+  }
+
+  void _startQuiz() {
+    if (_cards.isEmpty) return;
+
+    final copied = List<StudyCardItem>.from(_cards)..shuffle(_random);
+    final limit = _questionLimit.clamp(1, _cards.length).toInt();
+    final selected = copied.take(limit).toList();
+
+    setState(() {
+      _quizCards = selected;
+      _choiceMap = {
+        for (final card in selected) card.id: _buildChoices(card),
+      };
+      _answeredCards.clear();
+      _correctMap.clear();
+      _selectedAnswerMap.clear();
+      _finished = false;
+      _showSetup = false;
+      _currentEssayIndex = 0;
+      _essayController.clear();
+    });
+  }
+
+  void _restart() {
+    setState(() {
+      _showSetup = true;
+      _finished = false;
+    });
+    _openSetupSheet();
+  }
+
+  void _answerCard(StudyCardItem card, String selected) {
+    if (_answeredCards.contains(card.id)) return;
+
+    final correctText = _optionLabelOf(card);
+    final isCorrect = _normalizeAnswer(selected) == _normalizeAnswer(correctText);
+
+    setState(() {
+      _answeredCards.add(card.id);
+      _correctMap[card.id] = isCorrect;
+      _selectedAnswerMap[card.id] = selected;
+      if (_done >= _total) _finished = true;
+    });
+
+    if (_finished) _showResultSheet();
+  }
+
+  void _skipCard(StudyCardItem card) {
+    _answerCard(card, '');
+  }
+
+  void _submitEssay() {
+    if (_quizCards.isEmpty) return;
+    final card = _quizCards[_currentEssayIndex];
+    final typed = _essayController.text.trim();
+
+    if (typed.isEmpty) {
+      _showMessage('Nhập câu trả lời trước');
+      return;
+    }
+
+    final correct = _normalizeAnswer(_answerOf(card));
+    final answer = _normalizeAnswer(typed);
+    final ok = answer == correct;
+
+    setState(() {
+      _answeredCards.add(card.id);
+      _correctMap[card.id] = ok;
+      _selectedAnswerMap[card.id] = typed;
+      _essayController.clear();
+
+      if (_currentEssayIndex + 1 >= _quizCards.length) {
+        _finished = true;
+      } else {
+        _currentEssayIndex++;
+      }
+    });
+
+    if (_finished) _showResultSheet();
+  }
+
+  Future<void> _openSetupSheet() async {
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withOpacity(0.35),
+      builder: (sheetContext) {
+        int localLimit = _questionLimit.clamp(1, _cards.length).toInt();
+        bool localMc = _multipleChoice;
+        bool localEssay = _essay;
+        bool localAnswerByDefinition = _answerByDefinition;
+
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            void setMode({bool? mc, bool? essay}) {
+              setSheetState(() {
+                localMc = mc ?? localMc;
+                localEssay = essay ?? localEssay;
+                if (!localMc && !localEssay) {
+                  localEssay = true;
+                }
+              });
+            }
+
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 16,
+                right: 16,
+                bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+              ),
+              child: Center(
+                child: Container(
+                  constraints: const BoxConstraints(maxWidth: 560),
+                  padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xfff6f1fb),
+                    borderRadius: BorderRadius.circular(26),
+                    border: Border.all(color: AppColors.border, width: 1.4),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: AppColors.border,
+                        offset: Offset(0, 7),
+                        blurRadius: 0,
+                      ),
+                      BoxShadow(
+                        color: Color(0x26000000),
+                        offset: Offset(0, 18),
+                        blurRadius: 28,
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  widget.courseTitle,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: AppColors.muted,
+                                    fontWeight: FontWeight.w900,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                                const SizedBox(height: 3),
+                                const Text(
+                                  'Thiết lập ôn tập',
+                                  style: TextStyle(
+                                    color: AppColors.text,
+                                    fontSize: 24,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            onPressed: () => Navigator.pop(sheetContext),
+                            icon: const Icon(Icons.close_rounded, color: AppColors.border),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      _setupRow(
+                        label: 'Câu hỏi tối đa ${_cards.length}',
+                        child: _numberStepper(
+                          value: localLimit,
+                          min: 1,
+                          max: _cards.length,
+                          onChanged: (value) => setSheetState(() => localLimit = value),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      _setupRow(
+                        label: 'Trả lời bằng',
+                        child: Container(
+                          height: 48,
+                          padding: const EdgeInsets.symmetric(horizontal: 14),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: AppColors.border, width: 1.3),
+                          ),
+                          child: DropdownButtonHideUnderline(
+                            child: DropdownButton<bool>(
+                              value: localAnswerByDefinition,
+                              isExpanded: true,
+                              icon: const Icon(Icons.keyboard_arrow_down_rounded),
+                              items: const [
+                                DropdownMenuItem(value: true, child: Text('Tiếng Việt')),
+                                DropdownMenuItem(value: false, child: Text('Thuật ngữ')),
+                              ],
+                              onChanged: (value) {
+                                if (value == null) return;
+                                setSheetState(() => localAnswerByDefinition = value);
+                              },
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      Divider(color: AppColors.border.withOpacity(0.18)),
+                      _switchTile(
+                        text: 'Trắc nghiệm 4 đáp án',
+                        value: localMc,
+                        onChanged: (v) => setMode(mc: v),
+                      ),
+                      _switchTile(
+                        text: 'Tự luận',
+                        value: localEssay,
+                        onChanged: (v) => setMode(essay: v),
+                      ),
+                      const SizedBox(height: 14),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: _solidButton(
+                          text: 'Bắt đầu ôn tập',
+                          icon: Icons.play_arrow_rounded,
+                          color: AppColors.green,
+                          onTap: () {
+                            setState(() {
+                              _questionLimit = localLimit;
+                              _multipleChoice = localMc;
+                              _essay = localEssay;
+                              _answerByDefinition = localAnswerByDefinition;
+                            });
+                            Navigator.pop(sheetContext);
+                            _startQuiz();
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _showResultSheet() async {
+    await showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) {
+        return Padding(
+          padding: const EdgeInsets.all(16),
+          child: Center(
+            child: Container(
+              constraints: const BoxConstraints(maxWidth: 460),
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: const Color(0xfff6f1fb),
+                borderRadius: BorderRadius.circular(26),
+                border: Border.all(color: AppColors.border, width: 1.4),
+                boxShadow: const [
+                  BoxShadow(
+                    color: AppColors.border,
+                    offset: Offset(0, 7),
+                    blurRadius: 0,
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.emoji_events_outlined, color: AppColors.border, size: 54),
+                  const SizedBox(height: 10),
+                  const Text(
+                    'Kết quả ôn tập',
+                    style: TextStyle(
+                      color: AppColors.text,
+                      fontSize: 24,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(child: _resultBox('Đúng', '$_correct', AppColors.green)),
+                      const SizedBox(width: 10),
+                      Expanded(child: _resultBox('Sai', '$_wrong', AppColors.red)),
+                      const SizedBox(width: 10),
+                      Expanded(child: _resultBox('Tổng', '$_total', AppColors.blue)),
+                    ],
+                  ),
+                  const SizedBox(height: 18),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _outlineButton(
+                          text: 'Thoát',
+                          icon: Icons.logout_rounded,
+                          onTap: () {
+                            Navigator.pop(context);
+                            Navigator.pop(this.context);
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: _solidButton(
+                          text: 'Ôn lại',
+                          icon: Icons.refresh_rounded,
+                          color: AppColors.yellow,
+                          onTap: () {
+                            Navigator.pop(context);
+                            _restart();
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _setupRow({required String label, required Widget child}) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final narrow = constraints.maxWidth < 430;
+        final labelWidget = Text(
+          label,
+          style: const TextStyle(
+            color: AppColors.text,
+            fontWeight: FontWeight.w900,
+            fontSize: 15,
+          ),
+        );
+
+        if (narrow) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              labelWidget,
+              const SizedBox(height: 8),
+              child,
+            ],
+          );
+        }
+
+        return Row(
+          children: [
+            Expanded(child: labelWidget),
+            SizedBox(width: 210, child: child),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _numberStepper({
+    required int value,
+    required int min,
+    required int max,
+    required ValueChanged<int> onChanged,
+  }) {
+    return Container(
+      height: 48,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border, width: 1.3),
+      ),
+      child: Row(
+        children: [
+          IconButton(
+            onPressed: value <= min ? null : () => onChanged(value - 1),
+            icon: const Icon(Icons.remove_rounded),
+          ),
+          Expanded(
+            child: Center(
+              child: Text(
+                '$value',
+                style: const TextStyle(
+                  color: AppColors.text,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 16,
+                ),
+              ),
+            ),
+          ),
+          IconButton(
+            onPressed: value >= max ? null : () => onChanged(value + 1),
+            icon: const Icon(Icons.add_rounded),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _switchTile({
+    required String text,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              text,
+              style: const TextStyle(
+                color: AppColors.text,
+                fontWeight: FontWeight.w900,
+                fontSize: 15,
+              ),
+            ),
+          ),
+          Switch(
+            value: value,
+            activeColor: AppColors.border,
+            activeTrackColor: AppColors.green,
+            onChanged: onChanged,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _solidButton({
+    required String text,
+    required IconData icon,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        height: 50,
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.border, width: 1.4),
+          boxShadow: const [
+            BoxShadow(
+              color: AppColors.border,
+              offset: Offset(0, 4),
+              blurRadius: 0,
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: AppColors.border, size: 20),
+            const SizedBox(width: 7),
+            Flexible(
+              child: Text(
+                text,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: AppColors.border,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _outlineButton({
+    required String text,
+    required IconData icon,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        height: 50,
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.border, width: 1.4),
+          boxShadow: const [
+            BoxShadow(
+              color: AppColors.border,
+              offset: Offset(0, 4),
+              blurRadius: 0,
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: AppColors.border, size: 20),
+            const SizedBox(width: 7),
+            Flexible(
+              child: Text(
+                text,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: AppColors.border,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _resultBox(String title, String value, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.border, width: 1.3),
+      ),
+      child: Column(
+        children: [
+          Text(
+            value,
+            style: const TextStyle(
+              color: AppColors.border,
+              fontSize: 22,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          Text(
+            title,
+            style: const TextStyle(
+              color: AppColors.border,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _statChip({required String text, required Color color}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: AppColors.border, width: 1.2),
+      ),
+      child: Text(
+        text,
+        style: const TextStyle(
+          color: AppColors.border,
+          fontWeight: FontWeight.w900,
+          fontSize: 13,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildQuestionCard(StudyCardItem card, int index) {
+    final answered = _answeredCards.contains(card.id);
+    final selected = _selectedAnswerMap[card.id];
+    final correctAnswer = _optionLabelOf(card);
+    final isCorrect = _correctMap[card.id] == true;
+    final choices = _choiceMap[card.id] ?? const <String>[];
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: AppColors.border, width: 1.4),
+        boxShadow: const [
+          BoxShadow(
+            color: AppColors.border,
+            offset: Offset(0, 5),
+            blurRadius: 0,
+          ),
+          BoxShadow(
+            color: Color(0x14000000),
+            offset: Offset(0, 14),
+            blurRadius: 22,
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: AppColors.blue,
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: AppColors.border, width: 1.1),
+                ),
+                child: Text(
+                  '${index + 1}/$_total',
+                  style: const TextStyle(
+                    color: AppColors.border,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+              const Spacer(),
+              if (answered)
+                Icon(
+                  isCorrect ? Icons.check_circle_rounded : Icons.cancel_rounded,
+                  color: AppColors.border,
+                ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Text(
+            _answerByDefinition ? 'Thuật ngữ' : 'Định nghĩa',
+            style: const TextStyle(
+              color: AppColors.muted,
+              fontWeight: FontWeight.w900,
+              fontSize: 13,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Center(
+            child: Text(
+              _promptOf(card),
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: AppColors.text,
+                fontSize: _promptOf(card).length > 20 ? 27 : 36,
+                fontWeight: FontWeight.w900,
+                height: 1.15,
+              ),
+            ),
+          ),
+          if (_subPromptOf(card).trim().isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Center(
+              child: Text(
+                _subPromptOf(card),
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: AppColors.muted,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: 16),
+          const Text(
+            'Chọn đáp án đúng',
+            style: TextStyle(
+              color: AppColors.text,
+              fontWeight: FontWeight.w900,
+              fontSize: 15,
+            ),
+          ),
+          const SizedBox(height: 10),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final twoCols = constraints.maxWidth >= 520;
+              return Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: choices.map((choice) {
+                  final isSelected = selected == choice;
+                  final isCorrectChoice = _normalizeAnswer(choice) == _normalizeAnswer(correctAnswer);
+                  Color bg = const Color(0xfff7f9fc);
+                  if (answered && isCorrectChoice) bg = AppColors.green;
+                  if (answered && isSelected && !isCorrectChoice) bg = AppColors.red;
+
+                  return SizedBox(
+                    width: twoCols ? (constraints.maxWidth - 10) / 2 : constraints.maxWidth,
+                    child: GestureDetector(
+                      onTap: answered ? null : () => _answerCard(card, choice),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 160),
+                        constraints: const BoxConstraints(minHeight: 52),
+                        alignment: Alignment.center,
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: bg,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: AppColors.border, width: 1.25),
+                          boxShadow: answered
+                              ? const []
+                              : const [
+                                  BoxShadow(
+                                    color: AppColors.border,
+                                    offset: Offset(0, 3),
+                                    blurRadius: 0,
+                                  ),
+                                ],
+                        ),
+                        child: Text(
+                          choice,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: AppColors.text,
+                            fontWeight: FontWeight.w900,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              );
+            },
+          ),
+          const SizedBox(height: 12),
+          Center(
+            child: TextButton(
+              onPressed: answered ? null : () => _skipCard(card),
+              child: Text(
+                answered && !isCorrect ? 'Đáp án: $correctAnswer' : 'Bạn không biết?',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: AppColors.border,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEssayMode() {
+    final card = _quizCards[_currentEssayIndex];
+    final displayIndex = _currentEssayIndex + 1;
+
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(16, 18, 16, 100),
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 720),
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: AppColors.border, width: 1.4),
+            boxShadow: const [
+              BoxShadow(
+                color: AppColors.border,
+                offset: Offset(0, 6),
+                blurRadius: 0,
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  _statChip(text: '$displayIndex/$_total', color: AppColors.blue),
+                  const Spacer(),
+                  _statChip(text: 'Đúng $_correct', color: AppColors.green),
+                  const SizedBox(width: 8),
+                  _statChip(text: 'Sai $_wrong', color: AppColors.red),
+                ],
+              ),
+              const SizedBox(height: 24),
+              Text(
+                _answerByDefinition ? 'Thuật ngữ' : 'Định nghĩa',
+                style: const TextStyle(
+                  color: AppColors.muted,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Center(
+                child: Text(
+                  _promptOf(card),
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: AppColors.text,
+                    fontSize: _promptOf(card).length > 18 ? 34 : 46,
+                    fontWeight: FontWeight.w900,
+                    height: 1.12,
+                  ),
+                ),
+              ),
+              if (_subPromptOf(card).trim().isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Center(
+                  child: Text(
+                    _subPromptOf(card),
+                    style: const TextStyle(
+                      color: AppColors.muted,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 24),
+              TextField(
+                controller: _essayController,
+                minLines: 1,
+                maxLines: 3,
+                style: const TextStyle(
+                  color: AppColors.text,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 16,
+                ),
+                decoration: InputDecoration(
+                  hintText: _answerByDefinition ? 'Nhập Tiếng Việt' : 'Nhập thuật ngữ',
+                  filled: true,
+                  fillColor: const Color(0xfff7f9fc),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(18),
+                    borderSide: const BorderSide(color: AppColors.border, width: 1.3),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(18),
+                    borderSide: const BorderSide(color: AppColors.border, width: 1.8),
+                  ),
+                ),
+                onSubmitted: (_) => _submitEssay(),
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: _outlineButton(
+                      text: 'Bỏ qua',
+                      icon: Icons.skip_next_rounded,
+                      onTap: () {
+                        _selectedAnswerMap[card.id] = '';
+                        _correctMap[card.id] = false;
+                        _answeredCards.add(card.id);
+                        if (_currentEssayIndex + 1 >= _quizCards.length) {
+                          setState(() => _finished = true);
+                          _showResultSheet();
+                        } else {
+                          setState(() {
+                            _currentEssayIndex++;
+                            _essayController.clear();
+                          });
+                        }
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _solidButton(
+                      text: 'Tiếp',
+                      icon: Icons.arrow_forward_rounded,
+                      color: AppColors.green,
+                      onTap: _submitEssay,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMultipleChoiceMode() {
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 18, 16, 100),
+      itemCount: _quizCards.length,
+      itemBuilder: (context, index) => _buildQuestionCard(_quizCards[index], index),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Scaffold(
+        backgroundColor: AppColors.bg,
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (_cards.isEmpty) {
+      return Scaffold(
+        backgroundColor: AppColors.bg,
+        appBar: AppBar(
+          backgroundColor: Colors.white,
+          foregroundColor: AppColors.border,
+          title: const Text('Ôn tập'),
+        ),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Text(
+              'Học phần này chưa có thẻ để ôn tập',
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: AppColors.text,
+                fontWeight: FontWeight.w900,
+                fontSize: 18,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      body: SafeArea(
+        child: Stack(
+          children: [
+            Column(
+              children: [
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.9),
+                    border: Border(
+                      bottom: BorderSide(color: AppColors.border.withOpacity(0.12)),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      SmallIcon3DButton(
+                        icon: Icons.arrow_back_rounded,
+                        color: Colors.white,
+                        onTap: () => Navigator.pop(context),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Text(
+                              '$_done / ${_total == 0 ? _cards.length : _total}',
+                              style: const TextStyle(
+                                color: AppColors.text,
+                                fontWeight: FontWeight.w900,
+                                fontSize: 28,
+                              ),
+                            ),
+                            Text(
+                              widget.courseTitle,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: AppColors.muted,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      SmallIcon3DButton(
+                        icon: Icons.tune_rounded,
+                        color: AppColors.yellow,
+                        onTap: _openSetupSheet,
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: _showSetup || _quizCards.isEmpty
+                      ? Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(22),
+                            child: Container(
+                              constraints: const BoxConstraints(maxWidth: 460),
+                              padding: const EdgeInsets.all(22),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(24),
+                                border: Border.all(color: AppColors.border, width: 1.5),
+                                boxShadow: const [
+                                  BoxShadow(
+                                    color: AppColors.border,
+                                    offset: Offset(0, 7),
+                                    blurRadius: 0,
+                                  ),
+                                ],
+                              ),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.school_outlined, color: AppColors.border, size: 56),
+                                  const SizedBox(height: 12),
+                                  const Text(
+                                    'Sẵn sàng ôn tập',
+                                    style: TextStyle(
+                                      color: AppColors.text,
+                                      fontSize: 24,
+                                      fontWeight: FontWeight.w900,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'Có ${_cards.length} thẻ. Chọn kiểu câu hỏi rồi bắt đầu.',
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(
+                                      color: AppColors.muted,
+                                      fontWeight: FontWeight.w700,
+                                      height: 1.35,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 20),
+                                  _solidButton(
+                                    text: 'Thiết lập ôn tập',
+                                    icon: Icons.tune_rounded,
+                                    color: AppColors.green,
+                                    onTap: _openSetupSheet,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        )
+                      : _essay && !_multipleChoice
+                          ? _buildEssayMode()
+                          : _buildMultipleChoiceMode(),
+                ),
+              ],
+            ),
+            if (!_showSetup && _quizCards.isNotEmpty && _multipleChoice)
+              Positioned(
+                left: 14,
+                right: 14,
+                bottom: 14,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.86),
+                    borderRadius: BorderRadius.circular(22),
+                    border: Border.all(color: AppColors.border.withOpacity(0.18)),
+                  ),
+                  child: Row(
+                    children: [
+                      _statChip(text: 'Đúng $_correct', color: AppColors.green),
+                      const SizedBox(width: 8),
+                      _statChip(text: 'Sai $_wrong', color: AppColors.red),
+                      const Spacer(),
+                      _solidButton(
+                        text: _finished ? 'Xem kết quả' : 'Nộp bài',
+                        icon: Icons.flag_rounded,
+                        color: AppColors.yellow,
+                        onTap: _showResultSheet,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+
 // ─── Pronunciation helpers ────────────────────────────────────────────────────
 
 String normalizeText(String s) {
@@ -4838,3 +6090,4 @@ class ParsedDefinition {
     required this.pronunciation,
   });
 }
+
