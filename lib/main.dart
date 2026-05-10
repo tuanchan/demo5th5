@@ -795,13 +795,31 @@ class _HomePageState extends State<HomePage> {
   CourseListItem? selectedHomeCourse;
   final TextEditingController courseSearchController = TextEditingController();
   String courseSortType = "updatedDesc";
+  String courseLanguageFilter = "all";
+
+  List<String> get courseLanguageFilters {
+    final languages = courses
+        .map((course) => course.languageCode.trim())
+        .where((code) => code.isNotEmpty)
+        .toSet()
+        .toList();
+    languages.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    return languages;
+  }
 
   List<CourseListItem> get visibleCourses {
     final keyword = courseSearchController.text.trim().toLowerCase();
     final filtered = courses.where((course) {
+      final courseLanguage = course.languageCode.trim();
+      final matchesLanguage = courseLanguageFilter == "all" ||
+          courseLanguage.toLowerCase() == courseLanguageFilter.toLowerCase();
+
+      if (!matchesLanguage) return false;
       if (keyword.isEmpty) return true;
+
       return course.title.toLowerCase().contains(keyword) ||
-          course.languageCode.toLowerCase().contains(keyword);
+          courseLanguage.toLowerCase().contains(keyword) ||
+          languageNameFromCode(courseLanguage).toLowerCase().contains(keyword);
     }).toList();
 
     switch (courseSortType) {
@@ -1011,6 +1029,14 @@ Future<void> loadCourses() async {
 
     setState(() {
       courses = rows.map((e) => CourseListItem.fromMap(e)).toList();
+      final currentLanguages = courses
+          .map((course) => course.languageCode.trim().toLowerCase())
+          .where((code) => code.isNotEmpty)
+          .toSet();
+      if (courseLanguageFilter != "all" &&
+          !currentLanguages.contains(courseLanguageFilter.toLowerCase())) {
+        courseLanguageFilter = "all";
+      }
       if (selectedHomeCourse != null) {
         final stillExists = courses.where((e) => e.id == selectedHomeCourse!.id);
         selectedHomeCourse = stillExists.isEmpty ? null : stillExists.first;
@@ -1602,6 +1628,53 @@ Future<void> confirmDeleteCourse(CourseListItem course) async {
                                 width: 48,
                                 height: 42,
                                 child: PopupMenuButton<String>(
+                                  tooltip: "Lọc ngôn ngữ",
+                                  initialValue: courseLanguageFilter,
+                                  onSelected: (value) {
+                                    setState(() {
+                                      courseLanguageFilter = value;
+                                    });
+                                  },
+                                  itemBuilder: (_) => [
+                                    PopupMenuItem(value: "all", child: Text("Tất cả ngôn ngữ")),
+                                    ...courseLanguageFilters.map(
+                                      (code) => PopupMenuItem(
+                                        value: code,
+                                        child: Text("${languageNameFromCode(code)} • $code"),
+                                      ),
+                                    ),
+                                  ],
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      color: courseLanguageFilter == "all"
+                                          ? AppColors.green
+                                          : AppColors.blue,
+                                      borderRadius: BorderRadius.circular(14),
+                                      border: Border.all(
+                                        color: Colors.white,
+                                        width: 1.2,
+                                      ),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black,
+                                          offset: Offset(0, 3),
+                                          blurRadius: 0,
+                                        ),
+                                      ],
+                                    ),
+                                    child: Icon(
+                                      Icons.translate_rounded,
+                                      color: AppColors.border,
+                                      size: 22,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              SizedBox(width: 8),
+                              SizedBox(
+                                width: 48,
+                                height: 42,
+                                child: PopupMenuButton<String>(
                                   tooltip: "Sắp xếp học phần",
                                   initialValue: courseSortType,
                                   onSelected: (value) {
@@ -1664,7 +1737,9 @@ Future<void> confirmDeleteCourse(CourseListItem course) async {
           : visibleCourses.isEmpty
               ? Center(
                   child: Text(
-                    "Không tìm thấy học phần",
+                    courseLanguageFilter == "all"
+                        ? "Không tìm thấy học phần"
+                        : "Không có học phần ngôn ngữ này",
                     style: TextStyle(
                       color: AppColors.muted,
                       fontSize: 15,
@@ -3092,7 +3167,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
   Widget _buildOverviewGrid(StatisticsData data) {
     return GridView.count(
       crossAxisCount: 2,
-      childAspectRatio: 1.42,
+      childAspectRatio: 1.22,
       crossAxisSpacing: 12,
       mainAxisSpacing: 12,
       padding: EdgeInsets.zero,
@@ -4446,11 +4521,7 @@ class FlashCardsPage extends StatefulWidget {
   State<FlashCardsPage> createState() => _FlashCardsPageState();
 }
 
-class _FlashCardsPageState extends State<FlashCardsPage>
-    with TickerProviderStateMixin {
-  late final AnimationController flipController;
-  late final AnimationController ghostController;
-
+class _FlashCardsPageState extends State<FlashCardsPage> {
   List<CourseListItem> courseList = [];
   List<StudyCardItem> allCards = [];
   List<int> visibleOrder = [];
@@ -4463,13 +4534,15 @@ class _FlashCardsPageState extends State<FlashCardsPage>
   bool progressTracking = false;
   bool shuffleEnabled = false;
   bool starredOnly = false;
+  bool autoPlayAudio = false;
   bool isFlipped = false;
-  bool ghostReverse = false;
   bool showCompletion = false;
 
-  String ghostText = '';
   double cardDragDx = 0;
-bool isDraggingCard = false;
+  double cardDragDy = 0;
+  double cardDragStartLocalY = 0;
+  double cardDragHeight = 1;
+  bool isDraggingCard = false;
 
   int progressKnownCount = 0;
   int progressUnknownCount = 0;
@@ -4497,24 +4570,12 @@ bool isDraggingCard = false;
   void initState() {
     super.initState();
 
-    flipController = AnimationController(
-      vsync: this,
-      duration: Duration(milliseconds: 220),
-    );
-
-    ghostController = AnimationController(
-      vsync: this,
-      duration: Duration(milliseconds: 600),
-    );
-
     loadInitialData();
   }
 
   @override
   void dispose() {
     _finishStudySession();
-    flipController.dispose();
-    ghostController.dispose();
     super.dispose();
   }
 
@@ -4532,6 +4593,7 @@ bool isDraggingCard = false;
     final savedStarredOnly = await AppSettingsStore.getBool('flash.starredOnly');
     final savedShuffle = await AppSettingsStore.getBool('flash.shuffleEnabled');
     final savedProgress = await AppSettingsStore.getBool('flash.progressTracking');
+    final savedAutoPlay = await AppSettingsStore.getBool('flash.autoPlayAudio');
 
     if (!mounted) return;
 
@@ -4539,6 +4601,7 @@ bool isDraggingCard = false;
       starredOnly = savedStarredOnly ?? starredOnly;
       shuffleEnabled = savedShuffle ?? shuffleEnabled;
       progressTracking = savedProgress ?? progressTracking;
+      autoPlayAudio = savedAutoPlay ?? autoPlayAudio;
     });
   }
 
@@ -4547,6 +4610,7 @@ bool isDraggingCard = false;
       AppSettingsStore.setBool('flash.starredOnly', starredOnly),
       AppSettingsStore.setBool('flash.shuffleEnabled', shuffleEnabled),
       AppSettingsStore.setBool('flash.progressTracking', progressTracking),
+      AppSettingsStore.setBool('flash.autoPlayAudio', autoPlayAudio),
     ]);
   }
 
@@ -4686,12 +4750,12 @@ bool isDraggingCard = false;
         progressUnknownCount = 0;
         _progressHistory.clear();
         _sessionUnknownCardIds.clear();
-        flipController.value = 0;
         rebuildVisibleOrder(resetPosition: true);
         isLoading = false;
       });
 
       await _startStudySessionIfNeeded();
+      _playAutoAudioIfNeeded();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -4728,34 +4792,34 @@ bool isDraggingCard = false;
 
   void resetFlip() {
     isFlipped = false;
-    flipController.reverse();
   }
 
-  Future<void> toggleFlip() async {
+  void toggleFlip() {
     if (currentCard == null) return;
 
     setState(() {
       isFlipped = !isFlipped;
     });
-
-    if (isFlipped) {
-      await flipController.forward();
-    } else {
-      await flipController.reverse();
-    }
   }
 
-  Future<void> moveCard(int delta) async {
+  Future<void> moveCard(int delta, {bool playSwipeEffect = true, bool resetSwipeState = false}) async {
     if (currentCard == null) return;
 
     if (progressTracking) {
-      await answerProgress(known: delta > 0);
+      await answerProgress(known: delta > 0, playSwipeEffect: playSwipeEffect, resetSwipeState: resetSwipeState);
       return;
     }
 
     final nextPos = currentPos + delta;
 
     if (nextPos < 0) {
+      if (resetSwipeState) {
+        setState(() {
+          isDraggingCard = false;
+          cardDragDx = 0;
+          cardDragDy = 0;
+        });
+      }
       showFlashMessage("Đang ở thẻ đầu tiên");
       return;
     }
@@ -4763,22 +4827,30 @@ bool isDraggingCard = false;
     if (nextPos >= visibleOrder.length) {
       setState(() {
         showCompletion = true;
+        if (resetSwipeState) {
+          isDraggingCard = false;
+          cardDragDx = 0;
+          cardDragDy = 0;
+        }
       });
       return;
     }
-
-    playGhost(delta < 0);
 
     setState(() {
       currentPos = nextPos;
       isFlipped = false;
       showCompletion = false;
+      if (resetSwipeState) {
+        isDraggingCard = false;
+        cardDragDx = 0;
+        cardDragDy = 0;
+      }
     });
 
-    flipController.value = 0;
+    _playAutoAudioIfNeeded();
   }
 
-  Future<void> answerProgress({required bool known}) async {
+  Future<void> answerProgress({required bool known, bool playSwipeEffect = true, bool resetSwipeState = false}) async {
     final card = currentCard;
     if (card == null) return;
 
@@ -4788,9 +4860,6 @@ bool isDraggingCard = false;
     final studyResultId = await _insertFlashStudyResult(card: card, known: known);
     final nextPos = currentPos + 1;
     final isDone = nextPos >= visibleOrder.length;
-
-    ghostController.stop();
-    ghostController.reset();
 
     setState(() {
       _progressHistory.add(
@@ -4805,14 +4874,12 @@ bool isDraggingCard = false;
       );
 
       if (known) {
-  progressKnownCount++;
-} else {
-  progressUnknownCount++;
-  _sessionUnknownCardIds.add(card.id);
-}
+        progressKnownCount++;
+      } else {
+        progressUnknownCount++;
+        _sessionUnknownCardIds.add(card.id);
+      }
 
-      ghostReverse = false;
-      ghostText = card.term;
       isFlipped = false;
 
       if (isDone) {
@@ -4821,28 +4888,23 @@ bool isDraggingCard = false;
         currentPos = nextPos;
         showCompletion = false;
       }
+
+      if (resetSwipeState) {
+        isDraggingCard = false;
+        cardDragDx = 0;
+        cardDragDy = 0;
+      }
     });
 
     if (isDone) {
       await _finishStudySession();
     } else {
-      ghostController.forward();
+      _playAutoAudioIfNeeded();
     }
 
-    flipController.value = 0;
   }
 
-  void playGhost(bool reverse) {
-    ghostController.stop();
-    ghostController.reset();
-
-    setState(() {
-      ghostReverse = reverse;
-      ghostText = currentCard?.term ?? '';
-    });
-
-    ghostController.forward();
-  }
+  void playGhost(bool reverse) {}
 
   Future<void> toggleStar() async {
     final card = currentCard;
@@ -4945,6 +5007,11 @@ bool isDraggingCard = false;
       showFlashMessage("Không phát được âm thanh");
       debugPrint("PLAY TTS ERROR: $e");
     }
+  }
+
+  void _playAutoAudioIfNeeded() {
+    if (!autoPlayAudio || currentCard == null || showCompletion) return;
+    Future.microtask(playCurrentCardAudio);
   }
 
   Future<void> openEditCardDialog() async {
@@ -5251,6 +5318,14 @@ bool isDraggingCard = false;
     }
   }
 
+  void toggleAutoPlayAudio() {
+    setState(() {
+      autoPlayAudio = !autoPlayAudio;
+    });
+    saveFlashSettings();
+    _playAutoAudioIfNeeded();
+  }
+
   Future<void> restartStudy() async {
   await _finishStudySession();
   setState(() {
@@ -5295,7 +5370,6 @@ Future<void> restartUnknownCards() async {
     _progressHistory.clear();
     _sessionUnknownCardIds.clear();
     isFlipped = false;
-    flipController.value = 0;
   });
   await _startStudySessionIfNeeded();
 }
@@ -5326,7 +5400,6 @@ Future<void> resetMemorizedCards() async {
       showCompletion = false;
       isFlipped = false;
       rebuildVisibleOrder(resetPosition: true);
-      flipController.value = 0;
     });
 
     await _finishStudySession();
@@ -5387,7 +5460,6 @@ void exitFlashCards() {
 
     await _deleteFlashStudyResult(undoItem.studyResultId, undoItem.known);
 
-    flipController.value = 0;
   }
 
   void openMicOverlay() {
@@ -5522,6 +5594,11 @@ void exitFlashCards() {
                       title: "Theo dõi tiến độ",
                       value: progressTracking,
                       onTap: toggleProgressMode,
+                    ),
+                    settingRow(
+                      title: "Tự động phát âm",
+                      value: autoPlayAudio,
+                      onTap: toggleAutoPlayAudio,
                     ),
                     if (progressTracking) ...[
                       SizedBox(height: 12),
@@ -5660,11 +5737,7 @@ void exitFlashCards() {
                                             child: Stack(
   children: [
     buildPeekCard(),
-
     buildFlashCard(card!),
-
-    // hiệu ứng bay/lật nằm trên thẻ chính
-    buildGhostCard(),
 
     if (showCompletion)
       buildCompletionOverlay(),
@@ -5796,173 +5869,146 @@ void exitFlashCards() {
   }
 
   StudyCardItem? getPeekCard() {
-  if (visibleOrder.isEmpty) return null;
+    if (visibleOrder.isEmpty || cardDragDx.abs() < 1) return null;
 
-  int peekPos;
+    final peekPos = cardDragDx > 0 ? currentPos - 1 : currentPos + 1;
+    if (peekPos < 0 || peekPos >= visibleOrder.length) return null;
 
-  if (cardDragDx > 0) {
-    peekPos = currentPos - 1;
-  } else {
-    peekPos = currentPos + 1;
+    final realIndex = visibleOrder[peekPos];
+    if (realIndex < 0 || realIndex >= allCards.length) return null;
+
+    return allCards[realIndex];
   }
 
-  if (peekPos < 0 || peekPos >= visibleOrder.length) return null;
+  Widget buildPeekCard() {
+    if (!isDraggingCard || cardDragDx.abs() < 1) {
+      return SizedBox.shrink();
+    }
 
-  final realIndex = visibleOrder[peekPos];
-  if (realIndex < 0 || realIndex >= allCards.length) return null;
+    final peekCard = getPeekCard();
+    if (peekCard == null) return SizedBox.shrink();
 
-  return allCards[realIndex];
-}
-
-Widget buildPeekCard() {
-  if (!isDraggingCard || cardDragDx.abs() < 1) {
-    return SizedBox.shrink();
-  }
-
-  final peekCard = getPeekCard();
-  if (peekCard == null) return SizedBox.shrink();
-
-  final dragPercent = (cardDragDx.abs() / 180).clamp(0.0, 1.0);
-
-  return IgnorePointer(
-    child: Opacity(
-      opacity: dragPercent,
-      child: Transform.translate(
-        offset: Offset(
-          cardDragDx > 0 ? -22 * (1 - dragPercent) : 22 * (1 - dragPercent),
-          18 * (1 - dragPercent),
-        ),
-        child: Transform.scale(
-          scale: 0.94 + (0.04 * dragPercent),
-          child: buildCardFace(
-            label: cardDragDx > 0 ? "Thẻ trước" : "Thẻ sau",
-            mainText: peekCard.term,
-            subText: peekCard.pronunciation,
-            isBack: false,
-            isStarred: peekCard.isFavorite,
-          ),
-        ),
+    return IgnorePointer(
+      child: buildCardFace(
+        label: cardDragDx > 0 ? "Thẻ trước" : "Thẻ sau",
+        mainText: peekCard.term,
+        subText: peekCard.pronunciation,
+        isBack: false,
+        isStarred: peekCard.isFavorite,
       ),
-    ),
-  );
-}
+    );
+  }
 
-Future<void> finishSwipeCard(int delta) async {
-  final double endDx = delta > 0 ? -420.0 : 420.0;
+  Future<void> finishSwipeCard(int delta) async {
+    await moveCard(delta, playSwipeEffect: false, resetSwipeState: true);
+  }
 
-  setState(() {
-    isDraggingCard = false;
-    cardDragDx = endDx;
-  });
+  Widget buildFlipCardFace(StudyCardItem card) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(end: isFlipped ? math.pi : 0),
+      duration: Duration(milliseconds: 280),
+      curve: Curves.easeOutCubic,
+      builder: (context, value, child) {
+        final showBack = value > math.pi / 2;
+        final face = showBack
+            ? buildCardFace(
+                label: "Mặt sau",
+                mainText: card.definition,
+                subText: card.pronunciation,
+                isBack: true,
+                isStarred: card.isFavorite,
+              )
+            : buildCardFace(
+                label: "Mặt trước",
+                mainText: card.term,
+                subText: card.pronunciation,
+                isBack: false,
+                isStarred: card.isFavorite,
+              );
 
-  await Future.delayed(Duration(milliseconds: 180));
-  if (!mounted) return;
-
-  setState(() {
-    cardDragDx = 0;
-  });
-
-  await moveCard(delta);
-}
+        return Transform(
+          alignment: Alignment.center,
+          transform: Matrix4.identity()
+            ..setEntry(3, 2, 0.0012)
+            ..rotateY(showBack ? value - math.pi : value),
+          child: face,
+        );
+      },
+    );
+  }
 
   Widget buildFlashCard(StudyCardItem card) {
-  return GestureDetector(
-    behavior: HitTestBehavior.opaque,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final cardWidth = constraints.maxWidth <= 0 ? 1.0 : constraints.maxWidth;
+        final cardHeight = constraints.maxHeight <= 0 ? 1.0 : constraints.maxHeight;
+        final verticalTouchFactor =
+            ((cardDragStartLocalY / cardDragHeight) - 0.5).clamp(-0.5, 0.5) * 2;
+        final dragPercent = (cardDragDx / cardWidth).clamp(-1.0, 1.0);
+        final rotate = dragPercent * 0.35 * verticalTouchFactor;
 
-    onTap: () {
-      if (cardDragDx.abs() < 6) {
-        toggleFlip();
-      }
-    },
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () {
+            if (cardDragDx.abs() < 6 && cardDragDy.abs() < 6) {
+              toggleFlip();
+            }
+          },
+          onPanStart: (details) {
+            setState(() {
+              isDraggingCard = true;
+              cardDragDx = 0;
+              cardDragDy = 0;
+              cardDragHeight = cardHeight;
+              cardDragStartLocalY = details.localPosition.dy.clamp(0.0, cardHeight);
+            });
+          },
+          onPanUpdate: (details) {
+            setState(() {
+              cardDragDx = (cardDragDx + details.delta.dx).clamp(-cardWidth * 0.86, cardWidth * 0.86);
+              cardDragDy = (cardDragDy + details.delta.dy).clamp(-cardHeight * 0.34, cardHeight * 0.34);
+            });
+          },
+          onPanEnd: (details) async {
+            final velocityX = details.velocity.pixelsPerSecond.dx;
+            final shouldNext = cardDragDx < -cardWidth * 0.28 || velocityX < -650;
+            final shouldPrev = cardDragDx > cardWidth * 0.28 || velocityX > 650;
 
-    onHorizontalDragStart: (_) {
-      ghostController.stop();
+            if (shouldNext) {
+              await finishSwipeCard(1);
+              return;
+            }
 
-      setState(() {
-        isDraggingCard = true;
-        cardDragDx = 0;
-      });
-    },
+            if (shouldPrev) {
+              await finishSwipeCard(-1);
+              return;
+            }
 
-    onHorizontalDragUpdate: (details) {
-  setState(() {
-    cardDragDx = (cardDragDx + details.delta.dx).clamp(-260.0, 260.0);
-  });
-},
+            setState(() {
+              isDraggingCard = false;
+              cardDragDx = 0;
+              cardDragDy = 0;
+            });
+          },
+          onPanCancel: () {
+            setState(() {
+              isDraggingCard = false;
+              cardDragDx = 0;
+              cardDragDy = 0;
+            });
+          },
+          child: Transform.translate(
+            offset: Offset(cardDragDx, cardDragDy),
+            child: Transform.rotate(
+              angle: rotate,
+              child: buildFlipCardFace(card),
+            ),
+          ),
+        );
+      },
+    );
+  }
 
-    onHorizontalDragEnd: (details) async {
-      final velocity = details.primaryVelocity ?? 0;
-      final shouldNext = cardDragDx < -110 || velocity < -450;
-      final shouldPrev = cardDragDx > 110 || velocity > 450;
-
-      if (shouldNext) {
-        await finishSwipeCard(1);
-        return;
-      }
-
-      if (shouldPrev) {
-        await finishSwipeCard(-1);
-        return;
-      }
-
-      setState(() {
-        isDraggingCard = false;
-        cardDragDx = 0;
-      });
-    },
-
-    onHorizontalDragCancel: () {
-      setState(() {
-        isDraggingCard = false;
-        cardDragDx = 0;
-      });
-    },
-
-    child: AnimatedContainer(
-      duration: isDraggingCard
-          ? Duration.zero
-          : Duration(milliseconds: 180),
-      curve: Curves.easeOutBack,
-      transformAlignment: Alignment.center,
-      transform: Matrix4.identity()
-        ..translate(cardDragDx)
-        ..rotateZ(cardDragDx * 0.0009),
-      child: AnimatedBuilder(
-        animation: flipController,
-        builder: (context, child) {
-          final angle = flipController.value * math.pi;
-          final showBack = angle > math.pi / 2;
-
-          return Transform(
-            alignment: Alignment.center,
-            transform: Matrix4.identity()
-              ..setEntry(3, 2, 0.0012)
-              ..rotateY(angle),
-            child: showBack
-                ? Transform(
-                    alignment: Alignment.center,
-                    transform: Matrix4.identity()..rotateY(math.pi),
-                    child: buildCardFace(
-                      label: "Mặt sau",
-                      mainText: card.definition,
-                      subText: card.pronunciation,
-                      isBack: true,
-                      isStarred: card.isFavorite,
-                    ),
-                  )
-                : buildCardFace(
-                    label: "Mặt trước",
-                    mainText: card.term,
-                    subText: card.pronunciation,
-                    isBack: false,
-                    isStarred: card.isFavorite,
-                  ),
-          );
-        },
-      ),
-    ),
-  );
-}
   Widget buildCardFace({
     required String label,
     required String mainText,
@@ -6048,26 +6094,22 @@ Future<void> finishSwipeCard(int delta) async {
                 ),
               ),
             ),
-            AnimatedSwitcher(
-              duration: Duration(milliseconds: 180),
-              child: subText.trim().isEmpty
-                  ? SizedBox(height: 48)
-                  : Container(
-                      key: ValueKey(subText),
-                      height: 56,
-                      alignment: Alignment.center,
-                      padding: EdgeInsets.symmetric(horizontal: 20),
-                      child: Text(
-                        subText,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: AppColors.muted,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
-                        ),
+            subText.trim().isEmpty
+                ? SizedBox(height: 48)
+                : Container(
+                    height: 56,
+                    alignment: Alignment.center,
+                    padding: EdgeInsets.symmetric(horizontal: 20),
+                    child: Text(
+                      subText,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: AppColors.muted,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
-            ),
+                  ),
           ],
         ),
       ),
@@ -6098,66 +6140,6 @@ Future<void> finishSwipeCard(int delta) async {
     );
   }
 
-  Widget buildGhostCard() {
-    return IgnorePointer(
-      child: AnimatedBuilder(
-        animation: ghostController,
-        builder: (context, child) {
-          final t = ghostController.value;
-          if (t == 0 || t == 1) return SizedBox.shrink();
-
-          final direction = ghostReverse ? 1.0 : -1.0;
-          final dx = direction * (60 + 760 * t);
-          final dy = -28 * math.sin(t * math.pi);
-          final rot = direction * math.pi * t;
-          final opacity = (1 - t).clamp(0.0, 1.0);
-          final scale = 1 - (0.5 * t);
-
-          return Opacity(
-            opacity: opacity,
-            child: Transform.translate(
-              offset: Offset(dx, dy),
-              child: Transform.scale(
-                scale: scale,
-                child: Transform(
-                  alignment: Alignment.center,
-                  transform: Matrix4.identity()
-                    ..setEntry(3, 2, 0.0012)
-                    ..rotateY(rot),
-                  child: Container(
-                    width: double.infinity,
-                    height: double.infinity,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(22),
-                      border: Border.all(color: AppColors.border, width: 1.3),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Color(0x26000000),
-                          offset: Offset(0, 8),
-                          blurRadius: 24,
-                        ),
-                      ],
-                    ),
-                    child: Text(
-                      ghostText,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: AppColors.text,
-                        fontSize: 44,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
 
   Widget buildCompletionOverlay() {
   return Positioned.fill(
@@ -6697,6 +6679,29 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
         .trim();
   }
 
+  List<String> _acceptedEssayAnswersOf(StudyCardItem card) {
+    final rawAnswer = _answerOf(card);
+    final parts = rawAnswer
+        .split(RegExp(r'[,/]+'))
+        .map(_normalizeAnswer)
+        .where((e) => e.isNotEmpty)
+        .toSet()
+        .toList();
+
+    final fullAnswer = _normalizeAnswer(rawAnswer);
+    if (fullAnswer.isNotEmpty && !parts.contains(fullAnswer)) {
+      parts.add(fullAnswer);
+    }
+
+    return parts;
+  }
+
+  bool _isEssayAnswerCorrect(StudyCardItem card, String typed) {
+    final answer = _normalizeAnswer(typed);
+    if (answer.isEmpty) return false;
+    return _acceptedEssayAnswersOf(card).contains(answer);
+  }
+
   List<String> _buildChoices(StudyCardItem target) {
     final correct = _optionLabelOf(target);
     final wrongPool = _cards
@@ -7077,31 +7082,44 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
     _scrollToFirstWrong();
   }
 
-  Future<void> _submitEssay() async {
+  void _moveEssayPrevious() {
+    if (_currentEssayIndex <= 0 || _finished) return;
+
+    final previousIndex = _currentEssayIndex - 1;
+    final previousCard = _quizCards[previousIndex];
+
+    setState(() {
+      _currentEssayIndex = previousIndex;
+      _essayController.text = _selectedAnswerMap[previousCard.id] ?? '';
+      _essayQuestionStartedAt = DateTime.now();
+    });
+  }
+
+  Future<void> _submitEssay({bool allowEmptyAsSkip = false}) async {
     if (_quizCards.isEmpty) return;
     final card = _quizCards[_currentEssayIndex];
     final typed = _essayController.text.trim();
 
-    if (typed.isEmpty) {
+    if (typed.isEmpty && !allowEmptyAsSkip) {
       _showMessage('Nhập câu trả lời trước');
       return;
     }
 
-    final correct = _normalizeAnswer(_answerOf(card));
-    final answer = _normalizeAnswer(typed);
-    final ok = answer == correct;
+    final ok = _isEssayAnswerCorrect(card, typed);
     final wasLast = _currentEssayIndex + 1 >= _quizCards.length;
 
     setState(() {
       _answeredCards.add(card.id);
       _correctMap[card.id] = ok;
       _selectedAnswerMap[card.id] = typed;
-      _essayController.clear();
 
       if (wasLast) {
         _finished = true;
+        _essayController.clear();
       } else {
         _currentEssayIndex++;
+        final nextCard = _quizCards[_currentEssayIndex];
+        _essayController.text = _selectedAnswerMap[nextCard.id] ?? '';
         _essayQuestionStartedAt = DateTime.now();
       }
     });
@@ -7948,45 +7966,18 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
                 children: [
                   Expanded(
                     child: _outlineButton(
-                      text: 'Bỏ qua',
-                      icon: Icons.skip_next_rounded,
-                      onTap: () async {
-                        final wasLast = _currentEssayIndex + 1 >= _quizCards.length;
-
-                        setState(() {
-                          _selectedAnswerMap[card.id] = '';
-                          _correctMap[card.id] = false;
-                          _answeredCards.add(card.id);
-                          _essayController.clear();
-
-                          if (wasLast) {
-                            _finished = true;
-                          } else {
-                            _currentEssayIndex++;
-                            _essayQuestionStartedAt = DateTime.now();
-                          }
-                        });
-
-                        await _recordStudyResult(
-                          card: card,
-                          answerText: '',
-                          isCorrect: false,
-                        );
-
-                        if (_finished) {
-                          await _finishStudySession();
-                          _showResultSheet();
-                        }
-                      },
+                      text: 'Trước',
+                      icon: Icons.arrow_back_rounded,
+                      onTap: _currentEssayIndex <= 0 ? () {} : _moveEssayPrevious,
                     ),
                   ),
                   SizedBox(width: 10),
                   Expanded(
                     child: _solidButton(
-                      text: 'Tiếp',
+                      text: 'Sau',
                       icon: Icons.arrow_forward_rounded,
                       color: AppColors.green,
-                      onTap: _submitEssay,
+                      onTap: () => _submitEssay(allowEmptyAsSkip: true),
                     ),
                   ),
                 ],
