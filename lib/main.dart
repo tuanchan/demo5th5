@@ -230,8 +230,11 @@ class TtsAudioCache {
   FlutterTts _flutterTts = FlutterTts();
   bool _ready = false;
 
+  bool get _disableSoundOnWindows => Platform.isWindows;
+
   bool get _canCacheAudioFile =>
-      Platform.isAndroid || Platform.isIOS || Platform.isMacOS;
+      !_disableSoundOnWindows &&
+      (Platform.isAndroid || Platform.isIOS || Platform.isMacOS);
 
   Future<void> _resetTtsEngine() async {
     try {
@@ -445,6 +448,8 @@ class TtsAudioCache {
     required String text,
     required String languageCode,
   }) async {
+    if (_disableSoundOnWindows) return;
+
     final value = text.trim();
     if (value.isEmpty) return;
 
@@ -479,6 +484,8 @@ class TtsAudioCache {
     required String languageCode,
     required int courseId,
   }) async {
+    if (_disableSoundOnWindows) return;
+
     final value = text.trim();
     if (value.isEmpty) return;
 
@@ -535,7 +542,7 @@ OverlayEntry? _activeAppToastEntry;
 void showAppToast(
   BuildContext context,
   String text, {
-  IconData icon = Icons.notifications_rounded,
+  IconData? icon,
   Duration duration = const Duration(milliseconds: 2200),
 }) {
   final overlay = Overlay.maybeOf(context, rootOverlay: true);
@@ -565,7 +572,7 @@ void showAppToast(
 
 class _SlideToast extends StatefulWidget {
   final String text;
-  final IconData icon;
+  final IconData? icon;
   final Duration duration;
   final VoidCallback onDismissed;
 
@@ -665,17 +672,6 @@ class _SlideToastState extends State<_SlideToast> with SingleTickerProviderState
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      color: AppColors.green,
-                      borderRadius: BorderRadius.circular(13),
-                      border: Border.all(color: fg.withOpacity(0.2)),
-                    ),
-                    child: Icon(widget.icon, color: AppColors.readableOn(AppColors.green), size: 20),
-                  ),
-                  SizedBox(width: 10),
                   Expanded(
                     child: Text(
                       widget.text,
@@ -689,8 +685,6 @@ class _SlideToastState extends State<_SlideToast> with SingleTickerProviderState
                       ),
                     ),
                   ),
-                  SizedBox(width: 8),
-                  Icon(Icons.close_rounded, color: fg.withOpacity(0.75), size: 18),
                 ],
               ),
             ),
@@ -935,6 +929,7 @@ Future<void> openReviewPractice([CourseListItem? course]) async {
       builder: (_) => ReviewPracticePage(
         courseId: targetCourse!.id,
         courseTitle: targetCourse.title,
+        courseLanguageCode: targetCourse.languageCode,
       ),
     ),
   );
@@ -1554,8 +1549,6 @@ Future<void> confirmDeleteCourse(CourseListItem course) async {
                         children: [
                           Row(
                             children: [
-                              Icon(Icons.style_outlined, color: Colors.white, size: 26),
-                              SizedBox(width: 10),
                               Expanded(
                                 child: Text(
                                   "List Card",
@@ -1590,14 +1583,9 @@ Future<void> confirmDeleteCourse(CourseListItem course) async {
                                         color: AppColors.muted.withOpacity(0.75),
                                         fontWeight: FontWeight.w700,
                                       ),
-                                      prefixIcon: Icon(
-                                        Icons.search,
-                                        size: 20,
-                                        color: AppColors.border,
-                                      ),
                                       filled: true,
                                       fillColor: AppColors.panel,
-                                      contentPadding: EdgeInsets.zero,
+                                      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 0),
                                       border: OutlineInputBorder(
                                         borderRadius: BorderRadius.circular(14),
                                         borderSide: BorderSide(
@@ -1625,7 +1613,7 @@ Future<void> confirmDeleteCourse(CourseListItem course) async {
                               ),
                               SizedBox(width: 8),
                               SizedBox(
-                                width: 48,
+                                width: 74,
                                 height: 42,
                                 child: PopupMenuButton<String>(
                                   tooltip: "Lọc ngôn ngữ",
@@ -1662,17 +1650,19 @@ Future<void> confirmDeleteCourse(CourseListItem course) async {
                                         ),
                                       ],
                                     ),
-                                    child: Icon(
-                                      Icons.translate_rounded,
-                                      color: AppColors.border,
-                                      size: 22,
+                                    child: Center(
+                                      child: Icon(
+                                        Icons.translate_rounded,
+                                        size: 20,
+                                        color: AppColors.border,
+                                      ),
                                     ),
                                   ),
                                 ),
                               ),
                               SizedBox(width: 8),
                               SizedBox(
-                                width: 48,
+                                width: 72,
                                 height: 42,
                                 child: PopupMenuButton<String>(
                                   tooltip: "Sắp xếp học phần",
@@ -1705,10 +1695,12 @@ Future<void> confirmDeleteCourse(CourseListItem course) async {
                                         ),
                                       ],
                                     ),
-                                    child: Icon(
-                                      Icons.tune_rounded,
-                                      color: AppColors.border,
-                                      size: 23,
+                                    child: Center(
+                                      child: Icon(
+                                        Icons.tune_rounded,
+                                        size: 22,
+                                        color: AppColors.border,
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -1823,27 +1815,11 @@ Future<void> confirmDeleteCourse(CourseListItem course) async {
                             itemBuilder: (_) => [
                               PopupMenuItem(
                                 value: "edit",
-                                child: Row(
-                                  children: [
-                                    Icon(Icons.edit, size: 18),
-                                    SizedBox(width: 8),
-                                    Text("Sửa"),
-                                  ],
-                                ),
+                                child: Text("Sửa"),
                               ),
                               PopupMenuItem(
                                 value: "delete",
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      Icons.delete,
-                                      size: 18,
-                                      color: Colors.red,
-                                    ),
-                                    SizedBox(width: 8),
-                                    Text("Xóa"),
-                                  ],
-                                ),
+                                child: Text("Xóa"),
                               ),
                             ],
                           ),
@@ -1862,10 +1838,9 @@ Padding(
       Expanded(
         child: SizedBox(
           height: 46,
-          child: ElevatedButton.icon(
+          child: ElevatedButton(
             onPressed: openCreateCourse,
-            icon: Icon(Icons.add),
-            label: Text("Thêm học phần"),
+            child: Text("Thêm học phần"),
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.yellow,
               foregroundColor: AppColors.buttonInk,
@@ -1961,25 +1936,9 @@ Padding(
                     ),
                   ),
                   IconButton(
-                    onPressed: () {},
-                    icon: Icon(
-                      Icons.home,
-                      size: 30,
-                      color: AppColors.text,
-                    ),
-                  ),
-                  IconButton(
                     onPressed: openSettingsPage,
                     icon: Icon(
                       Icons.settings_rounded,
-                      size: 30,
-                      color: AppColors.muted,
-                    ),
-                  ),
-                  IconButton(
-                    onPressed: () {},
-                    icon: Icon(
-                      Icons.person_outline,
                       size: 30,
                       color: AppColors.muted,
                     ),
@@ -2426,26 +2385,9 @@ class _SettingsPageState extends State<SettingsPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: AppColors.green,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: AppColors.border, width: 1.2),
-                ),
-                child: Icon(icon, color: AppColors.border),
-              ),
-              SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  title,
-                  style: TextStyle(color: AppColors.text, fontSize: 18, fontWeight: FontWeight.w900),
-                ),
-              ),
-            ],
+          Text(
+            title,
+            style: TextStyle(color: AppColors.text, fontSize: 18, fontWeight: FontWeight.w900),
           ),
           SizedBox(height: 14),
           child,
@@ -2470,10 +2412,8 @@ class _SettingsPageState extends State<SettingsPage> {
         ),
         child: Row(
           children: [
-            Icon(icon, color: AppColors.border),
-            SizedBox(width: 10),
             Expanded(child: Text(text, style: TextStyle(color: AppColors.text, fontWeight: FontWeight.w900))),
-            if (active) Icon(Icons.check_circle_rounded, color: AppColors.border),
+            if (active) Text("Đang chọn", style: TextStyle(color: AppColors.text, fontSize: 12, fontWeight: FontWeight.w900)),
           ],
         ),
       ),
@@ -2495,8 +2435,6 @@ class _SettingsPageState extends State<SettingsPage> {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: AppColors.border),
-            SizedBox(width: 7),
             Flexible(child: Text(text, textAlign: TextAlign.center, style: TextStyle(color: AppColors.text, fontWeight: FontWeight.w900))),
           ],
         ),
@@ -3198,14 +3136,12 @@ class _StatisticsPageState extends State<StatisticsPage> {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Container(
-            width: 42,
-            height: 42,
+            width: 46,
+            height: 6,
             decoration: BoxDecoration(
               color: color,
-              borderRadius: BorderRadius.circular(15),
-              border: Border.all(color: AppColors.border, width: 1.2),
+              borderRadius: BorderRadius.circular(99),
             ),
-            child: Icon(icon, color: AppColors.border, size: 23),
           ),
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -3802,7 +3738,9 @@ String getLanguageCode() {
 ParsedDefinition parseDefinitionAndPronunciation(String raw) {
   final text = raw.trim();
 
-  final regex = RegExp(r'^(.*?)\s*\(([^()]*)\)\s*$');
+  // Nhận phiên âm đặt trong ngoặc cuối dòng.
+  // Fix IPA có ngoặc con như: [ˈɑːftə(r)]
+  final regex = RegExp(r'^(.*?)\s*\((.*)\)\s*$');
   final match = regex.firstMatch(text);
 
   if (match == null) {
@@ -3812,13 +3750,21 @@ ParsedDefinition parseDefinitionAndPronunciation(String raw) {
     );
   }
 
+  final definition = match.group(1)?.trim() ?? '';
+  final pronunciation = match.group(2)?.trim() ?? '';
+
+  if (definition.isEmpty || pronunciation.isEmpty) {
+    return ParsedDefinition(
+      definition: text,
+      pronunciation: '',
+    );
+  }
+
   return ParsedDefinition(
-    definition: match.group(1)?.trim() ?? '',
-    pronunciation: match.group(2)?.trim() ?? '',
+    definition: definition,
+    pronunciation: pronunciation,
   );
 }
-
-
 
   void updatePreview() {
     setState(() {
@@ -4547,6 +4493,8 @@ class _FlashCardsPageState extends State<FlashCardsPage> {
   int progressKnownCount = 0;
   int progressUnknownCount = 0;
   int? _studySessionId;
+  String? _selectedListeningAnswer;
+  bool _isPlayingListeningAudio = false;
   bool _studySessionFinished = true;
 
   // lịch sử để undo khi bật tiến độ
@@ -5299,16 +5247,18 @@ class _FlashCardsPageState extends State<FlashCardsPage> {
   Future<void> toggleProgressMode() async {
     final nextValue = !progressTracking;
 
-    if (!nextValue) {
-      await _finishStudySession();
-    }
+    await _finishStudySession();
 
     setState(() {
       progressTracking = nextValue;
+      currentPos = 0;
+      showCompletion = false;
       progressKnownCount = 0;
       progressUnknownCount = 0;
       _progressHistory.clear();
       _sessionUnknownCardIds.clear();
+      rebuildVisibleOrder(resetPosition: true);
+      resetFlip();
     });
 
     await saveFlashSettings();
@@ -5600,38 +5550,6 @@ void exitFlashCards() {
                       value: autoPlayAudio,
                       onTap: toggleAutoPlayAudio,
                     ),
-                    if (progressTracking) ...[
-                      SizedBox(height: 12),
-                      InkWell(
-                        onTap: () {
-                          restartStudy();
-                          Navigator.pop(sheetContext);
-                        },
-                        borderRadius: BorderRadius.circular(16),
-                        child: Container(
-                          padding: EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: AppColors.panel2,
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: AppColors.border, width: 1.2),
-                          ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.refresh, color: AppColors.border, size: 20),
-                              SizedBox(width: 8),
-                              Text(
-                                "Bắt đầu lại",
-                                style: TextStyle(
-                                  color: AppColors.text,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
                   ],
                 ),
               ),
@@ -5784,23 +5702,18 @@ void exitFlashCards() {
                   ),
                 ],
               ),
-              child: Row(
-                children: [
-                  Icon(Icons.menu_book, color: AppColors.border, size: 20),
-                  SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      widget.courseTitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: AppColors.text,
-                        fontWeight: FontWeight.w900,
-                        fontSize: 15,
-                      ),
-                    ),
+              child: Center(
+                child: Text(
+                  widget.courseTitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: AppColors.text,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 15,
                   ),
-                ],
+                ),
               ),
             ),
           ),
@@ -5871,7 +5784,10 @@ void exitFlashCards() {
   StudyCardItem? getPeekCard() {
     if (visibleOrder.isEmpty || cardDragDx.abs() < 1) return null;
 
-    final peekPos = cardDragDx > 0 ? currentPos - 1 : currentPos + 1;
+    // Khi bật theo dõi tiến độ: chỉ preview thẻ sau, không preview thẻ trước.
+    final peekPos = progressTracking
+        ? currentPos + 1
+        : (cardDragDx > 0 ? currentPos - 1 : currentPos + 1);
     if (peekPos < 0 || peekPos >= visibleOrder.length) return null;
 
     final realIndex = visibleOrder[peekPos];
@@ -5890,11 +5806,12 @@ void exitFlashCards() {
 
     return IgnorePointer(
       child: buildCardFace(
-        label: cardDragDx > 0 ? "Thẻ trước" : "Thẻ sau",
+        label: "",
         mainText: peekCard.term,
         subText: peekCard.pronunciation,
         isBack: false,
         isStarred: peekCard.isFavorite,
+        showLabelChip: false,
       ),
     );
   }
@@ -5942,10 +5859,17 @@ void exitFlashCards() {
       builder: (context, constraints) {
         final cardWidth = constraints.maxWidth <= 0 ? 1.0 : constraints.maxWidth;
         final cardHeight = constraints.maxHeight <= 0 ? 1.0 : constraints.maxHeight;
-        final verticalTouchFactor =
-            ((cardDragStartLocalY / cardDragHeight) - 0.5).clamp(-0.5, 0.5) * 2;
-        final dragPercent = (cardDragDx / cardWidth).clamp(-1.0, 1.0);
-        final rotate = dragPercent * 0.35 * verticalTouchFactor;
+        final double verticalTouchFactor =
+            (((cardDragStartLocalY / cardDragHeight) - 0.5).clamp(-0.5, 0.5) * 2).toDouble();
+        final double dragPercent =
+            (cardDragDx / cardWidth).clamp(-1.0, 1.0).toDouble();
+        final double rotate = dragPercent * 0.35 * verticalTouchFactor;
+        final double progressDragAbs =
+            (cardDragDx.abs() / (cardWidth * 0.5)).clamp(0.0, 1.0).toDouble();
+        final showProgressDragState = progressTracking && isDraggingCard && cardDragDx.abs() > 14;
+        final progressDragKnown = cardDragDx > 0;
+        final progressDragColor = progressDragKnown ? AppColors.green : AppColors.red;
+        final progressDragText = progressDragKnown ? 'Đã thuộc' : 'Chưa thuộc';
 
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
@@ -5971,16 +5895,17 @@ void exitFlashCards() {
           },
           onPanEnd: (details) async {
             final velocityX = details.velocity.pixelsPerSecond.dx;
-            final shouldNext = cardDragDx < -cardWidth * 0.28 || velocityX < -650;
-            final shouldPrev = cardDragDx > cardWidth * 0.28 || velocityX > 650;
+            final double swipeLimit = progressTracking ? cardWidth * 0.5 : cardWidth * 0.28;
+            final shouldSwipeLeft = cardDragDx < -swipeLimit || velocityX < -650;
+            final shouldSwipeRight = cardDragDx > swipeLimit || velocityX > 650;
 
-            if (shouldNext) {
-              await finishSwipeCard(1);
+            if (shouldSwipeLeft) {
+              await finishSwipeCard(progressTracking ? -1 : 1);
               return;
             }
 
-            if (shouldPrev) {
-              await finishSwipeCard(-1);
+            if (shouldSwipeRight) {
+              await finishSwipeCard(progressTracking ? 1 : -1);
               return;
             }
 
@@ -6001,7 +5926,59 @@ void exitFlashCards() {
             offset: Offset(cardDragDx, cardDragDy),
             child: Transform.rotate(
               angle: rotate,
-              child: buildFlipCardFace(card),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  buildFlipCardFace(card),
+                  if (showProgressDragState)
+                    IgnorePointer(
+                      child: Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(22),
+                          border: Border.all(
+                            color: progressDragColor.withOpacity(0.65 + 0.35 * progressDragAbs),
+                            width: 2.2 + 2.4 * progressDragAbs,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: progressDragColor.withOpacity(0.28 + 0.32 * progressDragAbs),
+                              blurRadius: 18 + 18 * progressDragAbs,
+                              spreadRadius: 1 + 3 * progressDragAbs,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  if (showProgressDragState)
+                    IgnorePointer(
+                      child: Center(
+                        child: Container(
+                          padding: EdgeInsets.symmetric(horizontal: 18, vertical: 11),
+                          decoration: BoxDecoration(
+                            color: progressDragColor.withOpacity(0.88),
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(color: Colors.white.withOpacity(0.78), width: 1.2),
+                            boxShadow: [
+                              BoxShadow(
+                                color: progressDragColor.withOpacity(0.42),
+                                blurRadius: 22,
+                                spreadRadius: 2,
+                              ),
+                            ],
+                          ),
+                          child: Text(
+                            progressDragText,
+                            style: TextStyle(
+                              color: AppColors.readableOn(progressDragColor),
+                              fontSize: 17,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
           ),
         );
@@ -6015,6 +5992,7 @@ void exitFlashCards() {
     required String subText,
     required bool isBack,
     required bool isStarred,
+    bool showLabelChip = true,
   }) {
     return Container(
       width: double.infinity,
@@ -6044,25 +6022,26 @@ void exitFlashCards() {
               padding: EdgeInsets.fromLTRB(14, 10, 10, 6),
               child: Row(
                 children: [
-                  Container(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: 11,
-                      vertical: 7,
-                    ),
-                    decoration: BoxDecoration(
-                      color: isBack ? AppColors.yellow : AppColors.red,
-                      borderRadius: BorderRadius.circular(99),
-                      border: Border.all(color: AppColors.border, width: 1.2),
-                    ),
-                    child: Text(
-                      label,
-                      style: TextStyle(
-                        color: AppColors.border,
-                        fontWeight: FontWeight.w900,
-                        fontSize: 13,
+                  if (showLabelChip)
+                    Container(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: 11,
+                        vertical: 7,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isBack ? AppColors.yellow : AppColors.red,
+                        borderRadius: BorderRadius.circular(99),
+                        border: Border.all(color: AppColors.border, width: 1.2),
+                      ),
+                      child: Text(
+                        label,
+                        style: TextStyle(
+                          color: AppColors.border,
+                          fontWeight: FontWeight.w900,
+                          fontSize: 13,
+                        ),
                       ),
                     ),
-                  ),
                   Spacer(),
                   buildCardIcon(Icons.edit, openEditCardDialog),
                   buildCardIcon(Icons.volume_up_outlined, playCurrentCardAudio),
@@ -6386,11 +6365,13 @@ Widget buildFinishButton({
 class ReviewPracticePage extends StatefulWidget {
   final int courseId;
   final String courseTitle;
+  final String courseLanguageCode;
 
   ReviewPracticePage({
     super.key,
     required this.courseId,
     required this.courseTitle,
+    required this.courseLanguageCode,
   });
 
   @override
@@ -6414,11 +6395,14 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
   bool _showSetup = true;
   bool _multipleChoice = true;
   bool _essay = false;
+  bool _listening = false;
   bool _answerByDefinition = true;
   bool _finished = false;
   int _questionLimit = 0;
   int _currentEssayIndex = 0;
   int? _studySessionId;
+  String? _selectedListeningAnswer;
+  bool _isPlayingListeningAudio = false;
   bool _studySessionFinished = true;
   DateTime? _sessionStartedAt;
   DateTime _essayQuestionStartedAt = DateTime.now();
@@ -6483,6 +6467,7 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
   Future<void> _loadReviewSettings() async {
     final savedMultipleChoice = await AppSettingsStore.getBool('review.multipleChoice');
     final savedEssay = await AppSettingsStore.getBool('review.essay');
+    final savedListening = await AppSettingsStore.getBool('review.listening');
     final savedAnswerByDefinition = await AppSettingsStore.getBool('review.answerByDefinition');
     final savedQuestionLimit = await AppSettingsStore.getInt('review.questionLimit');
 
@@ -6491,12 +6476,16 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
     setState(() {
       _multipleChoice = savedMultipleChoice ?? _multipleChoice;
       _essay = savedEssay ?? _essay;
+      _listening = savedListening ?? _listening;
 
-      if (!_multipleChoice && !_essay) {
+      final activeModes = [_multipleChoice, _essay, _listening].where((e) => e).length;
+      if (activeModes == 0) {
         _multipleChoice = true;
       }
-      if (_multipleChoice && _essay) {
+      if (activeModes > 1) {
         _essay = false;
+        _listening = false;
+        _multipleChoice = true;
       }
 
       _answerByDefinition = savedAnswerByDefinition ?? _answerByDefinition;
@@ -6510,6 +6499,7 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
     await Future.wait([
       AppSettingsStore.setBool('review.multipleChoice', _multipleChoice),
       AppSettingsStore.setBool('review.essay', _essay),
+      AppSettingsStore.setBool('review.listening', _listening),
       AppSettingsStore.setBool('review.answerByDefinition', _answerByDefinition),
       AppSettingsStore.setInt('review.questionLimit', _questionLimit),
     ]);
@@ -6679,10 +6669,30 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
         .trim();
   }
 
+  List<String> _splitAnswerParts(String rawAnswer) {
+    final seen = <String>{};
+    final parts = <String>[];
+
+    // Tách từng nghĩa riêng để chip không bị dính kiểu:
+    // "chẳng bao lâu nữa, chẳng mấy chốc, sắp; ngay".
+    // Không tách dấu cách thường, vì cụm từ như "xin chào" phải giữ nguyên.
+    final cleaned = rawAnswer.replaceAll(RegExp(r'\([^)]*\)'), ' ');
+    final separators = RegExp(r'[,/;；、，|\n\r]+');
+
+    for (final item in cleaned.split(separators)) {
+      final text = item.trim().replaceAll(RegExp(r'\s+'), ' ');
+      final key = _normalizeAnswer(text);
+      if (text.isEmpty || key.isEmpty || seen.contains(key)) continue;
+      seen.add(key);
+      parts.add(text);
+    }
+
+    return parts;
+  }
+
   List<String> _acceptedEssayAnswersOf(StudyCardItem card) {
     final rawAnswer = _answerOf(card);
-    final parts = rawAnswer
-        .split(RegExp(r'[,/]+'))
+    final parts = _splitAnswerParts(rawAnswer)
         .map(_normalizeAnswer)
         .where((e) => e.isNotEmpty)
         .toSet()
@@ -6694,6 +6704,39 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
     }
 
     return parts;
+  }
+
+  List<String> _acceptedListeningAnswersOf(StudyCardItem card) {
+    final parts = _splitAnswerParts(card.definition)
+        .map(_normalizeAnswer)
+        .where((e) => e.isNotEmpty)
+        .toSet()
+        .toList();
+
+    final fallback = _normalizeAnswer(card.definition);
+    return parts.isNotEmpty ? parts : (fallback.isEmpty ? <String>[] : <String>[fallback]);
+  }
+
+  List<String> _splitListeningChoiceParts(String rawAnswer) {
+    final seen = <String>{};
+    final chips = <String>[];
+
+    // Riêng chế độ nghe: tách thêm dấu cách để người dùng ghép nhiều chip
+    // thành cụm nghĩa, ví dụ: "xin chào" -> "xin" + "chào".
+    final meanings = _splitAnswerParts(rawAnswer);
+    final sourceParts = meanings.isNotEmpty ? meanings : [rawAnswer.trim()];
+
+    for (final meaning in sourceParts) {
+      for (final item in meaning.split(RegExp(r'\s+'))) {
+        final text = item.trim();
+        final key = _normalizeAnswer(text);
+        if (text.isEmpty || key.isEmpty || seen.contains(key)) continue;
+        seen.add(key);
+        chips.add(text);
+      }
+    }
+
+    return chips;
   }
 
   bool _isEssayAnswerCorrect(StudyCardItem card, String typed) {
@@ -6733,7 +6776,8 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
     setState(() {
       _quizCards = selected;
       _choiceMap = {
-        for (final card in selected) card.id: _buildChoices(card),
+        for (final card in selected)
+          card.id: _listening ? _buildListeningChoices(card) : _buildChoices(card),
       };
       _questionKeys
         ..clear()
@@ -6743,6 +6787,7 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
       _answeredCards.clear();
       _correctMap.clear();
       _selectedAnswerMap.clear();
+      _selectedListeningAnswer = null;
       _recordedResultCardIds.clear();
       _cardStartedAtMap
         ..clear()
@@ -6755,9 +6800,17 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
     });
 
     await _startStudySession(
-      mode: _multipleChoice ? 'review_multiple_choice' : 'review_essay',
+      mode: _listening
+          ? 'review_listening'
+          : (_multipleChoice ? 'review_multiple_choice' : 'review_essay'),
       totalCards: selected.length,
     );
+
+    if (_listening) {
+      Future.delayed(Duration(milliseconds: 260), () {
+        if (mounted && _listening) _playListeningAudio();
+      });
+    }
   }
 
   Future<void> _restart() async {
@@ -6837,8 +6890,9 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
     final firstWrongIndex = _quizCards.indexWhere((e) => e.id == firstWrong.id);
 
     setState(() {
-      if (_essay && !_multipleChoice && firstWrongIndex >= 0) {
+      if ((_essay || _listening) && !_multipleChoice && firstWrongIndex >= 0) {
         _currentEssayIndex = firstWrongIndex;
+        _selectedListeningAnswer = null;
         _essayController.clear();
       }
     });
@@ -6862,7 +6916,11 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
             final wrongCard = wrongCards[reviewIndex];
             final realIndex = _quizCards.indexWhere((e) => e.id == wrongCard.id);
             final yourAnswer = (_selectedAnswerMap[wrongCard.id] ?? '').trim();
-            final correctAnswer = _answerOf(wrongCard).trim();
+            final promptText = _listening ? wrongCard.term.trim() : _promptOf(wrongCard).trim();
+            final correctAnswer = (_listening ? wrongCard.definition : _answerOf(wrongCard)).trim();
+            final promptTitle = _listening
+                ? 'Âm thanh đã phát'
+                : (_answerByDefinition ? 'Thuật ngữ' : 'Định nghĩa');
 
             void moveReview(int delta) {
               final nextIndex = (reviewIndex + delta).clamp(0, wrongCards.length - 1).toInt();
@@ -6874,9 +6932,10 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
 
               final nextCard = wrongCards[nextIndex];
               final nextRealIndex = _quizCards.indexWhere((e) => e.id == nextCard.id);
-              if (_essay && !_multipleChoice && nextRealIndex >= 0) {
+              if ((_essay || _listening) && !_multipleChoice && nextRealIndex >= 0) {
                 setState(() {
                   _currentEssayIndex = nextRealIndex;
+                  _selectedListeningAnswer = null;
                   _essayController.clear();
                 });
               }
@@ -6949,7 +7008,7 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
                         ),
                         SizedBox(height: 14),
                         Text(
-                          _answerByDefinition ? 'Thuật ngữ' : 'Định nghĩa',
+                          promptTitle,
                           style: TextStyle(
                             color: AppColors.muted,
                             fontWeight: FontWeight.w900,
@@ -6965,11 +7024,11 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
                             border: Border.all(color: AppColors.border.withOpacity(0.5), width: 1.2),
                           ),
                           child: Text(
-                            _promptOf(wrongCard),
+                            promptText.isEmpty ? 'Không có nội dung' : promptText,
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               color: AppColors.text,
-                              fontSize: _promptOf(wrongCard).length > 22 ? 24 : 30,
+                              fontSize: promptText.length > 22 ? 24 : 30,
                               fontWeight: FontWeight.w900,
                               height: 1.15,
                             ),
@@ -7136,6 +7195,100 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
     }
   }
 
+
+  List<String> _buildListeningChoices(StudyCardItem target) {
+    final correctOptions = _splitListeningChoiceParts(target.definition);
+    final correctKeys = correctOptions.map(_normalizeAnswer).where((e) => e.isNotEmpty).toSet();
+    final seenWrongKeys = <String>{};
+
+    final wrongPool = _cards
+        .where((e) => e.id != target.id)
+        .expand((e) => _splitListeningChoiceParts(e.definition))
+        .where((e) {
+          final key = _normalizeAnswer(e);
+          if (key.isEmpty || correctKeys.contains(key) || seenWrongKeys.contains(key)) return false;
+          seenWrongKeys.add(key);
+          return true;
+        })
+        .toList();
+
+    wrongPool.shuffle(_random);
+    final targetCount = correctOptions.length >= 6 ? correctOptions.length + 2 : 6;
+    final options = <String>[
+      ...correctOptions.where((e) => e.trim().isNotEmpty),
+      ...wrongPool.take(targetCount - correctOptions.length),
+    ];
+
+    while (options.length < 4) {
+      options.add('Lựa chọn ${options.length + 1}');
+    }
+
+    options.shuffle(_random);
+    return options;
+  }
+
+  Future<void> _playListeningAudio() async {
+    if (_quizCards.isEmpty || _finished || _isPlayingListeningAudio) return;
+
+    final card = _quizCards[_currentEssayIndex];
+    setState(() => _isPlayingListeningAudio = true);
+
+    try {
+      await TtsAudioCache.instance.playText(
+        text: card.term,
+        languageCode: widget.courseLanguageCode.isNotEmpty ? widget.courseLanguageCode : 'zh-TW',
+        courseId: widget.courseId,
+      );
+    } catch (e) {
+      _showMessage('Không phát được âm thanh');
+      debugPrint('PLAY LISTENING TTS ERROR: $e');
+    } finally {
+      if (mounted) setState(() => _isPlayingListeningAudio = false);
+    }
+  }
+
+  Future<void> _submitListeningAnswer() async {
+    if (_quizCards.isEmpty || _finished) return;
+
+    final selected = (_selectedListeningAnswer ?? '').trim().replaceAll(RegExp(r'\s+'), ' ');
+    if (selected.isEmpty) {
+      _showMessage('Hãy chọn đáp án trước');
+      return;
+    }
+
+    final card = _quizCards[_currentEssayIndex];
+    final ok = _acceptedListeningAnswersOf(card).contains(_normalizeAnswer(selected));
+    final wasLast = _currentEssayIndex + 1 >= _quizCards.length;
+
+    setState(() {
+      _answeredCards.add(card.id);
+      _correctMap[card.id] = ok;
+      _selectedAnswerMap[card.id] = selected;
+      _finished = wasLast;
+      if (!wasLast) {
+        _currentEssayIndex++;
+        _selectedListeningAnswer = null;
+        _essayQuestionStartedAt = DateTime.now();
+        _cardStartedAtMap[_quizCards[_currentEssayIndex].id] = _essayQuestionStartedAt;
+      }
+    });
+
+    await _recordStudyResult(
+      card: card,
+      answerText: selected,
+      isCorrect: ok,
+    );
+
+    if (_finished) {
+      await _finishStudySession();
+      _showResultSheet();
+    } else {
+      Future.delayed(Duration(milliseconds: 220), () {
+        if (mounted && _listening) _playListeningAudio();
+      });
+    }
+  }
+
   Future<void> _openSetupSheet() async {
     await showModalBottomSheet(
       context: context,
@@ -7146,36 +7299,37 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
         int localLimit = _questionLimit.clamp(1, _cards.length).toInt();
         bool localMc = _multipleChoice;
         bool localEssay = _essay;
+        bool localListening = _listening;
         bool localAnswerByDefinition = _answerByDefinition;
 
         return StatefulBuilder(
           builder: (context, setSheetState) {
-            void setMode({bool? mc, bool? essay}) {
+            void setMode({bool? mc, bool? essay, bool? listening}) {
               setSheetState(() {
                 if (mc == true) {
                   localMc = true;
                   localEssay = false;
+                  localListening = false;
                   return;
                 }
 
                 if (essay == true) {
                   localEssay = true;
                   localMc = false;
+                  localListening = false;
                   return;
                 }
 
-                if (mc == false && localEssay) {
+                if (listening == true) {
+                  localListening = true;
                   localMc = false;
-                  return;
-                }
-
-                if (essay == false && localMc) {
                   localEssay = false;
                   return;
                 }
 
                 localMc = true;
                 localEssay = false;
+                localListening = false;
               });
             }
 
@@ -7294,6 +7448,11 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
                         value: localEssay,
                         onChanged: (v) => setMode(essay: v),
                       ),
+                      _switchTile(
+                        text: 'Nghe',
+                        value: localListening,
+                        onChanged: (v) => setMode(listening: v),
+                      ),
                       SizedBox(height: 14),
                       Align(
                         alignment: Alignment.centerRight,
@@ -7306,7 +7465,8 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
                               _questionLimit = localLimit;
                               _multipleChoice = localMc;
                               _essay = !localMc && localEssay;
-                              if (!_multipleChoice && !_essay) {
+                              _listening = !localMc && !localEssay && localListening;
+                              if (!_multipleChoice && !_essay && !_listening) {
                                 _multipleChoice = true;
                               }
                               _answerByDefinition = localAnswerByDefinition;
@@ -7376,7 +7536,7 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
                     ],
                   ),
                   SizedBox(height: 14),
-                  if (_essay && !_multipleChoice && _wrong > 0) ...[
+                  if ((_essay || _listening) && !_multipleChoice && _wrong > 0) ...[
                     SizedBox(
                       width: double.infinity,
                       child: _solidButton(
@@ -7989,6 +8149,228 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
     );
   }
 
+
+  Widget _listeningChip({
+    required String text,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: Duration(milliseconds: 220),
+        curve: Curves.easeOutBack,
+        transform: Matrix4.translationValues(0, selected ? -8 : 0, 0),
+        padding: EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+        decoration: BoxDecoration(
+          color: selected ? AppColors.green : Colors.white,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: AppColors.border, width: 1.25),
+          boxShadow: [
+            BoxShadow(
+              color: AppColors.border,
+              offset: Offset(0, selected ? 5 : 3),
+              blurRadius: 0,
+            ),
+          ],
+        ),
+        child: Text(
+          text,
+          style: TextStyle(
+            color: AppColors.text,
+            fontWeight: FontWeight.w900,
+            fontSize: 14,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildListeningMode() {
+    final card = _quizCards[_currentEssayIndex];
+    final displayIndex = _currentEssayIndex + 1;
+    final choices = _choiceMap[card.id] ?? _buildListeningChoices(card);
+    final selected = (_selectedListeningAnswer ?? '').trim();
+    final selectedParts = selected.isEmpty
+        ? <String>[]
+        : selected.split(RegExp(r'\s+')).where((e) => e.trim().isNotEmpty).toList();
+
+    return ListView(
+      padding: EdgeInsets.fromLTRB(16, 18, 16, 110),
+      children: [
+        AnimatedSwitcher(
+          duration: Duration(milliseconds: 380),
+          switchInCurve: Curves.easeOutCubic,
+          switchOutCurve: Curves.easeInCubic,
+          transitionBuilder: (child, animation) {
+            final slide = Tween<Offset>(
+              begin: Offset(0, 0.18),
+              end: Offset.zero,
+            ).animate(animation);
+
+            return FadeTransition(
+              opacity: animation,
+              child: SlideTransition(position: slide, child: child),
+            );
+          },
+          child: Center(
+            key: ValueKey('listening-card-${card.id}'),
+            child: Container(
+            constraints: BoxConstraints(maxWidth: 560),
+            padding: EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: AppColors.panel,
+              borderRadius: BorderRadius.circular(28),
+              border: Border.all(color: AppColors.border, width: 1.5),
+              boxShadow: [
+                BoxShadow(
+                  color: AppColors.border,
+                  offset: Offset(0, 7),
+                  blurRadius: 0,
+                ),
+                BoxShadow(
+                  color: Color(0x14000000),
+                  offset: Offset(0, 16),
+                  blurRadius: 26,
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    _statChip(text: '$displayIndex/$_total', color: AppColors.blue),
+                    Spacer(),
+                    Text(
+                      'Nghe và chọn nghĩa đúng',
+                      style: TextStyle(
+                        color: AppColors.muted,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ],
+                ),
+                SizedBox(height: 22),
+                Center(
+                  child: GestureDetector(
+                    onTap: _playListeningAudio,
+                    child: AnimatedContainer(
+                      duration: Duration(milliseconds: 180),
+                      width: 116,
+                      height: 116,
+                      decoration: BoxDecoration(
+                        color: _isPlayingListeningAudio ? AppColors.yellow : AppColors.green,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: AppColors.border, width: 1.7),
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppColors.border,
+                            offset: Offset(0, 7),
+                            blurRadius: 0,
+                          ),
+                        ],
+                      ),
+                      child: Icon(
+                        _isPlayingListeningAudio ? Icons.graphic_eq_rounded : Icons.volume_up_rounded,
+                        color: AppColors.border,
+                        size: 52,
+                      ),
+                    ),
+                  ),
+                ),
+                SizedBox(height: 18),
+                Text(
+                  'Ấn loa để nghe lại',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: AppColors.muted,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                SizedBox(height: 20),
+                AnimatedContainer(
+                  duration: Duration(milliseconds: 220),
+                  curve: Curves.easeOutCubic,
+                  width: double.infinity,
+                  constraints: BoxConstraints(minHeight: 62),
+                  padding: EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Color(0xfff7f9fc),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: AppColors.border.withOpacity(0.35), width: 1.25),
+                  ),
+                  child: selectedParts.isEmpty
+                      ? Center(
+                          child: Text(
+                            'Chọn nhiều chip để ghép đáp án',
+                            style: TextStyle(
+                              color: AppColors.muted,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        )
+                      : Align(
+                          alignment: Alignment.centerLeft,
+                          child: Wrap(
+                            spacing: 8,
+                            runSpacing: 10,
+                            children: selectedParts.map((part) {
+                              return _listeningChip(
+                                text: part,
+                                selected: true,
+                                onTap: () {
+                                  final next = List<String>.from(selectedParts)..remove(part);
+                                  setState(() {
+                                    _selectedListeningAnswer = next.isEmpty ? null : next.join(' ');
+                                  });
+                                },
+                              );
+                            }).toList(),
+                          ),
+                        ),
+                ),
+                SizedBox(height: 18),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 12,
+                  children: choices.map((choice) {
+                    final isSelected = selectedParts.contains(choice);
+                    return AnimatedOpacity(
+                      duration: Duration(milliseconds: 180),
+                      opacity: isSelected ? 0.28 : 1,
+                      child: IgnorePointer(
+                        ignoring: isSelected,
+                        child: _listeningChip(
+                          text: choice,
+                          selected: false,
+                          onTap: () {
+                            final next = [...selectedParts, choice];
+                            setState(() {
+                              _selectedListeningAnswer = next.join(' ');
+                            });
+                          },
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+                SizedBox(height: 22),
+                _solidButton(
+                  text: displayIndex >= _total ? 'Hoàn thành' : 'Kiểm tra',
+                  icon: Icons.check_rounded,
+                  color: AppColors.green,
+                  onTap: _submitListeningAnswer,
+                ),
+              ],
+            ),
+          ),
+        ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildMultipleChoiceMode() {
     return ListView.builder(
       controller: _mcScrollController,
@@ -8144,9 +8526,11 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
                             ),
                           ),
                         )
-                      : _essay && !_multipleChoice
-                          ? _buildEssayMode()
-                          : _buildMultipleChoiceMode(),
+                      : _listening
+                          ? _buildListeningMode()
+                          : (_essay && !_multipleChoice
+                              ? _buildEssayMode()
+                              : _buildMultipleChoiceMode()),
                 ),
               ],
             ),
@@ -9229,41 +9613,24 @@ class _Big3DButtonState extends State<Big3DButton> {
             ),
           ],
         ),
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            Positioned(
-              left: 34,
-              top: 0,
-              bottom: 0,
-              child: Center(
-                child: Icon(
-                  widget.icon,
+        child: Center(
+          child: Padding(
+            padding: EdgeInsets.symmetric(horizontal: 22),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                widget.text,
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                style: TextStyle(
                   color: AppColors.buttonInk,
-                  size: 34,
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.8,
                 ),
               ),
             ),
-            Center(
-              child: Padding(
-                padding: EdgeInsets.symmetric(horizontal: 76),
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Text(
-                    widget.text,
-                    textAlign: TextAlign.center,
-                    maxLines: 1,
-                    style: TextStyle(
-                      color: AppColors.buttonInk,
-                      fontSize: 22,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.8,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );
