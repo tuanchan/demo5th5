@@ -9,6 +9,10 @@ on:
       - clean-main
       - clean-restructure
 
+env:
+  FLUTTER_VERSION: "3.38.9"
+  IPA_NAME: flutterflashcard-unsigned.ipa
+
 jobs:
   build-ios:
     runs-on: macos-latest
@@ -20,7 +24,9 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
+          cache: true
 
       - name: Flutter doctor
         run: flutter doctor -v
@@ -28,8 +34,8 @@ jobs:
       - name: Clean project
         run: flutter clean
 
-      - name: Get packages
-        run: flutter pub get
+      - name: Get packages from lockfile
+        run: flutter pub get --enforce-lockfile
 
       - name: Generate launcher icons
         run: dart run flutter_launcher_icons
@@ -39,12 +45,13 @@ jobs:
 
       - name: Create unsigned IPA
         run: |
+          rm -rf Payload "$IPA_NAME"
           mkdir -p Payload
           cp -R build/ios/iphoneos/Runner.app Payload/Runner.app
-          zip -r unsigned-flashcard.ipa Payload
+          zip -qry "$IPA_NAME" Payload
 
       - name: Upload unsigned IPA
         uses: actions/upload-artifact@v4
         with:
-          name: unsigned-flashcard-ipa
-          path: unsigned-flashcard.ipa
+          name: flutterflashcard-unsigned-ipa
+          path: ${{ env.IPA_NAME }}
