@@ -1,10 +1,12 @@
 import 'dart:ui';
 import 'dart:math' as math;
 import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:archive/archive_io.dart';
@@ -206,6 +208,94 @@ class AppSettingsStore {
 
   static Future<void> setInt(String key, int value) {
     return setString(key, value.toString());
+  }
+}
+
+Widget geminiColorIcon({double size = 21}) {
+  return SvgPicture.asset(
+    'assets/icon/gemini-color.svg',
+    width: size,
+    height: size,
+  );
+}
+
+
+class GeminiFlashLiteClient {
+  GeminiFlashLiteClient._();
+
+  static const String defaultApiKey = 'AIzaSyAy7tpyPpnGt5PTXkO_ryFes7aAuk5uHFk';
+  static const String apiKeySettingKey = 'gemini.apiKey';
+  static const String model = 'gemini-flash-lite-latest';
+
+  static Future<String> _apiKey() async {
+    final saved = await AppSettingsStore.getString(apiKeySettingKey);
+    final key = saved?.trim().isNotEmpty == true ? saved!.trim() : defaultApiKey;
+    if (key.isEmpty) {
+      throw Exception('Chưa cấu hình API key Gemini.');
+    }
+    return key;
+  }
+
+  static Future<String> generateText(
+    String prompt, {
+    int maxOutputTokens = 900,
+    String? responseMimeType,
+  }) async {
+    final apiKey = await _apiKey();
+    final uri = Uri.https(
+      'generativelanguage.googleapis.com',
+      '/v1beta/models/$model:generateContent',
+      {'key': apiKey},
+    );
+
+    final client = HttpClient();
+    try {
+      final request = await client.postUrl(uri);
+      request.headers.contentType = ContentType.json;
+      final generationConfig = <String, Object>{
+        'temperature': 0.45,
+        'topP': 0.9,
+        'maxOutputTokens': maxOutputTokens,
+      };
+      if (responseMimeType != null) {
+        generationConfig['responseMimeType'] = responseMimeType;
+      }
+
+      request.write(jsonEncode({
+        'contents': [
+          {
+            'role': 'user',
+            'parts': [
+              {'text': prompt}
+            ],
+          }
+        ],
+        'generationConfig': generationConfig,
+      }));
+
+      final response = await request.close();
+      final body = await response.transform(utf8.decoder).join();
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        String message = body;
+        try {
+          final data = jsonDecode(body) as Map<String, dynamic>;
+          message = data['error']?['message']?.toString() ?? body;
+        } catch (_) {}
+        throw Exception(message);
+      }
+
+      final data = jsonDecode(body) as Map<String, dynamic>;
+      final candidates = data['candidates'] as List<dynamic>?;
+      final parts = candidates?.isNotEmpty == true
+          ? (candidates!.first['content']?['parts'] as List<dynamic>?)
+          : null;
+      final generated = parts?.map((e) => e['text']?.toString() ?? '').join('\n').trim() ?? '';
+      if (generated.isEmpty) throw Exception('Gemini không trả về nội dung.');
+      return generated;
+    } finally {
+      client.close(force: true);
+    }
   }
 }
 
@@ -2167,10 +2257,14 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
+  final TextEditingController geminiApiKeyController = TextEditingController();
+
   String themeMode = 'light';
   bool busy = false;
+  bool showGeminiApiKey = false;
   String appPath = '';
   String message = '';
+  String geminiKeyMessage = '';
 
   final Map<String, String> colorNames = {
     'bg': 'Nền app',
@@ -2209,13 +2303,24 @@ class _SettingsPageState extends State<SettingsPage> {
     loadSettings();
   }
 
+  @override
+  void dispose() {
+    geminiApiKeyController.dispose();
+    super.dispose();
+  }
+
   Future<void> loadSettings() async {
     final mode = await AppSettingsStore.getString('appearance.themeMode') ?? 'light';
     final path = await BackupManager.appDataPath();
+    final geminiApiKey = await AppSettingsStore.getString(GeminiFlashLiteClient.apiKeySettingKey) ?? '';
     if (!mounted) return;
+    geminiApiKeyController.text = geminiApiKey;
     setState(() {
       themeMode = mode;
       appPath = path;
+      geminiKeyMessage = geminiApiKey.trim().isEmpty
+          ? 'Đang dùng API key mặc định'
+          : 'Đang dùng API key riêng';
     });
   }
 
@@ -2243,6 +2348,17 @@ class _SettingsPageState extends State<SettingsPage> {
     } finally {
       if (mounted) setState(() => busy = false);
     }
+  }
+
+  Future<void> saveGeminiApiKey() async {
+    final key = geminiApiKeyController.text.trim();
+    await AppSettingsStore.setString(GeminiFlashLiteClient.apiKeySettingKey, key);
+    if (!mounted) return;
+    setState(() {
+      geminiKeyMessage = key.isEmpty
+          ? 'Đã xoá key riêng, quay về API key mặc định'
+          : 'Đã lưu API key Gemini';
+    });
   }
 
   @override
@@ -2290,6 +2406,75 @@ class _SettingsPageState extends State<SettingsPage> {
                     _modeTile('system', 'Theo điện thoại', Icons.phone_iphone_rounded),
                     _modeTile('light', 'Sáng', Icons.light_mode_rounded),
                     _modeTile('dark', 'Tối', Icons.nightlight_round),
+                  ],
+                ),
+              ),
+              SizedBox(height: 14),
+              _sectionCard(
+                title: 'Gemini API',
+                icon: Icons.key_rounded,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    TextField(
+                      controller: geminiApiKeyController,
+                      obscureText: !showGeminiApiKey,
+                      style: TextStyle(color: AppColors.text, fontWeight: FontWeight.w800),
+                      decoration: InputDecoration(
+                        hintText: 'Nhập API key Gemini',
+                        filled: true,
+                        fillColor: AppColors.panel2,
+                        prefixIcon: Padding(
+                          padding: EdgeInsets.all(12),
+                          child: geminiColorIcon(size: 20),
+                        ),
+                        suffixIcon: IconButton(
+                          onPressed: () => setState(() => showGeminiApiKey = !showGeminiApiKey),
+                          icon: Icon(
+                            showGeminiApiKey ? Icons.visibility_off_rounded : Icons.visibility_rounded,
+                            color: AppColors.border,
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: BorderSide(color: AppColors.border.withOpacity(0.45)),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: BorderSide(color: AppColors.border, width: 1.5),
+                        ),
+                      ),
+                    ),
+                    SizedBox(height: 10),
+                    Text(
+                      geminiKeyMessage,
+                      style: TextStyle(color: AppColors.muted, fontWeight: FontWeight.w800),
+                    ),
+                    SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _actionButton(
+                            text: 'Lưu key',
+                            icon: Icons.save_rounded,
+                            color: AppColors.green,
+                            onTap: saveGeminiApiKey,
+                          ),
+                        ),
+                        SizedBox(width: 10),
+                        Expanded(
+                          child: _actionButton(
+                            text: 'Dùng mặc định',
+                            icon: Icons.restore_rounded,
+                            color: AppColors.yellow,
+                            onTap: () {
+                              geminiApiKeyController.clear();
+                              saveGeminiApiKey();
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
                   ],
                 ),
               ),
@@ -5560,6 +5745,343 @@ void exitFlashCards() {
     );
   }
 
+
+  Future<void> openGeminiExampleDialog() async {
+    final card = currentCard;
+    if (card == null) return;
+
+    String selectedLevel = _defaultGeminiLevel(_languageCode);
+    String generatedText = '';
+    String? errorText;
+    bool isGenerating = false;
+
+    Future<void> generate(StateSetter setDialogState) async {
+      setDialogState(() {
+        isGenerating = true;
+        errorText = null;
+        generatedText = '';
+      });
+
+      final prompt = '''
+Bạn là trợ lý tạo ví dụ flashcard cho người Việt học ngoại ngữ.
+Ngôn ngữ thẻ: $_languageCode
+Cấp độ/band: $selectedLevel
+Từ vựng trên card: ${card.term}
+Nghĩa hiện tại nếu có: ${card.definition}
+Phiên âm nếu có: ${card.pronunciation}
+
+Yêu cầu:
+- Chỉ tạo ví dụ, không tạo lại nghĩa.
+- Ưu tiên câu giao tiếp hằng ngày, tự nhiên, ngắn, dễ nhớ.
+- Ví dụ phải dùng đúng từ vựng trên card.
+- Nếu là tiếng Trung/Nhật/Hàn/Đức/Anh, giữ đúng ngôn ngữ gốc trong câu ví dụ.
+- Trả về đúng format:
+Ví dụ 1: ...
+Dịch 1: ...
+Ví dụ 2: ...
+Dịch 2: ...
+Gợi ý dùng: ...
+''';
+
+      try {
+        final text = await GeminiFlashLiteClient.generateText(prompt);
+        if (!mounted) return;
+        setDialogState(() => generatedText = text.trim());
+      } catch (e) {
+        if (!mounted) return;
+        setDialogState(() => errorText = 'Gemini lỗi: ${e.toString().replaceFirst('Exception: ', '')}');
+      } finally {
+        if (mounted) setDialogState(() => isGenerating = false);
+      }
+    }
+
+    await showDialog(
+      context: context,
+      barrierColor: Colors.black.withOpacity(0.48),
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final levels = _geminiLevelsForLanguage(_languageCode);
+
+            return Dialog(
+              insetPadding: EdgeInsets.symmetric(horizontal: 18, vertical: 24),
+              backgroundColor: Colors.transparent,
+              child: Container(
+                constraints: BoxConstraints(maxWidth: 560),
+                padding: EdgeInsets.fromLTRB(18, 18, 18, 16),
+                decoration: BoxDecoration(
+                  color: Color(0xfff6f1fb),
+                  borderRadius: BorderRadius.circular(26),
+                  border: Border.all(color: AppColors.border, width: 1.4),
+                  boxShadow: [
+                    BoxShadow(color: AppColors.border, offset: Offset(0, 7), blurRadius: 0),
+                    BoxShadow(color: Color(0x26000000), offset: Offset(0, 18), blurRadius: 28),
+                  ],
+                ),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          SizedBox(
+                            width: 42,
+                            height: 42,
+                            child: Center(child: geminiColorIcon(size: 34)),
+                          ),
+                          SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Gemini tạo ví dụ',
+                                  style: TextStyle(color: AppColors.text, fontSize: 22, fontWeight: FontWeight.w900),
+                                ),
+                                Text(
+                                  card.term,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(color: AppColors.muted, fontWeight: FontWeight.w900),
+                                ),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            onPressed: () => Navigator.pop(dialogContext),
+                            icon: Icon(Icons.close_rounded, color: AppColors.border),
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: 14),
+                      Text('Chọn cấp độ', style: TextStyle(color: AppColors.muted, fontWeight: FontWeight.w900)),
+                      SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: levels.map((level) {
+                          final active = selectedLevel == level;
+                          return GestureDetector(
+                            onTap: isGenerating ? null : () => setDialogState(() => selectedLevel = level),
+                            child: AnimatedContainer(
+                              duration: Duration(milliseconds: 160),
+                              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                              decoration: BoxDecoration(
+                                color: active ? AppColors.green : Colors.white,
+                                borderRadius: BorderRadius.circular(999),
+                                border: Border.all(color: AppColors.border, width: 1.2),
+                                boxShadow: [BoxShadow(color: AppColors.border, offset: Offset(0, active ? 4 : 2), blurRadius: 0)],
+                              ),
+                              child: Text(level, style: TextStyle(color: AppColors.text, fontWeight: FontWeight.w900, fontSize: 13)),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                      SizedBox(height: 14),
+                      GestureDetector(
+                        onTap: isGenerating ? null : () => generate(setDialogState),
+                        child: Container(
+                          width: double.infinity,
+                          height: 48,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: isGenerating ? AppColors.muted.withOpacity(0.35) : AppColors.yellow,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: AppColors.border, width: 1.4),
+                            boxShadow: [BoxShadow(color: AppColors.border, offset: Offset(0, 4), blurRadius: 0)],
+                          ),
+                          child: isGenerating
+                              ? SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.4, color: AppColors.border))
+                              : Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(Icons.auto_awesome_rounded, color: AppColors.border, size: 20),
+                                    SizedBox(width: 8),
+                                    Text('Tạo ví dụ giao tiếp', style: TextStyle(color: AppColors.border, fontWeight: FontWeight.w900)),
+                                  ],
+                                ),
+                        ),
+                      ),
+                      if (errorText != null) ...[
+                        SizedBox(height: 12),
+                        Text(errorText!, style: TextStyle(color: Color(0xffb3261e), fontWeight: FontWeight.w800)),
+                      ],
+                      if (generatedText.trim().isNotEmpty) ...[
+                        SizedBox(height: 14),
+                        Container(
+                          width: double.infinity,
+                          padding: EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(18),
+                            border: Border.all(color: AppColors.border, width: 1.25),
+                          ),
+                          child: SelectableText(
+                            generatedText,
+                            style: TextStyle(color: AppColors.text, fontSize: 15, height: 1.35, fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                        SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _outlineFlashDialogButton(
+                                text: 'Copy',
+                                icon: Icons.copy_rounded,
+                                onTap: () {
+                                  Clipboard.setData(ClipboardData(text: generatedText));
+                                  showFlashMessage('Đã copy nội dung Gemini');
+                                },
+                              ),
+                            ),
+                            SizedBox(width: 10),
+                            Expanded(
+                              child: _solidFlashDialogButton(
+                                text: 'Lưu ví dụ',
+                                icon: Icons.save_rounded,
+                                color: AppColors.green,
+                                onTap: () async {
+                                  Navigator.pop(dialogContext);
+                                  await _saveCurrentCardExamples(generatedText);
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  List<String> _geminiLevelsForLanguage(String languageCode) {
+    final code = languageCode.toLowerCase();
+    if (code.startsWith('zh')) return ['TOCFL Band A', 'TOCFL Band B', 'TOCFL Band C'];
+    if (code.startsWith('en')) return ['A1', 'A2', 'B1', 'B2'];
+    if (code.startsWith('de')) return ['A1', 'A2', 'B1', 'B2'];
+    if (code.startsWith('ja')) return ['N5', 'N4', 'N3', 'N2'];
+    if (code.startsWith('ko')) return ['TOPIK 1', 'TOPIK 2', 'TOPIK 3'];
+    return ['Cơ bản', 'Trung bình', 'Nâng cao'];
+  }
+
+  String _defaultGeminiLevel(String languageCode) {
+    final levels = _geminiLevelsForLanguage(languageCode);
+    return levels.isEmpty ? 'Cơ bản' : levels.first;
+  }
+
+  Widget _outlineFlashDialogButton({required String text, required IconData icon, required VoidCallback onTap}) {
+    return OutlinedButton.icon(
+      onPressed: onTap,
+      icon: Icon(icon, size: 18),
+      label: Text(text, style: TextStyle(fontWeight: FontWeight.w900)),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: AppColors.buttonInk,
+        padding: EdgeInsets.symmetric(vertical: 13),
+        side: BorderSide(color: AppColors.border, width: 1.3),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      ),
+    );
+  }
+
+  Widget _solidFlashDialogButton({required String text, required IconData icon, required Color color, required VoidCallback onTap}) {
+    return ElevatedButton.icon(
+      onPressed: onTap,
+      icon: Icon(icon, size: 18),
+      label: Text(text, style: TextStyle(fontWeight: FontWeight.w900)),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: color,
+        foregroundColor: AppColors.buttonInk,
+        elevation: 0,
+        padding: EdgeInsets.symmetric(vertical: 13),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: AppColors.border, width: 1.3),
+        ),
+      ),
+    );
+  }
+
+  List<Map<String, String>> _parseGeminiExamples(String text) {
+    final lines = text
+        .split(RegExp(r'\r?\n'))
+        .map((line) => line.trim())
+        .where((line) => line.isNotEmpty)
+        .toList();
+    final examples = <Map<String, String>>[];
+
+    for (var i = 0; i < lines.length; i++) {
+      final line = lines[i];
+      final exampleMatch = RegExp(r'^Ví dụ\s*\d*\s*:\s*(.+)$', caseSensitive: false).firstMatch(line);
+      if (exampleMatch == null) continue;
+
+      final example = exampleMatch.group(1)?.trim() ?? '';
+      var meaning = '';
+      if (i + 1 < lines.length) {
+        final meaningMatch = RegExp(r'^Dịch\s*\d*\s*:\s*(.+)$', caseSensitive: false).firstMatch(lines[i + 1]);
+        meaning = meaningMatch?.group(1)?.trim() ?? '';
+      }
+
+      if (example.isNotEmpty) {
+        examples.add({
+          'exampleText': example,
+          'meaning': meaning,
+        });
+      }
+    }
+
+    if (examples.isEmpty && text.trim().isNotEmpty) {
+      examples.add({
+        'exampleText': text.trim(),
+        'meaning': '',
+      });
+    }
+
+    return examples;
+  }
+
+  Future<void> _saveCurrentCardExamples(String generatedText) async {
+    final card = currentCard;
+    if (card == null) return;
+
+    final examples = _parseGeminiExamples(generatedText);
+    if (examples.isEmpty) {
+      showFlashMessage('Gemini chưa tạo ví dụ để lưu');
+      return;
+    }
+
+    try {
+      final db = await AppDatabase.instance.database;
+      final now = DateTime.now().toIso8601String();
+
+      for (final example in examples) {
+        await db.insert(
+          'card_examples',
+          {
+            'cardId': card.id,
+            'exampleText': example['exampleText'] ?? '',
+            'pronunciation': '',
+            'meaning': example['meaning'] ?? '',
+            'createdAt': now,
+            'updatedAt': now,
+          },
+        );
+      }
+
+      if (!mounted) return;
+      showFlashMessage('Đã lưu ${examples.length} ví dụ Gemini');
+    } catch (e) {
+      showFlashMessage('Không lưu được ví dụ Gemini');
+      debugPrint('SAVE GEMINI EXAMPLES ERROR: $e');
+    }
+  }
+
   Future<void> deleteCurrentCard() async {
     final card = currentCard;
     if (card == null) return;
@@ -6044,6 +6566,7 @@ void exitFlashCards() {
                     ),
                   Spacer(),
                   buildCardIcon(Icons.edit, openEditCardDialog),
+                  buildGeminiCardIcon(openGeminiExampleDialog),
                   buildCardIcon(Icons.volume_up_outlined, playCurrentCardAudio),
                   buildCardIcon(Icons.mic_none, openMicOverlay),
                   buildCardIcon(
@@ -6119,6 +6642,21 @@ void exitFlashCards() {
     );
   }
 
+  Widget buildGeminiCardIcon(VoidCallback onTap) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          width: 34,
+          height: 32,
+          alignment: Alignment.center,
+          child: geminiColorIcon(size: 21),
+        ),
+      ),
+    );
+  }
 
   Widget buildCompletionOverlay() {
   return Positioned.fill(
@@ -6378,6 +6916,119 @@ class ReviewPracticePage extends StatefulWidget {
   State<ReviewPracticePage> createState() => _ReviewPracticePageState();
 }
 
+class _GeneratedSentenceQuestion {
+  final int cardId;
+  final String question;
+  final String answer;
+
+  _GeneratedSentenceQuestion({
+    required this.cardId,
+    required this.question,
+    required this.answer,
+  });
+}
+
+class _GeminiTextGradeItem {
+  final int cardId;
+  final bool isCorrect;
+  final String feedback;
+
+  _GeminiTextGradeItem({
+    required this.cardId,
+    required this.isCorrect,
+    required this.feedback,
+  });
+}
+
+class _SilverShimmerBlock extends StatefulWidget {
+  final double? width;
+  final double height;
+  final BorderRadius borderRadius;
+
+  const _SilverShimmerBlock({
+    this.width,
+    required this.height,
+    required this.borderRadius,
+  });
+
+  @override
+  State<_SilverShimmerBlock> createState() => _SilverShimmerBlockState();
+}
+
+class _SilverShimmerBlockState extends State<_SilverShimmerBlock>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: 1300),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: widget.width,
+      height: widget.height,
+      child: ClipRRect(
+        borderRadius: widget.borderRadius,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return AnimatedBuilder(
+              animation: _controller,
+              builder: (context, _) {
+                final width = constraints.maxWidth.isFinite ? constraints.maxWidth : 260.0;
+                final bandWidth = math.max(90.0, width * 0.48);
+                final left = (width + bandWidth) * _controller.value - bandWidth;
+
+                return Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    DecoratedBox(
+                      decoration: BoxDecoration(color: Color(0xffe5eaf0)),
+                    ),
+                    Positioned(
+                      left: left,
+                      top: 0,
+                      bottom: 0,
+                      width: bandWidth,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.centerLeft,
+                            end: Alignment.centerRight,
+                            colors: [
+                              Colors.transparent,
+                              Color(0xffcfd6df).withOpacity(0.65),
+                              Color(0xfff8fafc),
+                              Color(0xffcfd6df).withOpacity(0.65),
+                              Colors.transparent,
+                            ],
+                            stops: [0.0, 0.24, 0.5, 0.76, 1.0],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
 class _ReviewPracticePageState extends State<ReviewPracticePage> {
   final math.Random _random = math.Random();
   final TextEditingController _essayController = TextEditingController();
@@ -6390,12 +7041,16 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
   Set<int> _answeredCards = {};
   Map<int, bool> _correctMap = {};
   Map<int, String> _selectedAnswerMap = {};
+  Map<int, String> _geminiTextFeedbackMap = {};
 
   bool _isLoading = true;
+  bool _isGeneratingSentenceQuiz = false;
+  bool _isGeminiTextGrading = false;
   bool _showSetup = true;
   bool _multipleChoice = true;
   bool _essay = false;
   bool _listening = false;
+  bool _sentenceMode = false;
   bool _answerByDefinition = true;
   bool _finished = false;
   int _questionLimit = 0;
@@ -6413,6 +7068,13 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
   int get _done => _answeredCards.length;
   int get _correct => _correctMap.values.where((e) => e).length;
   int get _wrong => _done - _correct;
+  int get _displayTotal => _isGeneratingSentenceQuiz
+      ? (_questionLimit <= 0 ? _cards.length : _questionLimit.clamp(1, _cards.length).toInt())
+      : (_total == 0 ? _cards.length : _total);
+  bool get _usesGeminiTextGrading =>
+      (_essay || _sentenceMode) && !_multipleChoice && !_listening;
+
+  String _geminiTextResultScript = '';
 
   @override
   void initState() {
@@ -6468,6 +7130,7 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
     final savedMultipleChoice = await AppSettingsStore.getBool('review.multipleChoice');
     final savedEssay = await AppSettingsStore.getBool('review.essay');
     final savedListening = await AppSettingsStore.getBool('review.listening');
+    final savedSentenceMode = await AppSettingsStore.getBool('review.sentenceMode');
     final savedAnswerByDefinition = await AppSettingsStore.getBool('review.answerByDefinition');
     final savedQuestionLimit = await AppSettingsStore.getInt('review.questionLimit');
 
@@ -6477,14 +7140,16 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
       _multipleChoice = savedMultipleChoice ?? _multipleChoice;
       _essay = savedEssay ?? _essay;
       _listening = savedListening ?? _listening;
+      _sentenceMode = savedSentenceMode ?? _sentenceMode;
 
-      final activeModes = [_multipleChoice, _essay, _listening].where((e) => e).length;
+      final activeModes = [_multipleChoice, _essay, _listening, _sentenceMode].where((e) => e).length;
       if (activeModes == 0) {
         _multipleChoice = true;
       }
       if (activeModes > 1) {
         _essay = false;
         _listening = false;
+        _sentenceMode = false;
         _multipleChoice = true;
       }
 
@@ -6500,6 +7165,7 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
       AppSettingsStore.setBool('review.multipleChoice', _multipleChoice),
       AppSettingsStore.setBool('review.essay', _essay),
       AppSettingsStore.setBool('review.listening', _listening),
+      AppSettingsStore.setBool('review.sentenceMode', _sentenceMode),
       AppSettingsStore.setBool('review.answerByDefinition', _answerByDefinition),
       AppSettingsStore.setInt('review.questionLimit', _questionLimit),
     ]);
@@ -6645,6 +7311,7 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
   }
 
   String _promptOf(StudyCardItem card) {
+    if (_sentenceMode) return card.term;
     return _answerByDefinition ? card.term : card.definition;
   }
 
@@ -6654,6 +7321,7 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
   }
 
   String _answerOf(StudyCardItem card) {
+    if (_sentenceMode) return card.definition;
     return _answerByDefinition ? card.definition : card.term;
   }
 
@@ -6745,6 +7413,160 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
     return _acceptedEssayAnswersOf(card).contains(answer);
   }
 
+
+
+  bool _isSentenceAnswerCorrect(StudyCardItem card, String typed) {
+    final answer = _normalizeAnswer(typed);
+    final expected = _normalizeAnswer(_answerOf(card));
+    if (answer.isEmpty || expected.isEmpty) return false;
+    if (answer == expected) return true;
+    if (answer.contains(expected)) return true;
+    if (calcSimilarity(answer, expected) >= 0.82) return true;
+    return false;
+  }
+
+  String _extractJsonObject(String raw) {
+    final text = raw.trim();
+    final first = text.indexOf('{');
+    final last = text.lastIndexOf('}');
+    if (first >= 0 && last > first) {
+      return text.substring(first, last + 1);
+    }
+    return text;
+  }
+
+  bool _boolFromGeminiValue(Object? value) {
+    if (value is bool) return value;
+    final text = value?.toString().trim().toLowerCase() ?? '';
+    return text == 'true' || text == '1' || text == 'yes' || text == 'đúng';
+  }
+
+  Future<List<_GeminiTextGradeItem>> _gradeTextAnswersWithGemini() async {
+    final payload = _quizCards.map((card) {
+      return {
+        'cardId': card.id,
+        'question': _promptOf(card),
+        'expectedAnswer': _answerOf(card),
+        'studentAnswer': _selectedAnswerMap[card.id] ?? '',
+        'answerDirection': _answerByDefinition ? 'vi' : widget.courseLanguageCode,
+        'localExactCorrect': _correctMap[card.id] == true,
+      };
+    }).toList();
+
+    final prompt = '''
+Bạn là giám khảo chấm bài tự luận flashcard cho người Việt học ngoại ngữ.
+Chế độ: ${_sentenceMode ? 'kiểm tra đặt câu' : 'tự luận'}
+Ngôn ngữ học phần: ${widget.courseLanguageCode}
+Hướng trả lời: ${_answerByDefinition ? 'người học trả lời bằng tiếng Việt hoặc nghĩa tiếng Việt' : 'người học trả lời bằng từ/câu của ngôn ngữ học phần'}
+
+Tiêu chí chấm:
+- Chấm ĐÚNG nếu câu trả lời cùng nghĩa hoặc tương đương nghĩa với expectedAnswer, dù khác chữ.
+- Với kiểm tra đặt câu, chấp nhận câu khác nếu diễn đạt cùng ý giao tiếp với expectedAnswer.
+- Chấm SAI nếu câu trả lời rỗng, sai trọng tâm, sai ngôn ngữ cần trả lời, hoặc quá xa nghĩa expectedAnswer.
+- Nếu vừa sai cấu trúc/câu vừa quá xa nghĩa thì chắc chắn SAI.
+- Không chấm quá khắt khe lỗi dấu câu, hoa thường, hoặc khác biệt nhỏ không đổi nghĩa.
+
+Chỉ trả về JSON object hợp lệ, không markdown:
+{
+  "script": "nhận xét ngắn bằng tiếng Việt về kết quả chung",
+  "items": [
+    {"cardId": 1, "isCorrect": true, "feedback": "nhận xét ngắn"}
+  ]
+}
+
+Dữ liệu bài làm:
+${jsonEncode(payload)}
+''';
+
+    final text = await GeminiFlashLiteClient.generateText(
+      prompt,
+      maxOutputTokens: 8192,
+      responseMimeType: 'application/json',
+    );
+    final decoded = jsonDecode(_extractJsonObject(text));
+    if (decoded is! Map) {
+      throw FormatException('Gemini grading response is not an object');
+    }
+
+    final script = decoded['script']?.toString().trim() ?? '';
+    final items = decoded['items'];
+    if (items is! List) {
+      throw FormatException('Gemini grading response has no items');
+    }
+
+    final results = <_GeminiTextGradeItem>[];
+    for (final item in items) {
+      if (item is! Map) continue;
+      final cardId = int.tryParse(item['cardId']?.toString() ?? '');
+      if (cardId == null) continue;
+
+      final isCorrect = _boolFromGeminiValue(item['isCorrect']);
+      final feedback = item['feedback']?.toString().trim() ?? '';
+      results.add(_GeminiTextGradeItem(
+        cardId: cardId,
+        isCorrect: isCorrect,
+        feedback: feedback.isEmpty
+            ? (isCorrect
+                ? 'Gemini chấp nhận vì câu trả lời tương đồng nghĩa.'
+                : 'Gemini đánh dấu sai vì câu trả lời chưa đủ gần nghĩa đáp án.')
+            : feedback,
+      ));
+    }
+
+    if (results.isEmpty) {
+      throw FormatException('Gemini grading response returned no valid items');
+    }
+
+    _geminiTextResultScript = script.isEmpty
+        ? 'Gemini đã chấm theo mức độ tương đồng nghĩa của toàn bộ câu trả lời.'
+        : script;
+    return results;
+  }
+
+  Future<void> _recordFinalTextResults() async {
+    for (final card in _quizCards) {
+      await _recordStudyResult(
+        card: card,
+        answerText: _selectedAnswerMap[card.id] ?? '',
+        isCorrect: _correctMap[card.id] == true,
+      );
+    }
+  }
+
+  Future<void> _finalizeTextModeWithGemini() async {
+    if (_isGeminiTextGrading) return;
+
+    setState(() => _isGeminiTextGrading = true);
+
+    try {
+      final grades = await _gradeTextAnswersWithGemini();
+      if (!mounted) return;
+      setState(() {
+        for (final grade in grades) {
+          _correctMap[grade.cardId] = grade.isCorrect;
+          if (grade.feedback.trim().isNotEmpty) {
+            _geminiTextFeedbackMap[grade.cardId] = grade.feedback;
+          }
+        }
+      });
+    } catch (e) {
+      debugPrint('GEMINI TEXT GRADING ERROR: $e');
+      if (mounted) {
+        setState(() {
+          _geminiTextResultScript =
+              'Gemini không chấm được lần này, app dùng kết quả chấm nhanh tại máy.';
+        });
+        _showMessage('Gemini chấm tự luận lỗi, dùng kết quả tạm');
+      }
+    } finally {
+      if (mounted) setState(() => _isGeminiTextGrading = false);
+    }
+
+    await _recordFinalTextResults();
+    await _finishStudySession();
+    if (mounted) _showResultSheet();
+  }
+
   List<String> _buildChoices(StudyCardItem target) {
     final correct = _optionLabelOf(target);
     final wrongPool = _cards
@@ -6765,19 +7587,303 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
     return options;
   }
 
+  String _extractJsonArray(String raw) {
+    final text = raw.trim();
+    final first = text.indexOf('[');
+    final last = text.lastIndexOf(']');
+    if (first >= 0 && last > first) {
+      return text.substring(first, last + 1);
+    }
+    return text;
+  }
+
+  String _cleanGeneratedSentence(String value) {
+    return value
+        .trim()
+        .replaceAll(RegExp(r'^\s*[-*\d.)]+\s*'), '')
+        .replaceAll(RegExp(r'\s+'), ' ');
+  }
+
+  List<_GeneratedSentenceQuestion> _parseGeneratedSentenceQuestions(String raw) {
+    final decoded = jsonDecode(_extractJsonArray(raw));
+    if (decoded is! List) {
+      throw FormatException('Gemini sentence response is not a list');
+    }
+
+    final questions = <_GeneratedSentenceQuestion>[];
+    for (final item in decoded) {
+      if (item is! Map) continue;
+      final cardId = int.tryParse(item['cardId']?.toString() ?? '');
+      final question = _cleanGeneratedSentence(item['question']?.toString() ?? '');
+      final answer = _cleanGeneratedSentence(item['answer']?.toString() ?? '');
+      if (cardId == null || question.isEmpty || answer.isEmpty) continue;
+
+      questions.add(_GeneratedSentenceQuestion(
+        cardId: cardId,
+        question: question,
+        answer: answer,
+      ));
+    }
+
+    return questions;
+  }
+
+  List<StudyCardItem> _fallbackSentenceCards(List<StudyCardItem> selected) {
+    return selected.map((card) {
+      return card.copyWith(
+        term: _answerByDefinition ? card.term : card.definition,
+        definition: _answerByDefinition ? card.definition : card.term,
+      );
+    }).toList();
+  }
+
+  String _reviewLanguageNameFromCode(String code) {
+    switch (code) {
+      case 'zh-CN':
+        return 'Tiếng Trung Giản thể';
+      case 'zh-TW':
+        return 'Tiếng Trung Phồn thể';
+      case 'en-US':
+        return 'Tiếng Anh';
+      case 'de-DE':
+        return 'Tiếng Đức';
+      case 'ja-JP':
+        return 'Tiếng Nhật';
+      case 'ko-KR':
+        return 'Tiếng Hàn';
+      case 'vi-VN':
+        return 'Tiếng Việt';
+      default:
+        return code.isEmpty ? 'Ngoại ngữ' : code;
+    }
+  }
+
+  String _sentenceDirectionKey() {
+    return _answerByDefinition ? 'foreign_to_vi' : 'vi_to_foreign';
+  }
+
+  Future<Map<int, _GeneratedSentenceQuestion>> _loadCachedSentenceQuestions(
+    List<StudyCardItem> selected,
+  ) async {
+    if (selected.isEmpty) return {};
+
+    final ids = selected.map((card) => card.id).toList();
+    final cardsById = {for (final card in selected) card.id: card};
+    final placeholders = List.filled(ids.length, '?').join(',');
+    final db = await AppDatabase.instance.database;
+    final rows = await db.query(
+      'review_sentence_questions',
+      where:
+          'courseId = ? AND languageCode = ? AND direction = ? AND cardId IN ($placeholders)',
+      whereArgs: [
+        widget.courseId,
+        widget.courseLanguageCode,
+        _sentenceDirectionKey(),
+        ...ids,
+      ],
+    );
+
+    final cached = <int, _GeneratedSentenceQuestion>{};
+    for (final row in rows) {
+      final cardId = row['cardId'] as int?;
+      if (cardId == null) continue;
+
+      final card = cardsById[cardId];
+      if (card == null) continue;
+      if ((row['sourceTerm']?.toString() ?? '') != card.term) continue;
+      if ((row['sourceDefinition']?.toString() ?? '') != card.definition) continue;
+
+      final question = row['question']?.toString() ?? '';
+      final answer = row['answer']?.toString() ?? '';
+      if (question.trim().isEmpty || answer.trim().isEmpty) continue;
+
+      cached[cardId] = _GeneratedSentenceQuestion(
+        cardId: cardId,
+        question: question,
+        answer: answer,
+      );
+    }
+
+    return cached;
+  }
+
+  Future<void> _saveSentenceQuestions(
+    List<StudyCardItem> sourceCards,
+    List<_GeneratedSentenceQuestion> questions,
+  ) async {
+    if (questions.isEmpty) return;
+
+    final db = await AppDatabase.instance.database;
+    final cardsById = {for (final card in sourceCards) card.id: card};
+    final now = DateTime.now().toIso8601String();
+
+    for (final item in questions) {
+      final card = cardsById[item.cardId];
+      if (card == null) continue;
+
+      await db.insert(
+        'review_sentence_questions',
+        {
+          'courseId': widget.courseId,
+          'cardId': card.id,
+          'languageCode': widget.courseLanguageCode,
+          'direction': _sentenceDirectionKey(),
+          'sourceTerm': card.term,
+          'sourceDefinition': card.definition,
+          'question': item.question,
+          'answer': item.answer,
+          'createdAt': now,
+          'updatedAt': now,
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+  }
+
+  Future<List<StudyCardItem>> _selectSentenceSourceCards({
+    required List<StudyCardItem> shuffled,
+    required int limit,
+  }) async {
+    final cachedById = await _loadCachedSentenceQuestions(_cards);
+    final cachedIds = cachedById.keys.toSet();
+    final selected = <StudyCardItem>[];
+    final selectedIds = <int>{};
+
+    for (final card in shuffled) {
+      if (!cachedIds.contains(card.id)) continue;
+      selected.add(card);
+      selectedIds.add(card.id);
+      if (selected.length >= limit) return selected;
+    }
+
+    for (final card in shuffled) {
+      if (selectedIds.contains(card.id)) continue;
+      selected.add(card);
+      selectedIds.add(card.id);
+      if (selected.length >= limit) break;
+    }
+
+    return selected;
+  }
+
+  Future<List<StudyCardItem>> _buildSentenceQuizCards(List<StudyCardItem> selected) async {
+    if (selected.isEmpty) return selected;
+
+    final fallback = _fallbackSentenceCards(selected);
+    final fallbackById = {for (final card in fallback) card.id: card};
+    final cachedById = await _loadCachedSentenceQuestions(selected);
+    final missing = selected.where((card) => !cachedById.containsKey(card.id)).toList();
+    final generatedById = Map<int, _GeneratedSentenceQuestion>.from(cachedById);
+
+    List<StudyCardItem> buildCardsFromAvailable() {
+      return selected.map((card) {
+        final item = generatedById[card.id];
+        if (item == null) return fallbackById[card.id] ?? card;
+        return card.copyWith(term: item.question, definition: item.answer);
+      }).toList();
+    }
+
+    if (missing.isEmpty) {
+      return buildCardsFromAvailable();
+    }
+
+    final cardsJson = jsonEncode(missing.map((card) {
+      return {
+        'cardId': card.id,
+        'term': card.term,
+        'definition': card.definition,
+      };
+    }).toList());
+    final direction = _answerByDefinition
+        ? 'question la cau trong ngon ngu hoc phan co dung tu vung; answer la ban dich tieng Viet.'
+        : 'question la cau tieng Viet; answer la cau trong ngon ngu hoc phan co dung tu vung.';
+
+    final prompt = '''
+Ban la tro ly tao de kiem tra dat cau cho nguoi Viet hoc ngoai ngu.
+Ngon ngu hoc phan: ${widget.courseLanguageCode} (${_reviewLanguageNameFromCode(widget.courseLanguageCode)})
+So cau can tao: ${missing.length}
+Huong cau hoi: $direction
+
+Yeu cau:
+- Tao dung ${missing.length} cau, moi cardId dung 1 cau.
+- Tra ve day du moi cardId trong du lieu the, khong duoc bo sot.
+- Uu tien cau giao tiep doi thuong, tu nhien, co the dung trong hoi thoai hang ngay.
+- Khong tao cau hoc thuat, khong cau may moc, khong qua dai.
+- Cau trong ngon ngu hoc phan phai dung dung term cua card tuong ung.
+- Khong them giai thich, khong markdown.
+- Chi tra ve JSON array hop le theo mau:
+[{"cardId":1,"question":"...","answer":"..."}]
+
+Du lieu the:
+$cardsJson
+''';
+
+    try {
+      final text = await GeminiFlashLiteClient.generateText(
+        prompt,
+        maxOutputTokens: 8192,
+        responseMimeType: 'application/json',
+      );
+      final generated = _parseGeneratedSentenceQuestions(text);
+      if (generated.isEmpty) {
+        throw FormatException('Gemini did not return sentence items');
+      }
+      await _saveSentenceQuestions(missing, generated);
+      for (final item in generated) {
+        generatedById[item.cardId] = item;
+      }
+
+      return buildCardsFromAvailable();
+    } catch (e) {
+      debugPrint('GENERATE SENTENCE REVIEW ERROR: $e');
+      if (mounted) {
+        _showMessage(cachedById.isEmpty
+            ? 'Gemini lỗi hoặc hết quota, dùng tạm dữ liệu thẻ'
+            : 'Thiếu một số câu mới, dùng câu đã lưu trước');
+      }
+      return buildCardsFromAvailable();
+    }
+  }
+
   Future<void> _startQuiz() async {
     if (_cards.isEmpty) return;
 
     final copied = List<StudyCardItem>.from(_cards)..shuffle(_random);
     final limit = _questionLimit.clamp(1, _cards.length).toInt();
-    final selected = copied.take(limit).toList();
+    var selected = copied.take(limit).toList();
+    if (_sentenceMode) {
+      selected = await _selectSentenceSourceCards(
+        shuffled: copied,
+        limit: limit,
+      );
+      if (!mounted) return;
+      setState(() {
+        _isGeneratingSentenceQuiz = true;
+        _isGeminiTextGrading = false;
+        _showSetup = false;
+        _quizCards.clear();
+        _choiceMap.clear();
+        _answeredCards.clear();
+        _correctMap.clear();
+        _selectedAnswerMap.clear();
+        _geminiTextFeedbackMap.clear();
+        _geminiTextResultScript = '';
+        _finished = false;
+        _currentEssayIndex = 0;
+        _essayController.clear();
+      });
+      selected = await _buildSentenceQuizCards(selected);
+      if (!mounted) return;
+    }
     final now = DateTime.now();
 
     setState(() {
       _quizCards = selected;
       _choiceMap = {
         for (final card in selected)
-          card.id: _listening ? _buildListeningChoices(card) : _buildChoices(card),
+          card.id: _listening
+              ? _buildListeningChoices(card)
+              : (_sentenceMode ? <String>[] : _buildChoices(card)),
       };
       _questionKeys
         ..clear()
@@ -6787,12 +7893,16 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
       _answeredCards.clear();
       _correctMap.clear();
       _selectedAnswerMap.clear();
+      _geminiTextFeedbackMap.clear();
+      _geminiTextResultScript = '';
+      _isGeminiTextGrading = false;
       _selectedListeningAnswer = null;
       _recordedResultCardIds.clear();
       _cardStartedAtMap
         ..clear()
         ..addEntries(selected.map((card) => MapEntry(card.id, now)));
       _finished = false;
+      _isGeneratingSentenceQuiz = false;
       _showSetup = false;
       _currentEssayIndex = 0;
       _essayQuestionStartedAt = now;
@@ -6802,7 +7912,7 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
     await _startStudySession(
       mode: _listening
           ? 'review_listening'
-          : (_multipleChoice ? 'review_multiple_choice' : 'review_essay'),
+          : (_sentenceMode ? 'review_sentence' : (_multipleChoice ? 'review_multiple_choice' : 'review_essay')),
       totalCards: selected.length,
     );
 
@@ -6817,6 +7927,8 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
     await _finishStudySession();
     setState(() {
       _showSetup = true;
+      _isGeneratingSentenceQuiz = false;
+      _isGeminiTextGrading = false;
       _finished = false;
     });
     _openSetupSheet();
@@ -6890,7 +8002,7 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
     final firstWrongIndex = _quizCards.indexWhere((e) => e.id == firstWrong.id);
 
     setState(() {
-      if ((_essay || _listening) && !_multipleChoice && firstWrongIndex >= 0) {
+      if ((_essay || _listening || _sentenceMode) && !_multipleChoice && firstWrongIndex >= 0) {
         _currentEssayIndex = firstWrongIndex;
         _selectedListeningAnswer = null;
         _essayController.clear();
@@ -6918,9 +8030,12 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
             final yourAnswer = (_selectedAnswerMap[wrongCard.id] ?? '').trim();
             final promptText = _listening ? wrongCard.term.trim() : _promptOf(wrongCard).trim();
             final correctAnswer = (_listening ? wrongCard.definition : _answerOf(wrongCard)).trim();
+            final geminiFeedback = _geminiTextFeedbackMap[wrongCard.id]?.trim() ?? '';
             final promptTitle = _listening
                 ? 'Âm thanh đã phát'
-                : (_answerByDefinition ? 'Thuật ngữ' : 'Định nghĩa');
+                : (_sentenceMode
+                    ? (_answerByDefinition ? 'Câu ngoại ngữ' : 'Câu tiếng Việt')
+                    : (_answerByDefinition ? 'Thuật ngữ' : 'Định nghĩa'));
 
             void moveReview(int delta) {
               final nextIndex = (reviewIndex + delta).clamp(0, wrongCards.length - 1).toInt();
@@ -6932,7 +8047,7 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
 
               final nextCard = wrongCards[nextIndex];
               final nextRealIndex = _quizCards.indexWhere((e) => e.id == nextCard.id);
-              if ((_essay || _listening) && !_multipleChoice && nextRealIndex >= 0) {
+              if ((_essay || _listening || _sentenceMode) && !_multipleChoice && nextRealIndex >= 0) {
                 setState(() {
                   _currentEssayIndex = nextRealIndex;
                   _selectedListeningAnswer = null;
@@ -7000,6 +8115,10 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
                                 ],
                               ),
                             ),
+                            if (geminiFeedback.isNotEmpty) ...[
+                              SizedBox(width: 8),
+                              geminiColorIcon(size: 24),
+                            ],
                             IconButton(
                               onPressed: () => Navigator.pop(sheetContext),
                               icon: Icon(Icons.close_rounded, color: AppColors.border),
@@ -7062,6 +8181,10 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
                           icon: Icons.check_rounded,
                           color: AppColors.green,
                         ),
+                        if (geminiFeedback.isNotEmpty) ...[
+                          SizedBox(height: 12),
+                          _geminiReviewBox(geminiFeedback),
+                        ],
                         SizedBox(height: 16),
                         Row(
                           children: [
@@ -7155,7 +8278,7 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
   }
 
   Future<void> _submitEssay({bool allowEmptyAsSkip = false}) async {
-    if (_quizCards.isEmpty) return;
+    if (_quizCards.isEmpty || _finished || _isGeminiTextGrading) return;
     final card = _quizCards[_currentEssayIndex];
     final typed = _essayController.text.trim();
 
@@ -7164,7 +8287,7 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
       return;
     }
 
-    final ok = _isEssayAnswerCorrect(card, typed);
+    final ok = _sentenceMode ? _isSentenceAnswerCorrect(card, typed) : _isEssayAnswerCorrect(card, typed);
     final wasLast = _currentEssayIndex + 1 >= _quizCards.length;
 
     setState(() {
@@ -7183,15 +8306,21 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
       }
     });
 
-    await _recordStudyResult(
-      card: card,
-      answerText: typed,
-      isCorrect: ok,
-    );
+    if (!_usesGeminiTextGrading) {
+      await _recordStudyResult(
+        card: card,
+        answerText: typed,
+        isCorrect: ok,
+      );
+    }
 
     if (_finished) {
-      await _finishStudySession();
-      _showResultSheet();
+      if (_usesGeminiTextGrading) {
+        await _finalizeTextModeWithGemini();
+      } else {
+        await _finishStudySession();
+        _showResultSheet();
+      }
     }
   }
 
@@ -7300,16 +8429,18 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
         bool localMc = _multipleChoice;
         bool localEssay = _essay;
         bool localListening = _listening;
+        bool localSentenceMode = _sentenceMode;
         bool localAnswerByDefinition = _answerByDefinition;
 
         return StatefulBuilder(
           builder: (context, setSheetState) {
-            void setMode({bool? mc, bool? essay, bool? listening}) {
+            void setMode({bool? mc, bool? essay, bool? listening, bool? sentence}) {
               setSheetState(() {
                 if (mc == true) {
                   localMc = true;
                   localEssay = false;
                   localListening = false;
+                  localSentenceMode = false;
                   return;
                 }
 
@@ -7317,6 +8448,7 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
                   localEssay = true;
                   localMc = false;
                   localListening = false;
+                  localSentenceMode = false;
                   return;
                 }
 
@@ -7324,12 +8456,22 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
                   localListening = true;
                   localMc = false;
                   localEssay = false;
+                  localSentenceMode = false;
+                  return;
+                }
+
+                if (sentence == true) {
+                  localSentenceMode = true;
+                  localMc = false;
+                  localEssay = false;
+                  localListening = false;
                   return;
                 }
 
                 localMc = true;
                 localEssay = false;
                 localListening = false;
+                localSentenceMode = false;
               });
             }
 
@@ -7453,6 +8595,11 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
                         value: localListening,
                         onChanged: (v) => setMode(listening: v),
                       ),
+                      _switchTile(
+                        text: 'Kiểm tra đặt câu',
+                        value: localSentenceMode,
+                        onChanged: (v) => setMode(sentence: v),
+                      ),
                       SizedBox(height: 14),
                       Align(
                         alignment: Alignment.centerRight,
@@ -7465,8 +8612,9 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
                               _questionLimit = localLimit;
                               _multipleChoice = localMc;
                               _essay = !localMc && localEssay;
-                              _listening = !localMc && !localEssay && localListening;
-                              if (!_multipleChoice && !_essay && !_listening) {
+                              _listening = !localMc && !localEssay && !localSentenceMode && localListening;
+                              _sentenceMode = !localMc && !localEssay && !localListening && localSentenceMode;
+                              if (!_multipleChoice && !_essay && !_listening && !_sentenceMode) {
                                 _multipleChoice = true;
                               }
                               _answerByDefinition = localAnswerByDefinition;
@@ -7512,69 +8660,77 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
                   ),
                 ],
               ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.emoji_events_outlined, color: AppColors.border, size: 54),
-                  SizedBox(height: 10),
-                  Text(
-                    'Kết quả ôn tập',
-                    style: TextStyle(
-                      color: AppColors.text,
-                      fontSize: 24,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                  SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(child: _resultBox('Đúng', '$_correct', AppColors.green)),
-                      SizedBox(width: 10),
-                      Expanded(child: _resultBox('Sai', '$_wrong', AppColors.red)),
-                      SizedBox(width: 10),
-                      Expanded(child: _resultBox('Tổng', '$_total', AppColors.blue)),
-                    ],
-                  ),
-                  SizedBox(height: 14),
-                  if ((_essay || _listening) && !_multipleChoice && _wrong > 0) ...[
-                    SizedBox(
-                      width: double.infinity,
-                      child: _solidButton(
-                        text: 'Xem lại câu sai',
-                        icon: Icons.fact_check_rounded,
-                        color: AppColors.blue,
-                        onTap: _openWrongReviewFromResult,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _geminiTextResultScript.trim().isNotEmpty
+                        ? geminiColorIcon(size: 54)
+                        : Icon(Icons.emoji_events_outlined, color: AppColors.border, size: 54),
+                    SizedBox(height: 10),
+                    Text(
+                      'Kết quả ôn tập',
+                      style: TextStyle(
+                        color: AppColors.text,
+                        fontSize: 24,
+                        fontWeight: FontWeight.w900,
                       ),
                     ),
                     SizedBox(height: 12),
-                  ],
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _outlineButton(
-                          text: 'Thoát',
-                          icon: Icons.logout_rounded,
-                          onTap: () {
-                            Navigator.pop(context);
-                            Navigator.pop(this.context);
-                          },
-                        ),
-                      ),
-                      SizedBox(width: 10),
-                      Expanded(
-                        child: _solidButton(
-                          text: 'Ôn lại',
-                          icon: Icons.refresh_rounded,
-                          color: AppColors.yellow,
-                          onTap: () {
-                            Navigator.pop(context);
-                            _restart();
-                          },
-                        ),
-                      ),
+                    Row(
+                      children: [
+                        Expanded(child: _resultBox('Đúng', '$_correct', AppColors.green)),
+                        SizedBox(width: 10),
+                        Expanded(child: _resultBox('Sai', '$_wrong', AppColors.red)),
+                        SizedBox(width: 10),
+                        Expanded(child: _resultBox('Tổng', '$_total', AppColors.blue)),
+                      ],
+                    ),
+                    SizedBox(height: 14),
+                    if (_geminiTextResultScript.trim().isNotEmpty) ...[
+                      _geminiReviewBox(_geminiTextResultScript.trim()),
+                      SizedBox(height: 14),
                     ],
-                  ),
-                ],
+                    if ((_essay || _listening || _sentenceMode) && !_multipleChoice && _wrong > 0) ...[
+                      SizedBox(
+                        width: double.infinity,
+                        child: _solidButton(
+                          text: 'Xem lại câu sai',
+                          icon: Icons.fact_check_rounded,
+                          color: AppColors.blue,
+                          onTap: _openWrongReviewFromResult,
+                        ),
+                      ),
+                      SizedBox(height: 12),
+                    ],
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _outlineButton(
+                            text: 'Thoát',
+                            icon: Icons.logout_rounded,
+                            onTap: () {
+                              Navigator.pop(context);
+                              Navigator.pop(this.context);
+                            },
+                          ),
+                        ),
+                        SizedBox(width: 10),
+                        Expanded(
+                          child: _solidButton(
+                            text: 'Ôn lại',
+                            icon: Icons.refresh_rounded,
+                            color: AppColors.yellow,
+                            onTap: () {
+                              Navigator.pop(context);
+                              _restart();
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -7803,6 +8959,36 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
                 fontSize: 18,
                 fontWeight: FontWeight.w900,
                 height: 1.25,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _geminiReviewBox(String text) {
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border.withOpacity(0.45), width: 1.2),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          geminiColorIcon(size: 23),
+          SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(
+                color: AppColors.text,
+                fontSize: 15,
+                fontWeight: FontWeight.w800,
+                height: 1.28,
               ),
             ),
           ),
@@ -8059,11 +9245,12 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
                 children: [
                   _statChip(text: '$displayIndex/$_total', color: AppColors.blue),
                   Spacer(),
+                  if (_sentenceMode) geminiColorIcon(size: 24),
                 ],
               ),
               SizedBox(height: 24),
               Text(
-                _answerByDefinition ? 'Thuật ngữ' : 'Định nghĩa',
+                _sentenceMode ? (_answerByDefinition ? 'Câu ngoại ngữ' : 'Câu tiếng Việt') : (_answerByDefinition ? 'Thuật ngữ' : 'Định nghĩa'),
                 style: TextStyle(
                   color: AppColors.muted,
                   fontWeight: FontWeight.w900,
@@ -8106,7 +9293,7 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
                   fontSize: 16,
                 ),
                 decoration: InputDecoration(
-                  hintText: _answerByDefinition ? 'Nhập Tiếng Việt' : 'Nhập thuật ngữ',
+                  hintText: _sentenceMode ? (_answerByDefinition ? 'Nhập bản dịch tiếng Việt' : 'Nhập câu ngoại ngữ tương ứng') : (_answerByDefinition ? 'Nhập Tiếng Việt' : 'Nhập thuật ngữ'),
                   filled: true,
                   fillColor: Color(0xfff7f9fc),
                   contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 16),
@@ -8380,6 +9567,146 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
     );
   }
 
+  Widget _loadingShimmer({
+    double? width,
+    required double height,
+    double radius = 14,
+  }) {
+    return _SilverShimmerBlock(
+      width: width,
+      height: height,
+      borderRadius: BorderRadius.circular(radius),
+    );
+  }
+
+  Widget _buildSentenceGeneratingMode() {
+    final total = _displayTotal;
+
+    return Center(
+      child: SingleChildScrollView(
+        padding: EdgeInsets.fromLTRB(16, 18, 16, 100),
+        child: Container(
+          constraints: BoxConstraints(maxWidth: 720),
+          padding: EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: AppColors.border, width: 1.4),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.border,
+                offset: Offset(0, 6),
+                blurRadius: 0,
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  _statChip(text: '0/$total', color: AppColors.blue),
+                  Spacer(),
+                  geminiColorIcon(size: 24),
+                ],
+              ),
+              SizedBox(height: 24),
+              Text(
+                _answerByDefinition ? 'Câu ngoại ngữ' : 'Câu tiếng Việt',
+                style: TextStyle(
+                  color: AppColors.muted,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              SizedBox(height: 14),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final wideLine = math.min(330.0, constraints.maxWidth * 0.86);
+                  final shortLine = math.min(250.0, constraints.maxWidth * 0.66);
+                  return Center(
+                    child: Column(
+                      children: [
+                        _loadingShimmer(width: wideLine, height: 42, radius: 999),
+                        SizedBox(height: 12),
+                        _loadingShimmer(width: shortLine, height: 28, radius: 999),
+                      ],
+                    ),
+                  );
+                },
+              ),
+              SizedBox(height: 28),
+              _loadingShimmer(height: 52, radius: 18),
+              SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(child: _loadingShimmer(height: 50, radius: 16)),
+                  SizedBox(width: 10),
+                  Expanded(child: _loadingShimmer(height: 50, radius: 16)),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGeminiTextGradingMode() {
+    return Center(
+      child: SingleChildScrollView(
+        padding: EdgeInsets.fromLTRB(16, 18, 16, 100),
+        child: Container(
+          constraints: BoxConstraints(maxWidth: 720),
+          padding: EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: AppColors.border, width: 1.4),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.border,
+                offset: Offset(0, 6),
+                blurRadius: 0,
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  _statChip(text: '$_total/$_total', color: AppColors.blue),
+                  Spacer(),
+                  geminiColorIcon(size: 24),
+                ],
+              ),
+              SizedBox(height: 24),
+              Text(
+                'Gemini đang chấm',
+                style: TextStyle(
+                  color: AppColors.muted,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              SizedBox(height: 14),
+              Center(
+                child: Column(
+                  children: [
+                    _loadingShimmer(width: 280, height: 38, radius: 999),
+                    SizedBox(height: 12),
+                    _loadingShimmer(width: 210, height: 24, radius: 999),
+                  ],
+                ),
+              ),
+              SizedBox(height: 28),
+              _loadingShimmer(height: 52, radius: 18),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -8443,7 +9770,7 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
                           crossAxisAlignment: CrossAxisAlignment.center,
                           children: [
                             Text(
-                              '$_done / ${_total == 0 ? _cards.length : _total}',
+                              '$_done / $_displayTotal',
                               style: TextStyle(
                                 color: AppColors.text,
                                 fontWeight: FontWeight.w900,
@@ -8472,7 +9799,11 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
                   ),
                 ),
                 Expanded(
-                  child: _showSetup || _quizCards.isEmpty
+                  child: _isGeneratingSentenceQuiz
+                      ? _buildSentenceGeneratingMode()
+                      : (_isGeminiTextGrading
+                          ? _buildGeminiTextGradingMode()
+                          : (_showSetup || _quizCards.isEmpty
                       ? Center(
                           child: Padding(
                             padding: EdgeInsets.all(22),
@@ -8528,9 +9859,9 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
                         )
                       : _listening
                           ? _buildListeningMode()
-                          : (_essay && !_multipleChoice
+                          : ((_essay || _sentenceMode) && !_multipleChoice
                               ? _buildEssayMode()
-                              : _buildMultipleChoiceMode()),
+                              : _buildMultipleChoiceMode()))),
                 ),
               ],
             ),

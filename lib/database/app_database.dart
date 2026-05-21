@@ -24,11 +24,12 @@ class AppDatabase {
 
     return await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
       onCreate: _onCreate,
+      onUpgrade: _onUpgrade,
     );
   }
 
@@ -188,6 +189,8 @@ class AppDatabase {
       )
     ''');
 
+    await _createReviewSentenceQuestionsTable(db);
+
     await db.execute('''
       CREATE TABLE import_exports (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -218,6 +221,43 @@ class AppDatabase {
     await _createIndexes(db);
     await _insertDefaultLanguages(db);
     await _insertDefaultSettings(db);
+  }
+
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await _createReviewSentenceQuestionsTable(db);
+    }
+  }
+
+  Future<void> _createReviewSentenceQuestionsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS review_sentence_questions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        courseId INTEGER NOT NULL,
+        cardId INTEGER NOT NULL,
+        languageCode TEXT NOT NULL,
+        direction TEXT NOT NULL,
+        sourceTerm TEXT NOT NULL,
+        sourceDefinition TEXT NOT NULL,
+        question TEXT NOT NULL,
+        answer TEXT NOT NULL,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT,
+
+        FOREIGN KEY (courseId) REFERENCES courses(id) ON DELETE CASCADE,
+        FOREIGN KEY (cardId) REFERENCES cards(id) ON DELETE CASCADE
+      )
+    ''');
+
+    await db.execute(
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_review_sentence_questions_unique '
+      'ON review_sentence_questions(courseId, cardId, languageCode, direction)',
+    );
+
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_review_sentence_questions_course '
+      'ON review_sentence_questions(courseId, languageCode, direction)',
+    );
   }
 
   Future<void> _createIndexes(Database db) async {
