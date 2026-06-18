@@ -17,6 +17,7 @@ class _HomePageState extends State<HomePage> {
   bool _openedByEdgeSwipe = false;
 
   bool isLoadingCourses = false;
+  bool _duePopupShown = false;
   List<CourseListItem> courses = [];
   CourseListItem? selectedHomeCourse;
   String courseSortType = "updatedDesc";

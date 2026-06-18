@@ -68,11 +68,13 @@ class ProgressUndoItem {
 class FlashCardsPage extends StatefulWidget {
   final int courseId;
   final String courseTitle;
+  final bool dueOnly;
 
   FlashCardsPage({
     super.key,
     required this.courseId,
     required this.courseTitle,
+    this.dueOnly = false,
   });
 
   @override
@@ -84,12 +86,16 @@ class ReviewPracticePage extends StatefulWidget {
   final int courseId;
   final String courseTitle;
   final String courseLanguageCode;
+  final bool dueOnly;
+  final String? presetMode;
 
   ReviewPracticePage({
     super.key,
     required this.courseId,
     required this.courseTitle,
     required this.courseLanguageCode,
+    this.dueOnly = false,
+    this.presetMode,
   });
 
   @override

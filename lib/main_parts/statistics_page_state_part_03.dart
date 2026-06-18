@@ -119,18 +119,24 @@ extension StatisticsPageStatePart03 on _StatisticsPageState {
     return this._dashCard(
       title: 'LỊCH THẺ ĐẾN HẠN (7 NGÀY TỚI)',
       icon: Icons.hourglass_empty_rounded,
-      minHeight: 242,
-      child: SizedBox(
-        height: 160,
-        child: CustomPaint(
-          painter: DueSchedulePainter(
-            items: data.dueScheduleItems,
-            lineColor: _dashBlue,
-            textColor: _dashMuted,
-            gridColor: _dashBorder.withOpacity(0.35),
+      minHeight: 306,
+      child: Column(
+        children: [
+          SizedBox(
+            height: 160,
+            child: CustomPaint(
+              painter: DueSchedulePainter(
+                items: data.dueScheduleItems,
+                lineColor: _dashBlue,
+                textColor: _dashMuted,
+                gridColor: _dashBorder.withOpacity(0.35),
+              ),
+              child: SizedBox.expand(),
+            ),
           ),
-          child: SizedBox.expand(),
-        ),
+          SizedBox(height: 14),
+          this._buildDueReviewButton(data),
+        ],
       ),
     );
   }

@@ -194,6 +194,26 @@ extension HomePageStatePart02 on _HomePageState {
     }
 
     await this.loadCourses();
+
+    if (!mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) this.showDueCardsReminderIfNeeded();
+    });
+  }
+
+
+  Future<void> showDueCardsReminderIfNeeded() async {
+    if (_duePopupShown) return;
+    _duePopupShown = true;
+
+    final info = await _loadDueReviewLaunchInfo();
+    if (!mounted || info == null || info.count <= 0) return;
+
+    final shouldOpen = await _showDueTodayReminderDialog(context, info);
+    if (!mounted || shouldOpen != true) return;
+
+    await _openDueReviewFlow(context, initialInfo: info);
+    if (mounted) await this.loadCourses();
   }
 
 

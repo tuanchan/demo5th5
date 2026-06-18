@@ -27,9 +27,12 @@ extension FlashCardsPageStatePart01 on _FlashCardsPageState {
                         )
                       : visibleOrder.isEmpty
                       ? this.buildEmptyState(
-                          title: "Không có thẻ phù hợp",
-                          message:
-                              "Tắt chế độ chỉ học thẻ gắn sao hoặc gắn sao thêm thẻ.",
+                          title: widget.dueOnly
+                              ? "Không có thẻ đến hạn"
+                              : "Không có thẻ phù hợp",
+                          message: widget.dueOnly
+                              ? "Hôm nay chưa có thẻ đến hạn để học."
+                              : "Tắt chế độ chỉ học thẻ gắn sao hoặc gắn sao thêm thẻ.",
                         )
                       : Column(
                           children: [
@@ -84,7 +87,7 @@ extension FlashCardsPageStatePart01 on _FlashCardsPageState {
     if (!mounted) return;
 
     setState(() {
-      starredOnly = savedStarredOnly ?? starredOnly;
+      starredOnly = widget.dueOnly ? false : (savedStarredOnly ?? starredOnly);
       shuffleEnabled = savedShuffle ?? shuffleEnabled;
       progressTracking = savedProgress ?? progressTracking;
       autoPlayAudio = savedAutoPlay ?? autoPlayAudio;
@@ -213,29 +216,71 @@ extension FlashCardsPageStatePart01 on _FlashCardsPageState {
 
     try {
       final db = await AppDatabase.instance.database;
-      final rows = await db.query(
-        'cards',
-        where: 'courseId = ? AND deletedAt IS NULL AND isHidden = 0',
-        whereArgs: [courseId],
-        orderBy: 'position ASC, id ASC',
-      );
 
-      // Load languageCode from course
-      final courseRows = await db.query(
-        'courses',
-        columns: ['languageCode'],
-        where: 'id = ?',
-        whereArgs: [courseId],
-        limit: 1,
-      );
-      final langCode = courseRows.isNotEmpty
-          ? (courseRows.first['languageCode']?.toString() ?? 'zh-TW')
-          : 'zh-TW';
+      List<Map<String, Object?>> rows;
+      String langCode;
+      int? dueSessionCourseId;
+
+      if (widget.dueOnly) {
+        // Load due cards across all courses
+        final now = DateTime.now();
+        final tomorrowStart = DateTime(now.year, now.month, now.day).add(Duration(days: 1));
+        rows = await db.rawQuery('''
+          SELECT ca.* FROM cards ca
+          INNER JOIN courses c ON c.id = ca.courseId
+          INNER JOIN review_states rs ON rs.cardId = ca.id
+          WHERE ca.deletedAt IS NULL
+            AND ca.isHidden = 0
+            AND c.deletedAt IS NULL
+            AND COALESCE(rs.repetitionCount, 0) > 0
+            AND rs.nextReviewAt IS NOT NULL
+            AND rs.nextReviewAt < ?
+          ORDER BY rs.nextReviewAt ASC, ca.position ASC, ca.id ASC
+        ''', [tomorrowStart.toIso8601String()]);
+
+        // Get language from first due card's course
+        if (rows.isNotEmpty) {
+          final firstCourseId = rows.first['courseId'];
+          dueSessionCourseId = _dbInt(firstCourseId);
+          final courseRows = await db.query(
+            'courses',
+            columns: ['languageCode'],
+            where: 'id = ?',
+            whereArgs: [firstCourseId],
+            limit: 1,
+          );
+          langCode = courseRows.isNotEmpty
+              ? (courseRows.first['languageCode']?.toString() ?? 'zh-TW')
+              : 'zh-TW';
+        } else {
+          langCode = 'zh-TW';
+        }
+      } else {
+        rows = await db.query(
+          'cards',
+          where: 'courseId = ? AND deletedAt IS NULL AND isHidden = 0',
+          whereArgs: [courseId],
+          orderBy: 'position ASC, id ASC',
+        );
+
+        // Load languageCode from course
+        final courseRows = await db.query(
+          'courses',
+          columns: ['languageCode'],
+          where: 'id = ?',
+          whereArgs: [courseId],
+          limit: 1,
+        );
+        langCode = courseRows.isNotEmpty
+            ? (courseRows.first['languageCode']?.toString() ?? 'zh-TW')
+            : 'zh-TW';
+      }
 
       if (!mounted) return;
 
       setState(() {
         allCards = rows.map((e) => StudyCardItem.fromMap(e)).toList();
+        selectedCourseId = widget.dueOnly ? (dueSessionCourseId ?? courseId) : courseId;
         _languageCode = langCode;
         currentPos = 0;
         isFlipped = false;

@@ -30,11 +30,13 @@ extension StatisticsPageStatePart02 on _StatisticsPageState {
         (SELECT COUNT(*)
           FROM cards ca
           INNER JOIN courses c ON c.id = ca.courseId
-          LEFT JOIN review_states rs ON rs.cardId = ca.id
+          INNER JOIN review_states rs ON rs.cardId = ca.id
           WHERE ca.deletedAt IS NULL
             AND ca.isHidden = 0
             AND c.deletedAt IS NULL
-            AND (rs.id IS NULL OR rs.nextReviewAt IS NULL OR rs.nextReviewAt <= ?)
+            AND COALESCE(rs.repetitionCount, 0) > 0
+            AND rs.nextReviewAt IS NOT NULL
+            AND rs.nextReviewAt <= ?
         ) AS needReviewCards,
         (SELECT COUNT(*)
           FROM cards ca
@@ -98,7 +100,7 @@ extension StatisticsPageStatePart02 on _StatisticsPageState {
         c.languageCode,
         COUNT(ca.id) AS totalCards,
         COALESCE(SUM(CASE WHEN COALESCE(rs.level, 0) >= $masteredLevel THEN 1 ELSE 0 END), 0) AS masteredCards,
-        COALESCE(SUM(CASE WHEN ca.id IS NOT NULL AND (rs.id IS NULL OR rs.nextReviewAt IS NULL OR rs.nextReviewAt <= ?) THEN 1 ELSE 0 END), 0) AS needReviewCards,
+        COALESCE(SUM(CASE WHEN ca.id IS NOT NULL AND COALESCE(rs.repetitionCount, 0) > 0 AND rs.nextReviewAt IS NOT NULL AND rs.nextReviewAt <= ? THEN 1 ELSE 0 END), 0) AS needReviewCards,
         (
           SELECT COUNT(DISTINCT sr.cardId)
           FROM study_results sr
@@ -149,13 +151,14 @@ extension StatisticsPageStatePart02 on _StatisticsPageState {
         rs.nextReviewAt
       FROM cards ca
       INNER JOIN courses c ON c.id = ca.courseId
-      LEFT JOIN review_states rs ON rs.cardId = ca.id
+      INNER JOIN review_states rs ON rs.cardId = ca.id
       WHERE ca.deletedAt IS NULL
         AND ca.isHidden = 0
         AND c.deletedAt IS NULL
-        AND (rs.id IS NULL OR rs.nextReviewAt IS NULL OR rs.nextReviewAt <= ?)
+        AND COALESCE(rs.repetitionCount, 0) > 0
+        AND rs.nextReviewAt IS NOT NULL
+        AND rs.nextReviewAt <= ?
       ORDER BY
-        CASE WHEN rs.nextReviewAt IS NULL THEN 0 ELSE 1 END,
         rs.nextReviewAt ASC,
         ca.position ASC,
         ca.id ASC
@@ -189,11 +192,13 @@ extension StatisticsPageStatePart02 on _StatisticsPageState {
               SELECT COUNT(*) AS count
               FROM cards ca
               INNER JOIN courses c ON c.id = ca.courseId
-              LEFT JOIN review_states rs ON rs.cardId = ca.id
+              INNER JOIN review_states rs ON rs.cardId = ca.id
               WHERE ca.deletedAt IS NULL
                 AND ca.isHidden = 0
                 AND c.deletedAt IS NULL
-                AND (rs.id IS NULL OR rs.nextReviewAt IS NULL OR rs.nextReviewAt < ?)
+                AND COALESCE(rs.repetitionCount, 0) > 0
+                AND rs.nextReviewAt IS NOT NULL
+                AND rs.nextReviewAt < ?
             '''
             : '''
               SELECT COUNT(*) AS count
@@ -203,6 +208,8 @@ extension StatisticsPageStatePart02 on _StatisticsPageState {
               WHERE ca.deletedAt IS NULL
                 AND ca.isHidden = 0
                 AND c.deletedAt IS NULL
+                AND COALESCE(rs.repetitionCount, 0) > 0
+                AND rs.nextReviewAt IS NOT NULL
                 AND rs.nextReviewAt >= ?
                 AND rs.nextReviewAt < ?
             ''',

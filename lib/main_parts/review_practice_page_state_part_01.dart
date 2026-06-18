@@ -21,7 +21,9 @@ extension ReviewPracticePageStatePart01 on _ReviewPracticePageState {
           child: Padding(
             padding: EdgeInsets.all(20),
             child: Text(
-              'Học phần này chưa có thẻ để ôn tập',
+              widget.dueOnly
+                  ? 'Hôm nay chưa có thẻ đến hạn để ôn tập'
+                  : 'Học phần này chưa có thẻ để ôn tập',
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: AppColors.text,
@@ -219,29 +221,72 @@ extension ReviewPracticePageStatePart01 on _ReviewPracticePageState {
     try {
       await this._loadReviewSettings();
       final db = await AppDatabase.instance.database;
-      final rows = await db.query(
-        'cards',
-        where: 'courseId = ? AND deletedAt IS NULL AND isHidden = 0',
-        whereArgs: [widget.courseId],
-        orderBy: 'position ASC, id ASC',
-      );
+
+      List<Map<String, Object?>> rows;
+
+      if (widget.dueOnly) {
+        // Load due cards across all courses
+        final now = DateTime.now();
+        final tomorrowStart = DateTime(now.year, now.month, now.day).add(Duration(days: 1));
+        rows = await db.rawQuery('''
+          SELECT ca.* FROM cards ca
+          INNER JOIN courses c ON c.id = ca.courseId
+          INNER JOIN review_states rs ON rs.cardId = ca.id
+          WHERE ca.deletedAt IS NULL
+            AND ca.isHidden = 0
+            AND c.deletedAt IS NULL
+            AND COALESCE(rs.repetitionCount, 0) > 0
+            AND rs.nextReviewAt IS NOT NULL
+            AND rs.nextReviewAt < ?
+          ORDER BY rs.nextReviewAt ASC, ca.position ASC, ca.id ASC
+        ''', [tomorrowStart.toIso8601String()]);
+      } else {
+        rows = await db.query(
+          'cards',
+          where: 'courseId = ? AND deletedAt IS NULL AND isHidden = 0',
+          whereArgs: [widget.courseId],
+          orderBy: 'position ASC, id ASC',
+        );
+      }
 
       if (!mounted) return;
+
+      // Apply presetMode if specified
+      if (widget.presetMode != null) {
+        setState(() {
+          _multipleChoice = widget.presetMode == 'multipleChoice';
+          _essay = widget.presetMode == 'essay';
+          _listening = widget.presetMode == 'listening';
+          _sentenceMode = widget.presetMode == 'sentence';
+          if (!_multipleChoice && !_essay && !_listening && !_sentenceMode) {
+            _multipleChoice = true;
+          }
+        });
+      }
 
       setState(() {
         _cards = rows.map((e) => StudyCardItem.fromMap(e)).toList();
         _questionLimit = _cards.isEmpty
             ? 0
-            : (_questionLimit <= 0
+            : (widget.dueOnly && widget.presetMode != null
                   ? _cards.length
-                  : _questionLimit.clamp(1, _cards.length).toInt());
+                  : (_questionLimit <= 0
+                        ? _cards.length
+                        : _questionLimit.clamp(1, _cards.length).toInt()));
         _isLoading = false;
       });
 
       if (_cards.isNotEmpty) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) this._openSetupSheet();
-        });
+        if (widget.presetMode != null) {
+          // Auto-start quiz with preset mode
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) this._startQuiz();
+          });
+        } else {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) this._openSetupSheet();
+          });
+        }
       }
     } catch (e) {
       if (!mounted) return;
