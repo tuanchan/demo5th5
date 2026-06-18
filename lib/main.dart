@@ -9,6 +9,7 @@ import 'package:just_audio/just_audio.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:archive/archive_io.dart';
 import 'package:flutter/services.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
@@ -1000,6 +1001,17 @@ class _HomePageState extends State<HomePage> {
   String courseSortType = "updatedDesc";
   String courseLanguageFilter = "all";
 
+  static const String _courseSortSettingKey = 'home.courseSortType';
+  static const String _courseLanguageFilterSettingKey =
+      'home.courseLanguageFilter';
+  static const Set<String> _courseSortTypes = {
+    'updatedDesc',
+    'az',
+    'za',
+    'cardsDesc',
+    'cardsAsc',
+  };
+
   List<String> get courseLanguageFilters {
     final languages = courses
         .map((course) => course.languageCode.trim())
@@ -1075,6 +1087,47 @@ class _HomePageState extends State<HomePage> {
   void dispose() {
     courseSearchController.dispose();
     super.dispose();
+  }
+
+  Future<void> loadCourseListSettings() async {
+    final savedSort = await AppSettingsStore.getString(_courseSortSettingKey);
+    final savedLanguage = await AppSettingsStore.getString(
+      _courseLanguageFilterSettingKey,
+    );
+
+    if (!mounted) return;
+
+    setState(() {
+      if (savedSort != null && _courseSortTypes.contains(savedSort)) {
+        courseSortType = savedSort;
+      }
+
+      final language = savedLanguage?.trim();
+      if (language != null && language.isNotEmpty) {
+        courseLanguageFilter = language;
+      }
+    });
+  }
+
+  Future<void> setCourseSortType(String value) async {
+    if (!_courseSortTypes.contains(value)) return;
+
+    setState(() {
+      courseSortType = value;
+    });
+
+    await AppSettingsStore.setString(_courseSortSettingKey, value);
+  }
+
+  Future<void> setCourseLanguageFilter(String value) async {
+    setState(() {
+      courseLanguageFilter = value.trim().isEmpty ? 'all' : value.trim();
+    });
+
+    await AppSettingsStore.setString(
+      _courseLanguageFilterSettingKey,
+      courseLanguageFilter,
+    );
   }
 
   Future<void> toggleMenu() async {
@@ -1204,6 +1257,8 @@ class _HomePageState extends State<HomePage> {
       });
     }
 
+    await loadCourseListSettings();
+
     try {
       final result = await BuiltInVocabularyImporter.importMissing();
       if (mounted && result.importedCourses > 0) {
@@ -1249,16 +1304,28 @@ class _HomePageState extends State<HomePage> {
 
       if (!mounted) return;
 
+      final loadedCourses = rows
+          .map((e) => CourseListItem.fromMap(e))
+          .toList();
+      final currentLanguages = loadedCourses
+          .map((course) => course.languageCode.trim().toLowerCase())
+          .where((code) => code.isNotEmpty)
+          .toSet();
+      var nextLanguageFilter = courseLanguageFilter;
+      if (nextLanguageFilter != "all" &&
+          !currentLanguages.contains(nextLanguageFilter.toLowerCase())) {
+        nextLanguageFilter = "all";
+        await AppSettingsStore.setString(
+          _courseLanguageFilterSettingKey,
+          nextLanguageFilter,
+        );
+      }
+
+      if (!mounted) return;
+
       setState(() {
-        courses = rows.map((e) => CourseListItem.fromMap(e)).toList();
-        final currentLanguages = courses
-            .map((course) => course.languageCode.trim().toLowerCase())
-            .where((code) => code.isNotEmpty)
-            .toSet();
-        if (courseLanguageFilter != "all" &&
-            !currentLanguages.contains(courseLanguageFilter.toLowerCase())) {
-          courseLanguageFilter = "all";
-        }
+        courses = loadedCourses;
+        courseLanguageFilter = nextLanguageFilter;
         if (selectedHomeCourse != null) {
           final stillExists = courses.where(
             (e) => e.id == selectedHomeCourse!.id,
@@ -1854,9 +1921,7 @@ class _HomePageState extends State<HomePage> {
                                       tooltip: "Lọc ngôn ngữ",
                                       initialValue: courseLanguageFilter,
                                       onSelected: (value) {
-                                        setState(() {
-                                          courseLanguageFilter = value;
-                                        });
+                                        setCourseLanguageFilter(value);
                                       },
                                       itemBuilder: (_) => [
                                         PopupMenuItem(
@@ -1910,9 +1975,7 @@ class _HomePageState extends State<HomePage> {
                                       tooltip: "Sắp xếp học phần",
                                       initialValue: courseSortType,
                                       onSelected: (value) {
-                                        setState(() {
-                                          courseSortType = value;
-                                        });
+                                        setCourseSortType(value);
                                       },
                                       itemBuilder: (_) => [
                                         PopupMenuItem(
@@ -2020,6 +2083,12 @@ class _HomePageState extends State<HomePage> {
                                           setState(() {
                                             selectedHomeCourse = course;
                                           });
+                                        },
+                                        onDoubleTap: () {
+                                          setState(() {
+                                            selectedHomeCourse = course;
+                                          });
+                                          openFlashCards(course);
                                         },
                                         child: AnimatedContainer(
                                           duration: Duration(milliseconds: 220),
@@ -2458,6 +2527,10 @@ class _SettingsPageState extends State<SettingsPage> {
   String message = '';
   String geminiKeyMessage = '';
 
+  static final Uri _geminiApiKeyUri = Uri.parse(
+    'https://aistudio.google.com/api-keys?hl=vi&project=gen-lang-client-0159401860',
+  );
+
   final Map<String, String> colorNames = {
     'bg': 'Nền app',
     'panel': 'Nền card',
@@ -2544,6 +2617,23 @@ class _SettingsPageState extends State<SettingsPage> {
       setState(() => message = 'Lỗi: $e');
     } finally {
       if (mounted) setState(() => busy = false);
+    }
+  }
+
+  Future<void> openGeminiApiKeyPage() async {
+    try {
+      final opened = await launchUrl(
+        _geminiApiKeyUri,
+        mode: LaunchMode.externalApplication,
+      );
+      if (!opened && mounted) {
+        setState(
+          () => geminiKeyMessage = 'Không mở được trang lấy key Gemini',
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => geminiKeyMessage = 'Không mở được trang lấy key Gemini');
     }
   }
 
@@ -2683,13 +2773,10 @@ class _SettingsPageState extends State<SettingsPage> {
                         SizedBox(width: 10),
                         Expanded(
                           child: _actionButton(
-                            text: 'Dùng mặc định',
-                            icon: Icons.restore_rounded,
+                            text: 'Lấy key',
+                            icon: Icons.open_in_new_rounded,
                             color: AppColors.yellow,
-                            onTap: () {
-                              geminiApiKeyController.clear();
-                              saveGeminiApiKey();
-                            },
+                            onTap: openGeminiApiKeyPage,
                           ),
                         ),
                       ],
@@ -4011,7 +4098,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
           final columns = constraints.maxWidth < 620 ? 2 : 4;
           return GridView.count(
             crossAxisCount: columns,
-            childAspectRatio: columns == 2 ? 1.45 : 1.28,
+            childAspectRatio: columns == 2 ? 1.25 : 1.28,
             crossAxisSpacing: 12,
             mainAxisSpacing: 12,
             shrinkWrap: true,
@@ -4020,13 +4107,13 @@ class _StatisticsPageState extends State<StatisticsPage> {
               _dashMetric(
                 'TỔNG SỐ THẺ',
                 data.totalCards.toString(),
-                'thẻ trong tất cả học phần',
+                '',
                 _dashText,
               ),
               _dashMetric(
                 'SỐ NGÔN NGỮ',
                 data.languageCount.toString(),
-                'ngôn ngữ đang học',
+                '',
                 _dashText,
               ),
               _dashMetric(
@@ -4038,7 +4125,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
               _dashMetric(
                 'THẺ CHƯA THUỘC',
                 data.unmasteredCards.toString(),
-                'còn cần học tiếp',
+                '',
                 _dashText,
               ),
             ],
@@ -7359,6 +7446,43 @@ class _FlashCardsPageState extends State<FlashCardsPage> {
     String? errorText;
     bool isGenerating = false;
 
+    try {
+      final db = await AppDatabase.instance.database;
+      final rows = await db.query(
+        'card_examples',
+        where: 'cardId = ?',
+        whereArgs: [card.id],
+      );
+      if (rows.isNotEmpty) {
+        final sb = StringBuffer();
+        for (var i = 0; i < rows.length; i++) {
+          final row = rows[i];
+          final exText = row['exampleText'] as String? ?? '';
+          final mean = row['meaning'] as String? ?? '';
+          if (exText.isNotEmpty) {
+            sb.writeln('Ví dụ ${i + 1}: $exText');
+            if (mean.isNotEmpty) {
+              sb.writeln('Dịch ${i + 1}: $mean');
+            }
+            sb.writeln();
+          }
+        }
+        generatedText = sb.toString().trim();
+      }
+    } catch (e) {
+      debugPrint('LOAD CACHED EXAMPLES ERROR: $e');
+    }
+
+
+
+
+
+
+
+
+
+
+
     Future<void> generate(StateSetter setDialogState) async {
       setDialogState(() {
         isGenerating = true;
@@ -7769,6 +7893,7 @@ Gợi ý dùng: ...
 
     try {
       final db = await AppDatabase.instance.database;
+      await db.delete('card_examples', where: 'cardId = ?', whereArgs: [card.id]);
       final now = DateTime.now().toIso8601String();
 
       for (final example in examples) {
@@ -8511,80 +8636,80 @@ Gợi ý dùng: ...
 
   Widget buildBottomBar() {
     return Container(
+      width: double.infinity,
       height: 86,
       padding: EdgeInsets.fromLTRB(14, 8, 14, 14),
-      decoration: BoxDecoration(
-        color: AppColors.panel.withOpacity(0.94),
-        border: Border(
-          top: BorderSide(color: AppColors.border.withOpacity(0.12)),
-        ),
-      ),
-      child: Row(
+      child: Stack(
+        alignment: Alignment.center,
         children: [
-          Spacer(),
-          buildRoundNavButton(
-            icon: progressTracking ? Icons.close : Icons.chevron_left,
-            onTap: showCompletion
-                ? null
-                : progressTracking
-                ? () => moveCard(-1)
-                : (canPrev ? () => moveCard(-1) : null),
-            color: progressTracking ? AppColors.red : AppColors.panel,
-          ),
-          Container(
-            width: 76,
-            alignment: Alignment.center,
-            child: Text(
-              progressTracking
-                  ? "✓$progressKnownCount  ✕$progressUnknownCount\n$displayIndex / $displayTotal"
-                  : "$displayIndex / $displayTotal",
-              style: TextStyle(
-                color: AppColors.text,
-                fontWeight: FontWeight.w900,
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              buildRoundNavButton(
+                icon: progressTracking ? Icons.close : Icons.chevron_left,
+                onTap: showCompletion
+                    ? null
+                    : progressTracking
+                    ? () => moveCard(-1)
+                    : (canPrev ? () => moveCard(-1) : null),
+                color: progressTracking ? AppColors.red : AppColors.panel,
               ),
-            ),
-          ),
-          buildRoundNavButton(
-            icon: progressTracking ? Icons.check : Icons.chevron_right,
-            onTap: showCompletion ? null : () => moveCard(1),
-            color: progressTracking ? AppColors.green : AppColors.panel,
-          ),
-          Spacer(),
-          if (progressTracking)
-            Opacity(
-              opacity: _progressHistory.isNotEmpty ? 1.0 : 0.28,
-              child: GestureDetector(
-                onTap: _progressHistory.isNotEmpty ? undoLastCard : null,
-                child: Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: AppColors.panel,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: AppColors.border, width: 1.4),
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppColors.border,
-                        offset: Offset(0, 3),
-                        blurRadius: 0,
-                      ),
-                    ],
-                  ),
-                  child: Icon(
-                    Icons.undo_rounded,
-                    color: AppColors.border,
-                    size: 22,
+              Container(
+                width: 76,
+                alignment: Alignment.center,
+                child: Text(
+                  progressTracking
+                      ? "✓$progressKnownCount  ✕$progressUnknownCount\n$displayIndex / $displayTotal"
+                      : "$displayIndex / $displayTotal",
+                  style: TextStyle(
+                    color: AppColors.text,
+                    fontWeight: FontWeight.w900,
                   ),
                 ),
               ),
-            )
-          else
-            SizedBox(width: 44),
+              buildRoundNavButton(
+                icon: progressTracking ? Icons.check : Icons.chevron_right,
+                onTap: showCompletion ? null : () => moveCard(1),
+                color: progressTracking ? AppColors.green : AppColors.panel,
+              ),
+            ],
+          ),
+          if (progressTracking)
+            Positioned(
+              right: 0,
+              child: Opacity(
+                opacity: _progressHistory.isNotEmpty ? 1.0 : 0.28,
+                child: GestureDetector(
+                  onTap: _progressHistory.isNotEmpty ? undoLastCard : null,
+                  child: Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: AppColors.panel,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: AppColors.border, width: 1.4),
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppColors.border,
+                          offset: Offset(0, 3),
+                          blurRadius: 0,
+                        ),
+                      ],
+                    ),
+                    child: Icon(
+                      Icons.undo_rounded,
+                      color: AppColors.border,
+                      size: 22,
+                    ),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
   }
-
   Widget buildRoundNavButton({
     required IconData icon,
     required VoidCallback? onTap,

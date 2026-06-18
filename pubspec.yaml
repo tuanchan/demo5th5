@@ -39,6 +39,7 @@ dependencies:
   just_audio: ^0.9.42
   path_provider: ^2.1.5
   share_plus: ^10.1.4
+  url_launcher: ^6.3.2
   archive: ^3.6.1
   flutter_svg: ^2.2.1
   # The following adds the Cupertino Icons font to your application.
