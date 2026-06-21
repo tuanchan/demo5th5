@@ -10,6 +10,7 @@ class _FlashCardsPageState extends State<FlashCardsPage> {
   String _languageCode = 'zh-TW';
 
   bool isLoading = true;
+  bool courseDropdownOpen = false;
   bool progressTracking = false;
   bool shuffleEnabled = false;
   bool starredOnly = false;

@@ -284,6 +284,10 @@ extension FlashCardsPageStatePart06 on _FlashCardsPageState {
       child: Stack(
         alignment: Alignment.center,
         children: [
+          Positioned(
+            left: 0,
+            child: this.buildProgressToggleButton(),
+          ),
           Row(
             mainAxisSize: MainAxisSize.min,
             mainAxisAlignment: MainAxisAlignment.center,
@@ -349,6 +353,43 @@ extension FlashCardsPageStatePart06 on _FlashCardsPageState {
               ),
             ),
         ],
+      ),
+    );
+  }
+
+  Widget buildProgressToggleButton() {
+    return GestureDetector(
+      onTap: this.toggleProgressMode,
+      child: AnimatedContainer(
+        duration: Duration(milliseconds: 160),
+        height: 36,
+        padding: EdgeInsets.symmetric(horizontal: 10),
+        constraints: BoxConstraints(minWidth: 68, maxWidth: 82),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: progressTracking ? AppColors.green : AppColors.panel,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.border, width: 1.3),
+          boxShadow: [
+            BoxShadow(
+              color: AppColors.border.withOpacity(progressTracking ? 0.9 : 0.32),
+              offset: Offset(0, progressTracking ? 3 : 2),
+              blurRadius: 0,
+            ),
+          ],
+        ),
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            'Tiến độ',
+            maxLines: 1,
+            style: TextStyle(
+              color: AppColors.border,
+              fontSize: 12,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ),
       ),
     );
   }

@@ -135,65 +135,6 @@ extension SettingsPageStatePart01 on _SettingsPageState {
               ),
               SizedBox(height: 14),
               this._sectionCard(
-                title: 'Export / Import toàn bộ app',
-                icon: Icons.folder_zip_rounded,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Export sẽ tạo backup .zip gồm list_card.db và thư mục audio tts_cache. Trên iPhone/Android sẽ tự mở bảng chia sẻ, có AirDrop nếu thiết bị hỗ trợ.',
-                      style: TextStyle(
-                        color: AppColors.muted,
-                        fontWeight: FontWeight.w700,
-                        height: 1.35,
-                      ),
-                    ),
-                    SizedBox(height: 12),
-                    this._pathBox(appPath),
-                    SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: this._actionButton(
-                            text: 'Backup',
-                            icon: Icons.ios_share_rounded,
-                            color: AppColors.green,
-                            onTap: () => this.runTask(
-                              BackupManager.exportAll,
-                              'Đã export xong',
-                            ),
-                          ),
-                        ),
-                        SizedBox(width: 10),
-                        Expanded(
-                          child: this._actionButton(
-                            text: 'Import',
-                            icon: Icons.download_rounded,
-                            color: AppColors.yellow,
-                            onTap: () => this.runTask(
-                              BackupManager.importLatest,
-                              'Đã import xong, hãy mở lại app nếu dữ liệu chưa refresh',
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    if (busy) ...[
-                      SizedBox(height: 12),
-                      LinearProgressIndicator(
-                        color: AppColors.green,
-                        backgroundColor: AppColors.panel2,
-                      ),
-                    ],
-                    if (message.isNotEmpty) ...[
-                      SizedBox(height: 12),
-                      this._pathBox(message),
-                    ],
-                  ],
-                ),
-              ),
-              SizedBox(height: 14),
-              this._sectionCard(
                 title: 'Chỉnh màu toàn bộ giao diện',
                 icon: Icons.palette_rounded,
                 child: Column(
@@ -215,7 +156,6 @@ extension SettingsPageStatePart01 on _SettingsPageState {
   Future<void> loadSettings() async {
     final mode =
         await AppSettingsStore.getString('appearance.themeMode') ?? 'light';
-    final path = await BackupManager.appDataPath();
     final geminiApiKey =
         await AppSettingsStore.getString(
           GeminiFlashLiteClient.apiKeySettingKey,
@@ -225,7 +165,6 @@ extension SettingsPageStatePart01 on _SettingsPageState {
     geminiApiKeyController.text = geminiApiKey;
     setState(() {
       themeMode = mode;
-      appPath = path;
       geminiKeyMessage = geminiApiKey.trim().isEmpty
           ? 'Đang dùng API key mặc định'
           : 'Đang dùng API key riêng';
@@ -239,25 +178,6 @@ extension SettingsPageStatePart01 on _SettingsPageState {
     AppThemeController.instance.bump();
     if (!mounted) return;
     setState(() => themeMode = value);
-  }
-
-
-  Future<void> runTask(Future<String> Function() task, String doneText) async {
-    if (busy) return;
-    setState(() {
-      busy = true;
-      message = '';
-    });
-    try {
-      final path = await task();
-      if (!mounted) return;
-      setState(() => message = '$doneText\n$path');
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => message = 'Lỗi: $e');
-    } finally {
-      if (mounted) setState(() => busy = false);
-    }
   }
 
 
@@ -409,7 +329,7 @@ extension SettingsPageStatePart01 on _SettingsPageState {
     required VoidCallback onTap,
   }) {
     return InkWell(
-      onTap: busy ? null : onTap,
+      onTap: onTap,
       borderRadius: BorderRadius.circular(16),
       child: Container(
         height: 56,

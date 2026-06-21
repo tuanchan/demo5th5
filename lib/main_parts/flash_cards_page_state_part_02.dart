@@ -350,6 +350,11 @@ extension FlashCardsPageStatePart02 on _FlashCardsPageState {
 
 
   Future<void> toggleProgressMode() async {
+    if (widget.dueOnly) {
+      this.showFlashMessage("Ôn thẻ đến hạn luôn bật theo dõi SRS");
+      return;
+    }
+
     final nextValue = !progressTracking;
 
     await this._finishStudySession();

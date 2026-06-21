@@ -128,6 +128,1061 @@ extension StatisticsPageStatePart06 on _StatisticsPageState {
       ),
     );
   }
+
+
+  Future<List<_SrsEditorItem>> _loadSrsEditorItems() async {
+    final db = await AppDatabase.instance.database;
+    final rows = await db.rawQuery('''
+      SELECT
+        ca.id AS cardId,
+        c.id AS courseId,
+        ca.term,
+        ca.definition,
+        c.title AS courseTitle,
+        c.languageCode,
+        COALESCE(rs.level, 0) AS level,
+        COALESCE(rs.easeFactor, 2.5) AS easeFactor,
+        COALESCE(rs.intervalDays, 0) AS intervalDays,
+        COALESCE(rs.repetitionCount, 0) AS repetitionCount,
+        COALESCE(rs.correctCount, 0) AS correctCount,
+        COALESCE(rs.wrongCount, 0) AS wrongCount,
+        COALESCE(rs.lastReviewedAt, '') AS lastReviewedAt,
+        COALESCE(rs.nextReviewAt, '') AS nextReviewAt
+      FROM cards ca
+      INNER JOIN courses c ON c.id = ca.courseId
+      LEFT JOIN review_states rs ON rs.cardId = ca.id
+      WHERE ca.deletedAt IS NULL
+        AND ca.isHidden = 0
+        AND c.deletedAt IS NULL
+      ORDER BY
+        CASE WHEN rs.nextReviewAt IS NULL OR rs.nextReviewAt = '' THEN 1 ELSE 0 END,
+        rs.nextReviewAt ASC,
+        COALESCE(rs.level, 0) DESC,
+        c.title ASC,
+        ca.position ASC,
+        ca.id ASC
+      LIMIT 120
+    ''');
+
+    return rows.map(_SrsEditorItem.fromMap).toList();
+  }
+
+
+  Future<void> openSrsEditor() async {
+    Future<List<_SrsEditorItem>> editorFuture = this._loadSrsEditorItems();
+    final jsonController = TextEditingController();
+    int? selectedCourseId;
+    String selectedCourseTitle = '';
+    bool courseDropdownOpen = false;
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            Future<void> refreshEditor() async {
+              setSheetState(() {
+                editorFuture = this._loadSrsEditorItems();
+              });
+            }
+
+            Future<void> runEditorTask(Future<String> Function() task) async {
+              try {
+                final message = await task();
+                if (!context.mounted) return;
+                showAppToast(context, message);
+                await refreshEditor();
+              } catch (e) {
+                if (!context.mounted) return;
+                showAppToast(context, 'Lỗi SRS: $e');
+              }
+            }
+
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 12,
+                right: 12,
+                top: 14,
+                bottom: MediaQuery.of(context).viewInsets.bottom + 14,
+              ),
+              child: Center(
+                child: Container(
+                  constraints: BoxConstraints(maxWidth: 780),
+                  padding: EdgeInsets.fromLTRB(16, 14, 16, 16),
+                  decoration: BoxDecoration(
+                    color: _dashPanel,
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(color: _dashBorder),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.28),
+                        offset: Offset(0, 18),
+                        blurRadius: 34,
+                      ),
+                    ],
+                  ),
+                  child: SafeArea(
+                    top: false,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            if (selectedCourseId != null) ...[
+                              IconButton(
+                                onPressed: () {
+                                  setSheetState(() {
+                                    selectedCourseId = null;
+                                    selectedCourseTitle = '';
+                                    courseDropdownOpen = false;
+                                  });
+                                },
+                                icon: Icon(
+                                  Icons.arrow_back_rounded,
+                                  color: _dashText,
+                                ),
+                              ),
+                              SizedBox(width: 4),
+                            ],
+                            Expanded(
+                              child: selectedCourseId != null
+                                ? GestureDetector(
+                                    onTap: () {
+                                      setSheetState(() {
+                                        courseDropdownOpen = !courseDropdownOpen;
+                                      });
+                                    },
+                                    child: Container(
+                                      padding: EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 7,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: _dashPanel2,
+                                        borderRadius: BorderRadius.circular(10),
+                                        border: Border.all(
+                                          color: courseDropdownOpen
+                                              ? _dashBlue
+                                              : _dashBorder.withOpacity(0.72),
+                                        ),
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              selectedCourseTitle,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: TextStyle(
+                                                color: _dashText,
+                                                fontSize: 14,
+                                                fontWeight: FontWeight.w900,
+                                              ),
+                                            ),
+                                          ),
+                                          SizedBox(width: 6),
+                                          AnimatedRotation(
+                                            turns: courseDropdownOpen ? -0.5 : 0,
+                                            duration: Duration(milliseconds: 200),
+                                            curve: Curves.easeInOut,
+                                            child: SvgPicture.asset(
+                                              'assets/icon/chevron-down-solid-full.svg',
+                                              width: 14,
+                                              height: 14,
+                                              colorFilter: ColorFilter.mode(
+                                                _dashText,
+                                                BlendMode.srcIn,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  )
+                                : Text(
+                                    'Chỉnh SRS',
+                                    style: TextStyle(
+                                      color: _dashText,
+                                      fontSize: 22,
+                                      fontWeight: FontWeight.w900,
+                                    ),
+                                  ),
+                            ),
+                            IconButton(
+                              onPressed: () => Navigator.pop(sheetContext),
+                              icon: Icon(
+                                Icons.close_rounded,
+                                color: _dashText,
+                              ),
+                            ),
+                          ],
+                        ),
+                        SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _dueSolidButton(
+                                text: 'Export JSON',
+                                icon: Icons.upload_file_rounded,
+                                color: AppColors.green,
+                                onTap: () => runEditorTask(this._exportSrsJson),
+                              ),
+                            ),
+                            SizedBox(width: 10),
+                            Expanded(
+                              child: _dueOutlineButton(
+                                text: 'Dán clipboard',
+                                icon: Icons.content_paste_rounded,
+                                onTap: () async {
+                                  final data = await Clipboard.getData(
+                                    Clipboard.kTextPlain,
+                                  );
+                                  jsonController.text = data?.text ?? '';
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
+                        SizedBox(height: 10),
+                        TextField(
+                          controller: jsonController,
+                          minLines: 2,
+                          maxLines: 4,
+                          style: TextStyle(
+                            color: _dashText,
+                            fontWeight: FontWeight.w700,
+                          ),
+                          decoration: InputDecoration(
+                            hintText: 'Dán JSON SRS vào đây để import',
+                            hintStyle: TextStyle(color: _dashMuted),
+                            filled: true,
+                            fillColor: _dashPanel2,
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide(color: _dashBorder),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide(color: _dashBlue),
+                            ),
+                          ),
+                        ),
+                        SizedBox(height: 10),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: _dueSolidButton(
+                            text: 'Import SRS',
+                            icon: Icons.download_rounded,
+                            color: AppColors.yellow,
+                            onTap: () => runEditorTask(
+                              () => this._importSrsJsonText(
+                                jsonController.text,
+                              ),
+                            ),
+                          ),
+                        ),
+                        SizedBox(height: 14),
+                        Flexible(
+                          child: FutureBuilder<List<_SrsEditorItem>>(
+                            future: editorFuture,
+                            builder: (context, snapshot) {
+                              if (snapshot.connectionState ==
+                                  ConnectionState.waiting) {
+                                return SizedBox(
+                                  height: 220,
+                                  child: Center(
+                                    child: CircularProgressIndicator(
+                                      color: _dashBlue,
+                                    ),
+                                  ),
+                                );
+                              }
+
+                              final items = snapshot.data ?? [];
+                              if (items.isEmpty) {
+                                return SizedBox(
+                                  height: 120,
+                                  child: Center(
+                                    child: this._dashEmpty(
+                                      'Chưa có thẻ để chỉnh SRS',
+                                    ),
+                                  ),
+                                );
+                              }
+
+                              if (selectedCourseId == null) {
+                                final courses = this._buildSrsEditorCourses(items);
+                                return ConstrainedBox(
+                                  constraints: BoxConstraints(maxHeight: 420),
+                                  child: ListView.builder(
+                                    shrinkWrap: true,
+                                    itemCount: courses.length,
+                                    itemBuilder: (context, index) {
+                                      final course = courses[index];
+                                      return this._buildSrsCourseItem(
+                                        course,
+                                        onOpen: () {
+                                          setSheetState(() {
+                                            selectedCourseId = course.id;
+                                            selectedCourseTitle = course.title;
+                                          });
+                                        },
+                                      );
+                                    },
+                                  ),
+                                );
+                              }
+
+                              final allCourses = this._buildSrsEditorCourses(items);
+                              final courseItems = items
+                                  .where((item) => item.courseId == selectedCourseId)
+                                  .toList();
+
+                              return ConstrainedBox(
+                                constraints: BoxConstraints(maxHeight: 420),
+                                child: ListView(
+                                  shrinkWrap: true,
+                                  children: [
+                                    AnimatedCrossFade(
+                                      firstChild: SizedBox.shrink(),
+                                      secondChild: Container(
+                                        margin: EdgeInsets.only(bottom: 10),
+                                        padding: EdgeInsets.all(6),
+                                        decoration: BoxDecoration(
+                                          color: _dashPanel2,
+                                          borderRadius: BorderRadius.circular(12),
+                                          border: Border.all(
+                                            color: _dashBorder.withOpacity(0.72),
+                                          ),
+                                        ),
+                                        child: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: allCourses.map((course) {
+                                            final isActive =
+                                                course.id == selectedCourseId;
+                                            return GestureDetector(
+                                              onTap: () {
+                                                setSheetState(() {
+                                                  selectedCourseId = course.id;
+                                                  selectedCourseTitle =
+                                                      course.title;
+                                                  courseDropdownOpen = false;
+                                                });
+                                              },
+                                              child: Container(
+                                                width: double.infinity,
+                                                padding: EdgeInsets.symmetric(
+                                                  horizontal: 12,
+                                                  vertical: 10,
+                                                ),
+                                                decoration: BoxDecoration(
+                                                  color: isActive
+                                                      ? _dashBlue
+                                                          .withOpacity(0.18)
+                                                      : Colors.transparent,
+                                                  borderRadius:
+                                                      BorderRadius.circular(8),
+                                                ),
+                                                child: Text(
+                                                  course.title,
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  style: TextStyle(
+                                                    color: isActive
+                                                        ? _dashBlue
+                                                        : _dashText,
+                                                    fontSize: 13,
+                                                    fontWeight:
+                                                        FontWeight.w800,
+                                                  ),
+                                                ),
+                                              ),
+                                            );
+                                          }).toList(),
+                                        ),
+                                      ),
+                                      crossFadeState: courseDropdownOpen
+                                          ? CrossFadeState.showSecond
+                                          : CrossFadeState.showFirst,
+                                      duration: Duration(milliseconds: 200),
+                                    ),
+                                    ...courseItems.map((item) {
+                                      return this._buildSrsEditorItem(
+                                        item,
+                                        refreshEditor,
+                                      );
+                                    }),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    jsonController.dispose();
+    if (mounted) this.reloadStatistics();
+  }
+
+
+  List<_SrsEditorCourse> _buildSrsEditorCourses(List<_SrsEditorItem> items) {
+    final now = DateTime.now();
+    final tomorrowStart = DateTime(now.year, now.month, now.day).add(
+      Duration(days: 1),
+    );
+    final grouped = <int, List<_SrsEditorItem>>{};
+
+    for (final item in items) {
+      grouped.putIfAbsent(item.courseId, () => <_SrsEditorItem>[]).add(item);
+    }
+
+    final courses = grouped.entries.map((entry) {
+      final courseItems = entry.value;
+      final first = courseItems.first;
+      final reviewed = courseItems
+          .where((item) => item.repetitionCount > 0)
+          .length;
+      final due = courseItems.where((item) {
+        if (item.repetitionCount <= 0 || item.nextReviewAt.isEmpty) {
+          return false;
+        }
+        final date = DateTime.tryParse(item.nextReviewAt);
+        return date != null && date.isBefore(tomorrowStart);
+      }).length;
+
+      return _SrsEditorCourse(
+        id: entry.key,
+        title: first.courseTitle,
+        languageCode: first.languageCode,
+        cardCount: courseItems.length,
+        reviewedCount: reviewed,
+        dueCount: due,
+      );
+    }).toList();
+
+    courses.sort((a, b) => _naturalCompareText(a.title, b.title));
+    return courses;
+  }
+
+
+  Widget _buildSrsCourseItem(
+    _SrsEditorCourse course, {
+    required VoidCallback onOpen,
+  }) {
+    return GestureDetector(
+      onTap: onOpen,
+      child: Container(
+        margin: EdgeInsets.only(bottom: 10),
+        padding: EdgeInsets.all(13),
+        decoration: BoxDecoration(
+          color: _dashPanel2,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: _dashBorder.withOpacity(0.72)),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    course.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: _dashText,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  SizedBox(height: 5),
+                  Text(
+                    '${course.cardCount} thẻ • đã ôn ${course.reviewedCount} • đến hạn ${course.dueCount} • ${course.languageCode}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: _dashMuted,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            SizedBox(width: 10),
+            Icon(Icons.chevron_right_rounded, color: _dashText, size: 24),
+          ],
+        ),
+      ),
+    );
+  }
+
+
+  Widget _buildSrsEditorItem(
+    _SrsEditorItem item,
+    Future<void> Function() refresh,
+  ) {
+    final dateText = this._formatSrsDate(item.nextReviewAt);
+
+    Widget miniButton(IconData icon, Future<void> Function() onTap) {
+      return InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: () async {
+          await onTap();
+          await refresh();
+        },
+        child: Container(
+          width: 34,
+          height: 34,
+          decoration: BoxDecoration(
+            color: _dashPanel,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: _dashBorder),
+          ),
+          child: Icon(icon, color: _dashText, size: 18),
+        ),
+      );
+    }
+
+    Widget valuePill({
+      required String text,
+      required Color color,
+    }) {
+      return Container(
+        height: 34,
+        padding: EdgeInsets.symmetric(horizontal: 12),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: _dashBorder),
+        ),
+        child: Text(
+          text,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: _dashText,
+            fontWeight: FontWeight.w900,
+            fontSize: 12,
+          ),
+        ),
+      );
+    }
+
+    Widget calendarButton() {
+      return InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: () async {
+          final now = DateTime.now();
+          final current = DateTime.tryParse(item.nextReviewAt) ??
+              DateTime(now.year, now.month, now.day);
+          final picked = await showDatePicker(
+            context: context,
+            initialDate: current,
+            firstDate: DateTime(now.year - 1),
+            lastDate: DateTime(now.year + 3),
+            builder: (ctx, child) {
+              return Theme(
+                data: Theme.of(ctx).copyWith(
+                  colorScheme: ColorScheme.dark(
+                    primary: _dashBlue,
+                    surface: _dashPanel,
+                    onSurface: _dashText,
+                    onPrimary: Colors.white,
+                  ),
+                  dialogTheme: DialogThemeData(
+                    backgroundColor: _dashPanel,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                  ),
+                  textTheme: TextTheme(
+                    bodyLarge: TextStyle(color: _dashText),
+                    bodyMedium: TextStyle(color: _dashText),
+                    titleSmall: TextStyle(color: _dashText),
+                    labelLarge: TextStyle(color: _dashText),
+                    headlineLarge: TextStyle(color: _dashText),
+                  ),
+                  inputDecorationTheme: InputDecorationTheme(
+                    labelStyle: TextStyle(color: _dashMuted),
+                    hintStyle: TextStyle(color: _dashMuted),
+                    enabledBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(color: _dashBorder),
+                    ),
+                    focusedBorder: UnderlineInputBorder(
+                      borderSide: BorderSide(color: _dashBlue),
+                    ),
+                  ),
+                  textButtonTheme: TextButtonThemeData(
+                    style: TextButton.styleFrom(
+                      foregroundColor: _dashText,
+                    ),
+                  ),
+                ),
+                child: child!,
+              );
+            },
+          );
+          if (picked != null) {
+            await this._setSrsDueDate(item, picked);
+            await refresh();
+          }
+        },
+        child: Container(
+          width: 34,
+          height: 34,
+          alignment: Alignment.center,
+          child: Icon(
+            Icons.calendar_month_rounded,
+            color: _dashText,
+            size: 20,
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      margin: EdgeInsets.only(bottom: 10),
+      padding: EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: _dashPanel2,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _dashBorder.withOpacity(0.72)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            item.term,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: _dashText,
+              fontWeight: FontWeight.w900,
+              fontSize: 15,
+            ),
+          ),
+          SizedBox(height: 3),
+          Text(
+            '${item.definition} • ${item.courseTitle}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(color: _dashMuted, fontWeight: FontWeight.w700),
+          ),
+          SizedBox(height: 10),
+          Column(
+            children: [
+              Row(
+                children: [
+                  miniButton(
+                    Icons.remove_rounded,
+                    () => this._changeSrsLevel(item, -1),
+                  ),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: valuePill(
+                      text: 'L${item.level}',
+                      color: _dashBlue,
+                    ),
+                  ),
+                  SizedBox(width: 8),
+                  miniButton(
+                    Icons.add_rounded,
+                    () => this._changeSrsLevel(item, 1),
+                  ),
+                ],
+              ),
+              SizedBox(height: 8),
+              Row(
+                children: [
+                  miniButton(
+                    Icons.chevron_left_rounded,
+                    () => this._shiftSrsDate(item, -1),
+                  ),
+                  SizedBox(width: 8),
+                  Expanded(child: valuePill(text: dateText, color: _dashPanel)),
+                  SizedBox(width: 8),
+                  miniButton(
+                    Icons.chevron_right_rounded,
+                    () => this._shiftSrsDate(item, 1),
+                  ),
+                  SizedBox(width: 4),
+                  calendarButton(),
+                ],
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+
+  Future<void> _changeSrsLevel(_SrsEditorItem item, int delta) async {
+    final nextLevel = (item.level + delta).clamp(0, 8).toInt();
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final interval = ReviewScheduler.intervalDaysForLevel(nextLevel);
+    await this._upsertSrsState(
+      cardId: item.cardId,
+      level: nextLevel,
+      intervalDays: interval,
+      nextReviewAt: nextLevel <= 0 ? now : today.add(Duration(days: interval)),
+    );
+  }
+
+
+  Future<void> _shiftSrsDate(_SrsEditorItem item, int days) async {
+    final now = DateTime.now();
+    final fallback = DateTime(now.year, now.month, now.day);
+    final current = DateTime.tryParse(item.nextReviewAt) ?? fallback;
+    final next = current.add(Duration(days: days));
+    final today = DateTime(now.year, now.month, now.day);
+    final interval = math.max(0, next.difference(today).inDays);
+    await this._upsertSrsState(
+      cardId: item.cardId,
+      level: item.level,
+      intervalDays: interval,
+      nextReviewAt: next,
+    );
+  }
+
+
+  Future<void> _setSrsDueDate(_SrsEditorItem item, DateTime date) async {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final target = DateTime(date.year, date.month, date.day);
+    final interval = math.max(0, target.difference(today).inDays);
+    await this._upsertSrsState(
+      cardId: item.cardId,
+      level: item.level,
+      intervalDays: interval,
+      nextReviewAt: target,
+    );
+  }
+
+
+  Future<void> _upsertSrsState({
+    required int cardId,
+    required int level,
+    required int intervalDays,
+    required DateTime nextReviewAt,
+  }) async {
+    final db = await AppDatabase.instance.database;
+    await this._upsertSrsStateOn(
+      db,
+      cardId: cardId,
+      level: level,
+      easeFactor: null,
+      intervalDays: intervalDays,
+      repetitionCount: null,
+      correctCount: null,
+      wrongCount: null,
+      lastReviewedAt: null,
+      nextReviewAt: nextReviewAt,
+    );
+  }
+
+
+  Future<void> _upsertSrsStateOn(
+    DatabaseExecutor executor, {
+    required int cardId,
+    required int level,
+    required double? easeFactor,
+    required int intervalDays,
+    required int? repetitionCount,
+    required int? correctCount,
+    required int? wrongCount,
+    required String? lastReviewedAt,
+    required DateTime nextReviewAt,
+  }) async {
+    final nowIso = DateTime.now().toIso8601String();
+    final rows = await executor.query(
+      'review_states',
+      where: 'cardId = ?',
+      whereArgs: [cardId],
+      limit: 1,
+    );
+    final previous = rows.isEmpty ? null : rows.first;
+    final nextLevel = level.clamp(0, 8).toInt();
+    final nextRepetition = repetitionCount ??
+        math.max(_dbInt(previous?['repetitionCount']), nextLevel > 0 ? 1 : 0);
+
+    final values = <String, Object?>{
+      'cardId': cardId,
+      'level': nextLevel,
+      'easeFactor': easeFactor ?? _dbDouble(previous?['easeFactor'], 2.5),
+      'intervalDays': math.max(0, intervalDays),
+      'repetitionCount': nextRepetition,
+      'correctCount': correctCount ?? _dbInt(previous?['correctCount']),
+      'wrongCount': wrongCount ?? _dbInt(previous?['wrongCount']),
+      'lastReviewedAt': lastReviewedAt ??
+          previous?['lastReviewedAt']?.toString() ??
+          (nextRepetition > 0 ? nowIso : null),
+      'nextReviewAt': nextReviewAt.toIso8601String(),
+      'updatedAt': nowIso,
+    };
+
+    if (rows.isEmpty) {
+      values['createdAt'] = nowIso;
+      await executor.insert('review_states', values);
+      return;
+    }
+
+    await executor.update(
+      'review_states',
+      values,
+      where: 'cardId = ?',
+      whereArgs: [cardId],
+    );
+  }
+
+
+  Future<String> _exportSrsJson() async {
+    final db = await AppDatabase.instance.database;
+    final rows = await db.rawQuery('''
+      SELECT
+        ca.id AS cardId,
+        c.id AS courseId,
+        ca.term,
+        ca.definition,
+        c.title AS courseTitle,
+        c.languageCode,
+        COALESCE(rs.level, 0) AS level,
+        COALESCE(rs.easeFactor, 2.5) AS easeFactor,
+        COALESCE(rs.intervalDays, 0) AS intervalDays,
+        COALESCE(rs.repetitionCount, 0) AS repetitionCount,
+        COALESCE(rs.correctCount, 0) AS correctCount,
+        COALESCE(rs.wrongCount, 0) AS wrongCount,
+        COALESCE(rs.lastReviewedAt, '') AS lastReviewedAt,
+        COALESCE(rs.nextReviewAt, '') AS nextReviewAt
+      FROM review_states rs
+      INNER JOIN cards ca ON ca.id = rs.cardId
+      INNER JOIN courses c ON c.id = ca.courseId
+      WHERE ca.deletedAt IS NULL
+        AND ca.isHidden = 0
+        AND c.deletedAt IS NULL
+      ORDER BY c.title ASC, ca.position ASC, ca.id ASC
+    ''');
+    final items = rows.map((row) => _SrsEditorItem.fromMap(row).toJson()).toList();
+    final data = {
+      'format': 'flutterflashcard.srs.v1',
+      'exportedAt': DateTime.now().toIso8601String(),
+      'items': items,
+    };
+    final text = JsonEncoder.withIndent('  ').convert(data);
+    await Clipboard.setData(ClipboardData(text: text));
+
+    final docDir = await getApplicationDocumentsDirectory();
+    final dir = Directory('${docDir.path}/srs_exports');
+    if (!await dir.exists()) await dir.create(recursive: true);
+    final file = File('${dir.path}/srs_${this._srsStamp()}.json');
+    await file.writeAsString(text);
+
+    await db.insert('import_exports', {
+      'type': 'export',
+      'fileName': file.uri.pathSegments.isNotEmpty
+          ? file.uri.pathSegments.last
+          : 'srs.json',
+      'filePath': file.path,
+      'format': 'json',
+      'courseId': null,
+      'status': 'success',
+      'message': 'Export SRS JSON',
+      'createdAt': DateTime.now().toIso8601String(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+
+    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+      await Share.shareXFiles(
+        [XFile(file.path)],
+        subject: 'FlashCard SRS JSON',
+        text: 'SRS JSON để import lại lịch ôn.',
+      );
+    }
+
+    return 'Đã export ${items.length} SRS, đã copy JSON vào clipboard';
+  }
+
+
+  Future<String> _importSrsJsonText(String raw) async {
+    final text = raw.trim();
+    if (text.isEmpty) {
+      throw FormatException('JSON đang trống');
+    }
+
+    final decoded = jsonDecode(text);
+    final items = this._extractSrsImportItems(decoded);
+    if (items.isEmpty) {
+      throw FormatException('Không tìm thấy items SRS');
+    }
+
+    final db = await AppDatabase.instance.database;
+    var imported = 0;
+    var skipped = 0;
+
+    await db.transaction((txn) async {
+      for (final item in items) {
+        final cardId = await this._findSrsImportCardId(txn, item);
+        if (cardId == null) {
+          skipped++;
+          continue;
+        }
+
+        final now = DateTime.now();
+        final level = _dbInt(item['level']).clamp(0, 8).toInt();
+        final interval = math.max(0, _dbInt(item['intervalDays']));
+        final nextReviewAt =
+            DateTime.tryParse(item['nextReviewAt']?.toString() ?? '') ??
+            DateTime(now.year, now.month, now.day).add(
+              Duration(days: interval),
+            );
+
+        await this._upsertSrsStateOn(
+          txn,
+          cardId: cardId,
+          level: level,
+          easeFactor: _dbDouble(item['easeFactor'], 2.5),
+          intervalDays: interval,
+          repetitionCount: _dbInt(item['repetitionCount']),
+          correctCount: _dbInt(item['correctCount']),
+          wrongCount: _dbInt(item['wrongCount']),
+          lastReviewedAt: item['lastReviewedAt']?.toString(),
+          nextReviewAt: nextReviewAt,
+        );
+        imported++;
+      }
+
+      await txn.insert('import_exports', {
+        'type': 'import',
+        'fileName': 'srs_json_clipboard',
+        'filePath': null,
+        'format': 'json',
+        'courseId': null,
+        'status': skipped == 0 ? 'success' : 'partial',
+        'message': 'Import SRS JSON: $imported ok, $skipped bỏ qua',
+        'createdAt': DateTime.now().toIso8601String(),
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+    });
+
+    return 'Đã import $imported SRS, bỏ qua $skipped thẻ không khớp';
+  }
+
+
+  List<Map<String, Object?>> _extractSrsImportItems(Object? decoded) {
+    final source = decoded is Map ? decoded['items'] : decoded;
+    if (source is! List) return [];
+
+    return source
+        .whereType<Map>()
+        .map((item) => Map<String, Object?>.from(item))
+        .toList();
+  }
+
+
+  Future<int?> _findSrsImportCardId(
+    DatabaseExecutor executor,
+    Map<String, Object?> item,
+  ) async {
+    final term = item['term']?.toString().trim() ?? '';
+    final definition = item['definition']?.toString().trim() ?? '';
+    final courseTitle = item['courseTitle']?.toString().trim() ?? '';
+    final languageCode = item['languageCode']?.toString().trim() ?? '';
+
+    Future<int?> firstId(String sql, List<Object?> args) async {
+      final rows = await executor.rawQuery(sql, args);
+      if (rows.isEmpty) return null;
+      final id = _dbInt(rows.first['id']);
+      return id > 0 ? id : null;
+    }
+
+    if (term.isNotEmpty && definition.isNotEmpty && courseTitle.isNotEmpty) {
+      final id = await firstId(
+        '''
+        SELECT ca.id
+        FROM cards ca
+        INNER JOIN courses c ON c.id = ca.courseId
+        WHERE ca.deletedAt IS NULL
+          AND ca.isHidden = 0
+          AND c.deletedAt IS NULL
+          AND lower(trim(c.title)) = lower(trim(?))
+          AND (? = '' OR c.languageCode = ?)
+          AND lower(trim(ca.term)) = lower(trim(?))
+          AND lower(trim(ca.definition)) = lower(trim(?))
+        LIMIT 1
+        ''',
+        [courseTitle, languageCode, languageCode, term, definition],
+      );
+      if (id != null) return id;
+    }
+
+    if (term.isNotEmpty && definition.isNotEmpty) {
+      final id = await firstId(
+        '''
+        SELECT ca.id
+        FROM cards ca
+        INNER JOIN courses c ON c.id = ca.courseId
+        WHERE ca.deletedAt IS NULL
+          AND ca.isHidden = 0
+          AND c.deletedAt IS NULL
+          AND (? = '' OR c.languageCode = ?)
+          AND lower(trim(ca.term)) = lower(trim(?))
+          AND lower(trim(ca.definition)) = lower(trim(?))
+        ORDER BY c.updatedAt DESC, c.createdAt DESC, ca.id ASC
+        LIMIT 1
+        ''',
+        [languageCode, languageCode, term, definition],
+      );
+      if (id != null) return id;
+    }
+
+    final staleCardId = _dbInt(item['cardId']);
+    if (staleCardId > 0) {
+      return firstId(
+        '''
+        SELECT ca.id
+        FROM cards ca
+        INNER JOIN courses c ON c.id = ca.courseId
+        WHERE ca.id = ?
+          AND ca.deletedAt IS NULL
+          AND ca.isHidden = 0
+          AND c.deletedAt IS NULL
+        LIMIT 1
+        ''',
+        [staleCardId],
+      );
+    }
+
+    return null;
+  }
+
+
+  String _formatSrsDate(String value) {
+    final date = DateTime.tryParse(value);
+    if (date == null) return 'chưa có ngày';
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${two(date.day)}/${two(date.month)}/${date.year}';
+  }
+
+
+  String _srsStamp() {
+    final n = DateTime.now();
+    String two(int v) => v.toString().padLeft(2, '0');
+    return '${n.year}${two(n.month)}${two(n.day)}_${two(n.hour)}${two(n.minute)}${two(n.second)}';
+  }
 }
 
 

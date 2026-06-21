@@ -392,7 +392,7 @@ extension HomePageStateDrawer on _HomePageState {
                           height: 46,
                           child: ElevatedButton(
                             onPressed: this.openCreateCourse,
-                            child: Text("Thêm học phần"),
+                            child: Text("Tạo Cards"),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: AppColors.yellow,
                               foregroundColor: AppColors.buttonInk,

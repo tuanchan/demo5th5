@@ -87,6 +87,14 @@ extension FlashCardsPageStatePart05 on _FlashCardsPageState {
 
 
   Widget buildTopBar() {
+    String currentTitle = widget.courseTitle;
+    if (selectedCourseId != null) {
+      final currentCourse = courseList.where((c) => c.id == selectedCourseId);
+      if (currentCourse.isNotEmpty) {
+        currentTitle = currentCourse.first.title;
+      }
+    }
+
     return Padding(
       padding: EdgeInsets.fromLTRB(14, 12, 14, 8),
       child: Row(
@@ -98,32 +106,59 @@ extension FlashCardsPageStatePart05 on _FlashCardsPageState {
           ),
           SizedBox(width: 12),
           Expanded(
-            child: Container(
-              height: 50,
-              padding: EdgeInsets.symmetric(horizontal: 14),
-              decoration: BoxDecoration(
-                color: AppColors.panel,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: AppColors.border, width: 1.4),
-                boxShadow: [
-                  BoxShadow(
-                    color: AppColors.border,
-                    offset: Offset(0, 4),
-                    blurRadius: 0,
-                  ),
-                ],
-              ),
-              child: Center(
-                child: Text(
-                  widget.courseTitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: AppColors.text,
-                    fontWeight: FontWeight.w900,
-                    fontSize: 15,
-                  ),
+            child: GestureDetector(
+              onTap: () {
+                setState(() {
+                  courseDropdownOpen = !courseDropdownOpen;
+                });
+              },
+              child: Container(
+                height: 50,
+                padding: EdgeInsets.symmetric(horizontal: 14),
+                decoration: BoxDecoration(
+                  color: AppColors.panel,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppColors.border, width: 1.4),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppColors.border,
+                      offset: Offset(0, 4),
+                      blurRadius: 0,
+                    ),
+                  ],
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        currentTitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: AppColors.text,
+                          fontWeight: FontWeight.w900,
+                          fontSize: 15,
+                        ),
+                      ),
+                    ),
+                    SizedBox(width: 6),
+                    AnimatedRotation(
+                      turns: courseDropdownOpen ? -0.5 : 0,
+                      duration: Duration(milliseconds: 200),
+                      curve: Curves.easeInOut,
+                      child: SvgPicture.asset(
+                        'assets/icon/chevron-down-solid-full.svg',
+                        width: 12,
+                        height: 12,
+                        colorFilter: ColorFilter.mode(
+                          AppColors.text,
+                          BlendMode.srcIn,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),

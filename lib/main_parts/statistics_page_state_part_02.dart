@@ -5,11 +5,11 @@ extension StatisticsPageStatePart02 on _StatisticsPageState {
     final db = await AppDatabase.instance.database;
     await this._purgeSoftDeletedCourses(db);
     final nowDate = DateTime.now();
-    final now = nowDate.toIso8601String();
     final todayStart = DateTime(nowDate.year, nowDate.month, nowDate.day);
     final tomorrowStart = todayStart.add(Duration(days: 1));
     final todayStartIso = todayStart.toIso8601String();
     final tomorrowStartIso = tomorrowStart.toIso8601String();
+    final dueTodayBeforeIso = tomorrowStartIso;
     final masteredLevel = ReviewScheduler.masteredLevel;
 
     final overviewRows = await db.rawQuery(
@@ -36,7 +36,7 @@ extension StatisticsPageStatePart02 on _StatisticsPageState {
             AND c.deletedAt IS NULL
             AND COALESCE(rs.repetitionCount, 0) > 0
             AND rs.nextReviewAt IS NOT NULL
-            AND rs.nextReviewAt <= ?
+            AND rs.nextReviewAt < ?
         ) AS needReviewCards,
         (SELECT COUNT(*)
           FROM cards ca
@@ -85,7 +85,7 @@ extension StatisticsPageStatePart02 on _StatisticsPageState {
             AND COALESCE(rs.wrongCount, 0) > $_hardCardWrongThreshold
         ) AS hardCards
     ''',
-      [now, todayStartIso, tomorrowStartIso],
+      [dueTodayBeforeIso, todayStartIso, tomorrowStartIso],
     );
 
     final overview = overviewRows.isEmpty
@@ -100,7 +100,7 @@ extension StatisticsPageStatePart02 on _StatisticsPageState {
         c.languageCode,
         COUNT(ca.id) AS totalCards,
         COALESCE(SUM(CASE WHEN COALESCE(rs.level, 0) >= $masteredLevel THEN 1 ELSE 0 END), 0) AS masteredCards,
-        COALESCE(SUM(CASE WHEN ca.id IS NOT NULL AND COALESCE(rs.repetitionCount, 0) > 0 AND rs.nextReviewAt IS NOT NULL AND rs.nextReviewAt <= ? THEN 1 ELSE 0 END), 0) AS needReviewCards,
+        COALESCE(SUM(CASE WHEN ca.id IS NOT NULL AND COALESCE(rs.repetitionCount, 0) > 0 AND rs.nextReviewAt IS NOT NULL AND rs.nextReviewAt < ? THEN 1 ELSE 0 END), 0) AS needReviewCards,
         (
           SELECT COUNT(DISTINCT sr.cardId)
           FROM study_results sr
@@ -136,7 +136,13 @@ extension StatisticsPageStatePart02 on _StatisticsPageState {
       GROUP BY c.id, c.title, c.languageCode
       ORDER BY COALESCE(c.updatedAt, c.createdAt) DESC
     ''',
-      [now, todayStartIso, tomorrowStartIso, todayStartIso, tomorrowStartIso],
+      [
+        dueTodayBeforeIso,
+        todayStartIso,
+        tomorrowStartIso,
+        todayStartIso,
+        tomorrowStartIso,
+      ],
     );
 
     final dueRows = await db.rawQuery(
@@ -157,14 +163,14 @@ extension StatisticsPageStatePart02 on _StatisticsPageState {
         AND c.deletedAt IS NULL
         AND COALESCE(rs.repetitionCount, 0) > 0
         AND rs.nextReviewAt IS NOT NULL
-        AND rs.nextReviewAt <= ?
+        AND rs.nextReviewAt < ?
       ORDER BY
         rs.nextReviewAt ASC,
         ca.position ASC,
         ca.id ASC
       LIMIT 12
     ''',
-      [now],
+      [dueTodayBeforeIso],
     );
 
     final srsRows = await db.rawQuery('''
@@ -435,6 +441,11 @@ extension StatisticsPageStatePart02 on _StatisticsPageState {
             ),
           ),
         ),
+        this._dashIconButton(
+          icon: Icons.edit_calendar_rounded,
+          onTap: this.openSrsEditor,
+        ),
+        SizedBox(width: 8),
         this._dashIconButton(icon: Icons.refresh_rounded, onTap: this.reloadStatistics),
       ],
     );

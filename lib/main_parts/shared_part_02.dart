@@ -362,9 +362,11 @@ class ReviewScheduler {
       final nextReviewAtStr = previous['nextReviewAt']?.toString();
       if (nextReviewAtStr != null && nextReviewAtStr.isNotEmpty) {
         final nextReviewAt = DateTime.tryParse(nextReviewAtStr);
-        final todayStart = DateTime(now.year, now.month, now.day);
-        if (nextReviewAt != null && nextReviewAt.isAfter(todayStart)) {
-          // Card is not due yet — keep existing state, only bump counts
+        final tomorrowStart = DateTime(now.year, now.month, now.day).add(
+          Duration(days: 1),
+        );
+        if (nextReviewAt != null && !nextReviewAt.isBefore(tomorrowStart)) {
+          // Card is not due today yet - keep existing state, only bump counts.
           return <String, Object?>{
             'cardId': cardId,
             'level': _dbInt(previous['level']),

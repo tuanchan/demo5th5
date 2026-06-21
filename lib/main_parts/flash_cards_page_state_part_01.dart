@@ -56,6 +56,95 @@ extension FlashCardsPageStatePart01 on _FlashCardsPageState {
                 ),
               ],
             ),
+            if (courseDropdownOpen)
+              Positioned.fill(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () {
+                    setState(() {
+                      courseDropdownOpen = false;
+                    });
+                  },
+                  child: Container(
+                    color: Colors.black.withOpacity(0.12),
+                  ),
+                ),
+              ),
+            if (courseDropdownOpen)
+              Positioned(
+                top: 70, // right under the top bar
+                left: 14,
+                right: 14,
+                child: Container(
+                  constraints: BoxConstraints(maxHeight: 280),
+                  decoration: BoxDecoration(
+                    color: AppColors.panel,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: AppColors.border, width: 1.4),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.15),
+                        blurRadius: 12,
+                        offset: Offset(0, 6),
+                      ),
+                    ],
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(15),
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      padding: EdgeInsets.zero,
+                      itemCount: courseList.length,
+                      itemBuilder: (context, index) {
+                        final course = courseList[index];
+                        final isSelected = course.id == selectedCourseId;
+                        return InkWell(
+                          onTap: () async {
+                            setState(() {
+                              selectedCourseId = course.id;
+                              courseDropdownOpen = false;
+                            });
+                            await this.loadCardsForCourse(course.id);
+                          },
+                          child: Container(
+                            padding: EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 14,
+                            ),
+                            color: isSelected
+                                ? AppColors.blue.withOpacity(0.24)
+                                : Colors.transparent,
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    course.title,
+                                    style: TextStyle(
+                                      color: isSelected
+                                          ? AppColors.text
+                                          : AppColors.muted,
+                                      fontWeight: isSelected
+                                          ? FontWeight.w900
+                                          : FontWeight.w700,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                ),
+                                if (isSelected)
+                                  Icon(
+                                    Icons.check_circle_rounded,
+                                    color: AppColors.border,
+                                    size: 18,
+                                  ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
       ),
@@ -70,7 +159,72 @@ extension FlashCardsPageStatePart01 on _FlashCardsPageState {
       selectedCourseId = widget.courseId;
     });
 
+    await this._loadAllCourses();
     await this.loadCardsForCourse(widget.courseId);
+  }
+
+
+  Future<void> _loadAllCourses() async {
+    try {
+      final db = await AppDatabase.instance.database;
+      final rows = await db.rawQuery('''
+        SELECT 
+          c.id,
+          c.title,
+          c.languageCode,
+          COUNT(cards.id) AS cardCount
+        FROM courses c
+        LEFT JOIN cards 
+          ON cards.courseId = c.id 
+          AND cards.deletedAt IS NULL
+          AND cards.isHidden = 0
+        WHERE c.deletedAt IS NULL
+        GROUP BY c.id, c.title, c.languageCode
+        ORDER BY COALESCE(c.updatedAt, c.createdAt) DESC
+      ''');
+
+      final loadedCourses = rows
+          .map((e) => CourseListItem.fromMap(e))
+          .toList();
+
+      final savedSort = await AppSettingsStore.getString('home.courseSortType') ?? 'updatedDesc';
+      final savedLanguage = await AppSettingsStore.getString('home.courseLanguageFilter') ?? 'all';
+
+      var filtered = loadedCourses;
+      if (savedLanguage.trim().toLowerCase() != 'all') {
+        filtered = loadedCourses.where((course) {
+          return course.languageCode.trim().toLowerCase() == savedLanguage.trim().toLowerCase();
+        }).toList();
+      }
+
+      switch (savedSort) {
+        case "az":
+          filtered.sort(
+            (a, b) => _naturalCompareText(a.title, b.title),
+          );
+          break;
+        case "za":
+          filtered.sort(
+            (a, b) => _naturalCompareText(b.title, a.title),
+          );
+          break;
+        case "cardsDesc":
+          filtered.sort((a, b) => b.cardCount.compareTo(a.cardCount));
+          break;
+        case "cardsAsc":
+          filtered.sort((a, b) => a.cardCount.compareTo(b.cardCount));
+          break;
+        default:
+          break;
+      }
+
+      if (!mounted) return;
+      setState(() {
+        courseList = filtered;
+      });
+    } catch (e) {
+      debugPrint('LOAD ALL COURSES ERROR: $e');
+    }
   }
 
 
@@ -89,7 +243,9 @@ extension FlashCardsPageStatePart01 on _FlashCardsPageState {
     setState(() {
       starredOnly = widget.dueOnly ? false : (savedStarredOnly ?? starredOnly);
       shuffleEnabled = savedShuffle ?? shuffleEnabled;
-      progressTracking = savedProgress ?? progressTracking;
+      progressTracking = widget.dueOnly
+          ? true
+          : (savedProgress ?? progressTracking);
       autoPlayAudio = savedAutoPlay ?? autoPlayAudio;
     });
   }

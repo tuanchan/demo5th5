@@ -11,6 +11,49 @@ const Set<String> _courseSortTypes = {
   'cardsAsc',
 };
 
+int _naturalCompareText(String a, String b) {
+  final left = a.trim().toLowerCase();
+  final right = b.trim().toLowerCase();
+  final pattern = RegExp(r'\d+|\D+');
+  final leftParts = pattern.allMatches(left).map((m) => m.group(0)!).toList();
+  final rightParts = pattern.allMatches(right).map((m) => m.group(0)!).toList();
+  final length = math.min(leftParts.length, rightParts.length);
+
+  for (var i = 0; i < length; i++) {
+    final leftPart = leftParts[i];
+    final rightPart = rightParts[i];
+    final leftIsNumber = int.tryParse(leftPart) != null;
+    final rightIsNumber = int.tryParse(rightPart) != null;
+
+    if (leftIsNumber && rightIsNumber) {
+      final leftNumber = leftPart.replaceFirst(RegExp(r'^0+'), '');
+      final rightNumber = rightPart.replaceFirst(RegExp(r'^0+'), '');
+      final normalizedLeft = leftNumber.isEmpty ? '0' : leftNumber;
+      final normalizedRight = rightNumber.isEmpty ? '0' : rightNumber;
+
+      final lengthCompare = normalizedLeft.length.compareTo(
+        normalizedRight.length,
+      );
+      if (lengthCompare != 0) return lengthCompare;
+
+      final numberCompare = normalizedLeft.compareTo(normalizedRight);
+      if (numberCompare != 0) return numberCompare;
+
+      final zeroCompare = leftPart.length.compareTo(rightPart.length);
+      if (zeroCompare != 0) return zeroCompare;
+      continue;
+    }
+
+    final partCompare = leftPart.compareTo(rightPart);
+    if (partCompare != 0) return partCompare;
+  }
+
+  final partCountCompare = leftParts.length.compareTo(rightParts.length);
+  if (partCountCompare != 0) return partCountCompare;
+
+  return left.compareTo(right);
+}
+
 class _HomePageState extends State<HomePage> {
   bool isOpen = false;
   double _homeDragStartX = 0;
@@ -53,12 +96,12 @@ class _HomePageState extends State<HomePage> {
     switch (courseSortType) {
       case "az":
         filtered.sort(
-          (a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()),
+          (a, b) => _naturalCompareText(a.title, b.title),
         );
         break;
       case "za":
         filtered.sort(
-          (a, b) => b.title.toLowerCase().compareTo(a.title.toLowerCase()),
+          (a, b) => _naturalCompareText(b.title, a.title),
         );
         break;
       case "cardsDesc":

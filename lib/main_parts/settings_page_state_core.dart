@@ -6,10 +6,7 @@ final Uri _geminiApiKeyUri = Uri.parse(
 
 class _SettingsPageState extends State<SettingsPage> {
   String themeMode = 'light';
-  bool busy = false;
   bool showGeminiApiKey = false;
-  String appPath = '';
-  String message = '';
   String geminiKeyMessage = '';
 
   final Map<String, String> colorNames = {
