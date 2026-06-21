@@ -14,6 +14,7 @@ class _PronunciationOverlayState extends State<PronunciationOverlay> with Single
   late Animation<double> _pulseAnim;
 
   final stt.SpeechToText _speech = stt.SpeechToText();
+  final AudioPlayer _successPlayer = AudioPlayer();
 
   @override
   void initState() {
@@ -31,6 +32,7 @@ class _PronunciationOverlayState extends State<PronunciationOverlay> with Single
   @override
   void dispose() {
     _speech.stop();
+    _successPlayer.dispose();
     _pulseController.dispose();
     super.dispose();
   }

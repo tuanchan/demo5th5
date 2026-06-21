@@ -354,6 +354,9 @@ extension PronunciationOverlayStatePart01 on _PronunciationOverlayState {
 
   void _micReset() {
     _speech.stop();
+    try {
+      _successPlayer.stop();
+    } catch (_) {}
     setState(() {
       _isRecording = false;
       _hasResult = false;

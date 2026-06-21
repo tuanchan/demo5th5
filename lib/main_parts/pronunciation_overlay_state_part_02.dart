@@ -2,6 +2,9 @@ part of flutterflashcard_main;
 
 extension PronunciationOverlayStatePart02 on _PronunciationOverlayState {
   Future<void> _micToggle() async {
+    try {
+      _successPlayer.stop();
+    } catch (_) {}
     if (_isRecording) {
       await _speech.stop();
       setState(() {
@@ -140,6 +143,19 @@ extension PronunciationOverlayStatePart02 on _PronunciationOverlayState {
       _score = score;
       _hasResult = true;
     });
+
+    final pct = (score * 100).round();
+    if (pct == 100) {
+      try {
+        _successPlayer.stop().then((_) {
+          _successPlayer.setAsset('assets/audios/succes100.mp3').then((_) {
+            _successPlayer.play();
+          });
+        });
+      } catch (e) {
+        debugPrint('Play success audio error: $e');
+      }
+    }
   }
 
 }
