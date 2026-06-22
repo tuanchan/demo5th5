@@ -312,9 +312,7 @@ extension ReviewPracticePageStatePart04 on _ReviewPracticePageState {
       return;
     }
 
-    final ok = _sentenceMode
-        ? this._isSentenceAnswerCorrect(card, typed)
-        : this._isEssayAnswerCorrect(card, typed);
+    final ok = this._isEssayAnswerCorrect(card, typed);
     final wasLast = _currentEssayIndex + 1 >= _quizCards.length;
 
     setState(() {
@@ -343,6 +341,13 @@ extension ReviewPracticePageStatePart04 on _ReviewPracticePageState {
       } else {
         await this._finishStudySession();
         this._showResultSheet();
+      }
+    } else {
+      final isNextListening = _listening || (_sentenceMode && _currentEssayIndex % 3 == 2);
+      if (isNextListening) {
+        Future.delayed(Duration(milliseconds: 260), () {
+          if (mounted) this._playListeningAudio();
+        });
       }
     }
   }
@@ -449,8 +454,9 @@ extension ReviewPracticePageStatePart04 on _ReviewPracticePageState {
       await this._finishStudySession();
       this._showResultSheet();
     } else {
+      final isNextListening = _listening || (_sentenceMode && _currentEssayIndex % 3 == 2);
       Future.delayed(Duration(milliseconds: 220), () {
-        if (mounted && _listening) this._playListeningAudio();
+        if (mounted && isNextListening) this._playListeningAudio();
       });
     }
   }

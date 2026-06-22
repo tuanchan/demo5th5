@@ -95,6 +95,16 @@ extension ReviewPracticePageStatePart01 on _ReviewPracticePageState {
                     ],
                   ),
                 ),
+                if (!_showSetup && _quizCards.isNotEmpty)
+                  Container(
+                    width: double.infinity,
+                    height: 5,
+                    child: LinearProgressIndicator(
+                      value: _displayTotal <= 0 ? 0 : _done / _displayTotal,
+                      backgroundColor: AppColors.panel2,
+                      color: AppColors.green,
+                    ),
+                  ),
                 Expanded(
                   child: _isGeneratingSentenceQuiz
                       ? this._buildSentenceGeneratingMode()
@@ -167,6 +177,14 @@ extension ReviewPracticePageStatePart01 on _ReviewPracticePageState {
                                     )
                                   : _listening
                                   ? this._buildListeningMode()
+                                  : _matchingPairs
+                                  ? this._buildMatchingPairsMode()
+                                  : _sentenceMode
+                                  ? (_currentEssayIndex % 3 == 0
+                                        ? this._buildSingleCardMultipleChoiceMode()
+                                        : (_currentEssayIndex % 3 == 1
+                                              ? this._buildEssayMode()
+                                              : this._buildListeningMode()))
                                   : ((_essay || _sentenceMode) &&
                                             !_multipleChoice
                                         ? this._buildEssayMode()
@@ -208,6 +226,47 @@ extension ReviewPracticePageStatePart01 on _ReviewPracticePageState {
                   ),
                 ),
               ),
+            if (!_showSetup &&
+                _quizCards.isNotEmpty &&
+                _matchingPairs &&
+                _finished)
+              Positioned(
+                left: 14,
+                right: 14,
+                bottom: 14,
+                child: Container(
+                  padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.86),
+                    borderRadius: BorderRadius.circular(22),
+                    border: Border.all(
+                      color: AppColors.border.withOpacity(0.18),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: this._outlineButton(
+                          text: 'Thoát',
+                          icon: Icons.logout_rounded,
+                          onTap: () {
+                            Navigator.pop(context);
+                          },
+                        ),
+                      ),
+                      SizedBox(width: 10),
+                      Expanded(
+                        child: this._solidButton(
+                          text: 'Ôn lại',
+                          icon: Icons.refresh_rounded,
+                          color: AppColors.yellow,
+                          onTap: this._restart,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
           ],
         ),
       ),
@@ -215,6 +274,9 @@ extension ReviewPracticePageStatePart01 on _ReviewPracticePageState {
   }
 
 // ─── Pronunciation helpers ────────────────────────────────────────────────────
+
+
+
 
 
   Future<void> _loadCards() async {
@@ -257,8 +319,13 @@ extension ReviewPracticePageStatePart01 on _ReviewPracticePageState {
           _multipleChoice = widget.presetMode == 'multipleChoice';
           _essay = widget.presetMode == 'essay';
           _listening = widget.presetMode == 'listening';
+          _matchingPairs = widget.presetMode == 'matchingPairs';
           _sentenceMode = widget.presetMode == 'sentence';
-          if (!_multipleChoice && !_essay && !_listening && !_sentenceMode) {
+          if (!_multipleChoice &&
+              !_essay &&
+              !_listening &&
+              !_matchingPairs &&
+              !_sentenceMode) {
             _multipleChoice = true;
           }
         });
@@ -297,12 +364,18 @@ extension ReviewPracticePageStatePart01 on _ReviewPracticePageState {
   }
 
 
+
+
+
   Future<void> _loadReviewSettings() async {
     final savedMultipleChoice = await AppSettingsStore.getBool(
       'review.multipleChoice',
     );
     final savedEssay = await AppSettingsStore.getBool('review.essay');
     final savedListening = await AppSettingsStore.getBool('review.listening');
+    final savedMatchingPairs = await AppSettingsStore.getBool(
+      'review.matchingPairs',
+    );
     final savedSentenceMode = await AppSettingsStore.getBool(
       'review.sentenceMode',
     );
@@ -319,12 +392,14 @@ extension ReviewPracticePageStatePart01 on _ReviewPracticePageState {
       _multipleChoice = savedMultipleChoice ?? _multipleChoice;
       _essay = savedEssay ?? _essay;
       _listening = savedListening ?? _listening;
+      _matchingPairs = savedMatchingPairs ?? _matchingPairs;
       _sentenceMode = savedSentenceMode ?? _sentenceMode;
 
       final activeModes = [
         _multipleChoice,
         _essay,
         _listening,
+        _matchingPairs,
         _sentenceMode,
       ].where((e) => e).length;
       if (activeModes == 0) {
@@ -333,6 +408,7 @@ extension ReviewPracticePageStatePart01 on _ReviewPracticePageState {
       if (activeModes > 1) {
         _essay = false;
         _listening = false;
+        _matchingPairs = false;
         _sentenceMode = false;
         _multipleChoice = true;
       }
@@ -345,11 +421,15 @@ extension ReviewPracticePageStatePart01 on _ReviewPracticePageState {
   }
 
 
+
+
+
   Future<void> _saveReviewSettings() async {
     await Future.wait([
       AppSettingsStore.setBool('review.multipleChoice', _multipleChoice),
       AppSettingsStore.setBool('review.essay', _essay),
       AppSettingsStore.setBool('review.listening', _listening),
+      AppSettingsStore.setBool('review.matchingPairs', _matchingPairs),
       AppSettingsStore.setBool('review.sentenceMode', _sentenceMode),
       AppSettingsStore.setBool(
         'review.answerByDefinition',
@@ -358,6 +438,9 @@ extension ReviewPracticePageStatePart01 on _ReviewPracticePageState {
       AppSettingsStore.setInt('review.questionLimit', _questionLimit),
     ]);
   }
+
+
+
 
 
   Future<void> _startStudySession({
@@ -387,111 +470,5 @@ extension ReviewPracticePageStatePart01 on _ReviewPracticePageState {
       ..addEntries(_quizCards.map((card) => MapEntry(card.id, now)));
   }
 
-
-  Future<void> _finishStudySession() async {
-    final sessionId = _studySessionId;
-    if (sessionId == null || _studySessionFinished) return;
-
-    try {
-      final db = await AppDatabase.instance.database;
-      await db.update(
-        'study_sessions',
-        {
-          'correctCount': _correct,
-          'wrongCount': _wrong,
-          'endedAt': DateTime.now().toIso8601String(),
-        },
-        where: 'id = ?',
-        whereArgs: [sessionId],
-      );
-      _studySessionFinished = true;
-    } catch (e) {
-      debugPrint('FINISH REVIEW SESSION ERROR: $e');
-    }
-  }
-
-
-  Future<void> _markReviewStateForCard({
-    required int cardId,
-    required bool isCorrect,
-  }) async {
-    final db = await AppDatabase.instance.database;
-    final now = DateTime.now();
-
-    final rows = await db.query(
-      'review_states',
-      where: 'cardId = ?',
-      whereArgs: [cardId],
-      limit: 1,
-    );
-    final previousState = rows.isEmpty
-        ? null
-        : Map<String, Object?>.from(rows.first);
-    final nextState = ReviewScheduler.nextState(
-      cardId: cardId,
-      previous: previousState,
-      isCorrect: isCorrect,
-      now: now,
-    );
-
-    if (rows.isEmpty) {
-      await db.insert('review_states', nextState);
-      return;
-    }
-
-    await db.update(
-      'review_states',
-      nextState,
-      where: 'cardId = ?',
-      whereArgs: [cardId],
-    );
-  }
-
-
-  Future<void> _recordStudyResult({
-    required StudyCardItem card,
-    required String answerText,
-    required bool isCorrect,
-  }) async {
-    final sessionId = _studySessionId;
-    if (sessionId == null || _studySessionFinished) return;
-    if (_recordedResultCardIds.contains(card.id)) return;
-
-    final now = DateTime.now();
-    final startedAt = _cardStartedAtMap[card.id] ?? _essayQuestionStartedAt;
-    final responseMs = now
-        .difference(startedAt)
-        .inMilliseconds
-        .clamp(0, 2147483647);
-
-    try {
-      final db = await AppDatabase.instance.database;
-      await db.insert('study_results', {
-        'sessionId': sessionId,
-        'cardId': card.id,
-        'answerText': answerText,
-        'isCorrect': isCorrect ? 1 : 0,
-        'responseTimeMs': responseMs,
-        'reviewedAt': now.toIso8601String(),
-      });
-
-      await this._markReviewStateForCard(cardId: card.id, isCorrect: isCorrect);
-
-      _recordedResultCardIds.add(card.id);
-
-      await db.update(
-        'study_sessions',
-        {
-          'correctCount': _correctMap.values.where((e) => e).length,
-          'wrongCount':
-              _answeredCards.length - _correctMap.values.where((e) => e).length,
-        },
-        where: 'id = ?',
-        whereArgs: [sessionId],
-      );
-    } catch (e) {
-      debugPrint('INSERT REVIEW RESULT ERROR: $e');
-    }
-  }
 
 }

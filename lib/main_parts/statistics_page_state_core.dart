@@ -6,6 +6,108 @@ class _StatisticsPageState extends State<StatisticsPage> {
   late Future<StatisticsData> _future;
   final Set<int> _expandedCourseIds = {};
 
+  List<Map<String, Object?>> _extractSrsImportItems(Object? decoded) {
+    final source = decoded is Map ? decoded['items'] : decoded;
+    if (source is! List) return [];
+
+    return source
+        .whereType<Map>()
+        .map((item) => Map<String, Object?>.from(item))
+        .toList();
+  }
+
+
+  Future<int?> _findSrsImportCardId(
+    DatabaseExecutor executor,
+    Map<String, Object?> item,
+  ) async {
+    final term = item['term']?.toString().trim() ?? '';
+    final definition = item['definition']?.toString().trim() ?? '';
+    final courseTitle = item['courseTitle']?.toString().trim() ?? '';
+    final languageCode = item['languageCode']?.toString().trim() ?? '';
+
+    Future<int?> firstId(String sql, List<Object?> args) async {
+      final rows = await executor.rawQuery(sql, args);
+      if (rows.isEmpty) return null;
+      final id = _dbInt(rows.first['id']);
+      return id > 0 ? id : null;
+    }
+
+    if (term.isNotEmpty && definition.isNotEmpty && courseTitle.isNotEmpty) {
+      final id = await firstId(
+        '''
+        SELECT ca.id
+        FROM cards ca
+        INNER JOIN courses c ON c.id = ca.courseId
+        WHERE ca.deletedAt IS NULL
+          AND ca.isHidden = 0
+          AND c.deletedAt IS NULL
+          AND lower(trim(c.title)) = lower(trim(?))
+          AND (? = '' OR c.languageCode = ?)
+          AND lower(trim(ca.term)) = lower(trim(?))
+          AND lower(trim(ca.definition)) = lower(trim(?))
+        LIMIT 1
+        ''',
+        [courseTitle, languageCode, languageCode, term, definition],
+      );
+      if (id != null) return id;
+    }
+
+    if (term.isNotEmpty && definition.isNotEmpty) {
+      final id = await firstId(
+        '''
+        SELECT ca.id
+        FROM cards ca
+        INNER JOIN courses c ON c.id = ca.courseId
+        WHERE ca.deletedAt IS NULL
+          AND ca.isHidden = 0
+          AND c.deletedAt IS NULL
+          AND (? = '' OR c.languageCode = ?)
+          AND lower(trim(ca.term)) = lower(trim(?))
+          AND lower(trim(ca.definition)) = lower(trim(?))
+        ORDER BY c.updatedAt DESC, c.createdAt DESC, ca.id ASC
+        LIMIT 1
+        ''',
+        [languageCode, languageCode, term, definition],
+      );
+      if (id != null) return id;
+    }
+
+    final staleCardId = _dbInt(item['cardId']);
+    if (staleCardId > 0) {
+      return firstId(
+        '''
+        SELECT ca.id
+        FROM cards ca
+        INNER JOIN courses c ON c.id = ca.courseId
+        WHERE ca.id = ?
+          AND ca.deletedAt IS NULL
+          AND ca.isHidden = 0
+          AND c.deletedAt IS NULL
+        LIMIT 1
+        ''',
+        [staleCardId],
+      );
+    }
+
+    return null;
+  }
+
+
+  String _formatSrsDate(String value) {
+    final date = DateTime.tryParse(value);
+    if (date == null) return 'chưa có ngày';
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${two(date.day)}/${two(date.month)}/${date.year}';
+  }
+
+
+  String _srsStamp() {
+    final n = DateTime.now();
+    String two(int v) => v.toString().padLeft(2, '0');
+    return '${n.year}${two(n.month)}${two(n.day)}_${two(n.hour)}${two(n.minute)}${two(n.second)}';
+  }
+
   @override
   void initState() {
     super.initState();
@@ -16,96 +118,4 @@ class _StatisticsPageState extends State<StatisticsPage> {
   Widget build(BuildContext context) {
     return this._buildStatisticsPagePage(context);
   }
-}
-
-
-class _SrsEditorItem {
-  final int cardId;
-  final int courseId;
-  final String term;
-  final String definition;
-  final String courseTitle;
-  final String languageCode;
-  final int level;
-  final double easeFactor;
-  final int intervalDays;
-  final int repetitionCount;
-  final int correctCount;
-  final int wrongCount;
-  final String lastReviewedAt;
-  final String nextReviewAt;
-
-  _SrsEditorItem({
-    required this.cardId,
-    required this.courseId,
-    required this.term,
-    required this.definition,
-    required this.courseTitle,
-    required this.languageCode,
-    required this.level,
-    required this.easeFactor,
-    required this.intervalDays,
-    required this.repetitionCount,
-    required this.correctCount,
-    required this.wrongCount,
-    required this.lastReviewedAt,
-    required this.nextReviewAt,
-  });
-
-  factory _SrsEditorItem.fromMap(Map<String, Object?> map) {
-    return _SrsEditorItem(
-      cardId: _dbInt(map['cardId']),
-      courseId: _dbInt(map['courseId']),
-      term: map['term']?.toString() ?? '',
-      definition: map['definition']?.toString() ?? '',
-      courseTitle: map['courseTitle']?.toString() ?? '',
-      languageCode: map['languageCode']?.toString() ?? '',
-      level: _dbInt(map['level']),
-      easeFactor: _dbDouble(map['easeFactor'], 2.5),
-      intervalDays: _dbInt(map['intervalDays']),
-      repetitionCount: _dbInt(map['repetitionCount']),
-      correctCount: _dbInt(map['correctCount']),
-      wrongCount: _dbInt(map['wrongCount']),
-      lastReviewedAt: map['lastReviewedAt']?.toString() ?? '',
-      nextReviewAt: map['nextReviewAt']?.toString() ?? '',
-    );
-  }
-
-  Map<String, Object?> toJson() {
-    return {
-      'cardId': cardId,
-      'courseId': courseId,
-      'term': term,
-      'definition': definition,
-      'courseTitle': courseTitle,
-      'languageCode': languageCode,
-      'level': level,
-      'easeFactor': easeFactor,
-      'intervalDays': intervalDays,
-      'repetitionCount': repetitionCount,
-      'correctCount': correctCount,
-      'wrongCount': wrongCount,
-      'lastReviewedAt': lastReviewedAt,
-      'nextReviewAt': nextReviewAt,
-    };
-  }
-}
-
-
-class _SrsEditorCourse {
-  final int id;
-  final String title;
-  final String languageCode;
-  final int cardCount;
-  final int reviewedCount;
-  final int dueCount;
-
-  _SrsEditorCourse({
-    required this.id,
-    required this.title,
-    required this.languageCode,
-    required this.cardCount,
-    required this.reviewedCount,
-    required this.dueCount,
-  });
 }

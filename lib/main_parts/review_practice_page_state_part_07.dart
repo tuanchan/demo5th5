@@ -392,6 +392,20 @@ extension ReviewPracticePageStatePart07 on _ReviewPracticePageState {
   }
 
 
+  Widget _buildSingleCardMultipleChoiceMode() {
+    final card = _quizCards[_currentEssayIndex];
+    return Center(
+      child: SingleChildScrollView(
+        padding: EdgeInsets.fromLTRB(16, 18, 16, 100),
+        child: Container(
+          constraints: BoxConstraints(maxWidth: 720),
+          child: this._buildQuestionCard(card, _currentEssayIndex),
+        ),
+      ),
+    );
+  }
+
+
   Widget _loadingShimmer({
     double? width,
     required double height,

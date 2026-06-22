@@ -12,6 +12,7 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
         bool localMc = _multipleChoice;
         bool localEssay = _essay;
         bool localListening = _listening;
+        bool localMatchingPairs = _matchingPairs;
         bool localSentenceMode = _sentenceMode;
         bool localAnswerByDefinition = _answerByDefinition;
 
@@ -21,6 +22,7 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
               bool? mc,
               bool? essay,
               bool? listening,
+              bool? matching,
               bool? sentence,
             }) {
               setSheetState(() {
@@ -28,6 +30,7 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
                   localMc = true;
                   localEssay = false;
                   localListening = false;
+                  localMatchingPairs = false;
                   localSentenceMode = false;
                   return;
                 }
@@ -36,6 +39,7 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
                   localEssay = true;
                   localMc = false;
                   localListening = false;
+                  localMatchingPairs = false;
                   localSentenceMode = false;
                   return;
                 }
@@ -44,6 +48,16 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
                   localListening = true;
                   localMc = false;
                   localEssay = false;
+                  localMatchingPairs = false;
+                  localSentenceMode = false;
+                  return;
+                }
+
+                if (matching == true) {
+                  localMatchingPairs = true;
+                  localMc = false;
+                  localEssay = false;
+                  localListening = false;
                   localSentenceMode = false;
                   return;
                 }
@@ -53,12 +67,14 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
                   localMc = false;
                   localEssay = false;
                   localListening = false;
+                  localMatchingPairs = false;
                   return;
                 }
 
                 localMc = true;
                 localEssay = false;
                 localListening = false;
+                localMatchingPairs = false;
                 localSentenceMode = false;
               });
             }
@@ -199,7 +215,12 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
                         onChanged: (v) => setMode(listening: v),
                       ),
                       this._switchTile(
-                        text: 'Kiểm tra đặt câu',
+                        text: 'Kiểm tra cặp thẻ',
+                        value: localMatchingPairs,
+                        onChanged: (v) => setMode(matching: v),
+                      ),
+                      this._switchTile(
+                        text: 'Kiểm tra tổng hợp',
                         value: localSentenceMode,
                         onChanged: (v) => setMode(sentence: v),
                       ),
@@ -218,16 +239,25 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
                               _listening =
                                   !localMc &&
                                   !localEssay &&
+                                  !localMatchingPairs &&
                                   !localSentenceMode &&
                                   localListening;
+                              _matchingPairs =
+                                  !localMc &&
+                                  !localEssay &&
+                                  !localListening &&
+                                  !localSentenceMode &&
+                                  localMatchingPairs;
                               _sentenceMode =
                                   !localMc &&
                                   !localEssay &&
                                   !localListening &&
+                                  !localMatchingPairs &&
                                   localSentenceMode;
                               if (!_multipleChoice &&
                                   !_essay &&
                                   !_listening &&
+                                  !_matchingPairs &&
                                   !_sentenceMode) {
                                 _multipleChoice = true;
                               }
@@ -288,7 +318,9 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
                           ),
                     SizedBox(height: 10),
                     Text(
-                      'Kết quả ôn tập',
+                      _matchingPairs
+                          ? 'Chúc mừng hoàn thành'
+                          : 'Kết quả ôn tập',
                       style: TextStyle(
                         color: AppColors.text,
                         fontSize: 24,

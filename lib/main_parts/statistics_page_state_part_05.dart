@@ -236,7 +236,7 @@ extension StatisticsPageStatePart05 on _StatisticsPageState {
                 SizedBox(width: 8),
                 AnimatedRotation(
                   turns: isExpanded ? 0.5 : 0,
-                  duration: Duration(milliseconds: 160),
+                  duration: getDuration(milliseconds: 160),
                   child: Icon(
                     Icons.keyboard_arrow_down_rounded,
                     color: AppColors.border,
@@ -308,7 +308,7 @@ extension StatisticsPageStatePart05 on _StatisticsPageState {
               crossFadeState: isExpanded
                   ? CrossFadeState.showSecond
                   : CrossFadeState.showFirst,
-              duration: Duration(milliseconds: 180),
+              duration: getDuration(milliseconds: 180),
               sizeCurve: Curves.easeOutCubic,
             ),
           ],

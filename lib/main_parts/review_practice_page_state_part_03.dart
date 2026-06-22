@@ -30,7 +30,6 @@ extension ReviewPracticePageStatePart03 on _ReviewPracticePageState {
     }
   }
 
-
   Future<List<StudyCardItem>> _selectSentenceSourceCards({
     required List<StudyCardItem> shuffled,
     required int limit,
@@ -56,7 +55,6 @@ extension ReviewPracticePageStatePart03 on _ReviewPracticePageState {
 
     return selected;
   }
-
 
   Future<List<StudyCardItem>> _buildSentenceQuizCards(
     List<StudyCardItem> selected,
@@ -146,46 +144,29 @@ $cardsJson
     }
   }
 
-
   Future<void> _startQuiz() async {
     if (_cards.isEmpty) return;
 
     final copied = List<StudyCardItem>.from(_cards)..shuffle(_random);
     final limit = _questionLimit.clamp(1, _cards.length).toInt();
     var selected = copied.take(limit).toList();
-    if (_sentenceMode) {
-      selected = await this._selectSentenceSourceCards(
-        shuffled: copied,
-        limit: limit,
-      );
-      if (!mounted) return;
-      setState(() {
-        _isGeneratingSentenceQuiz = true;
-        _isGeminiTextGrading = false;
-        _showSetup = false;
-        _quizCards.clear();
-        _choiceMap.clear();
-        _answeredCards.clear();
-        _correctMap.clear();
-        _selectedAnswerMap.clear();
-        _geminiTextFeedbackMap.clear();
-        _geminiTextResultScript = '';
-        _finished = false;
-        _currentEssayIndex = 0;
-        _essayController.clear();
-      });
-      selected = await this._buildSentenceQuizCards(selected);
-      if (!mounted) return;
-    }
     final now = DateTime.now();
 
     setState(() {
       _quizCards = selected;
       _choiceMap = {
-        for (final card in selected)
-          card.id: _listening
-              ? this._buildListeningChoices(card)
-              : (_sentenceMode ? <String>[] : this._buildChoices(card)),
+        for (var i = 0; i < selected.length; i++)
+          selected[i].id: _listening
+              ? this._buildListeningChoices(selected[i])
+              : (_sentenceMode
+                    ? (i % 3 == 0
+                          ? this._buildChoices(selected[i])
+                          : (i % 3 == 2
+                                ? this._buildListeningChoices(selected[i])
+                                : <String>[]))
+                    : ((_matchingPairs)
+                          ? <String>[]
+                          : this._buildChoices(selected[i]))),
       };
       _questionKeys
         ..clear()
@@ -194,6 +175,15 @@ $cardsJson
       _correctMap.clear();
       _selectedAnswerMap.clear();
       _geminiTextFeedbackMap.clear();
+      if (_matchingPairs) {
+        this._setupMatchingTilesForPage(0);
+      } else {
+        _matchPairTiles = [];
+      }
+      _selectedMatchPairTileId = null;
+      _matchedPairCardIds.clear();
+      _wrongMatchPairTileIds.clear();
+      _correctMatchPairTileIds.clear();
       _geminiTextResultScript = '';
       _isGeminiTextGrading = false;
       _selectedListeningAnswer = null;
@@ -212,21 +202,23 @@ $cardsJson
     await this._startStudySession(
       mode: _listening
           ? 'review_listening'
-          : (_sentenceMode
-                ? 'review_sentence'
+          : (_matchingPairs
+                ? 'review_matching_pairs'
+                : (_sentenceMode
+                ? 'review_mixed'
                 : (_multipleChoice
                       ? 'review_multiple_choice'
-                      : 'review_essay')),
+                          : 'review_essay'))),
       totalCards: selected.length,
     );
 
-    if (_listening) {
+    final isFirstListening = _listening || (_sentenceMode && _currentEssayIndex % 3 == 2);
+    if (isFirstListening) {
       Future.delayed(Duration(milliseconds: 260), () {
-        if (mounted && _listening) this._playListeningAudio();
+        if (mounted) this._playListeningAudio();
       });
     }
   }
-
 
   Future<void> _restart() async {
     await this._finishStudySession();
@@ -238,7 +230,6 @@ $cardsJson
     });
     this._openSetupSheet();
   }
-
 
   Future<void> _answerCard(StudyCardItem card, String selected) async {
     if (_answeredCards.contains(card.id) || _finished) return;
@@ -259,14 +250,39 @@ $cardsJson
       isCorrect: isCorrect,
     );
 
-    this._scrollToNextUnanswered(card);
+    if (_sentenceMode) {
+      final wasLast = _currentEssayIndex + 1 >= _quizCards.length;
+      Future.delayed(Duration(milliseconds: 1000), () {
+        if (!mounted) return;
+        setState(() {
+          if (wasLast) {
+            _finished = true;
+          } else {
+            _currentEssayIndex++;
+            _selectedListeningAnswer = null;
+            _essayController.clear();
+            _essayQuestionStartedAt = DateTime.now();
+            _cardStartedAtMap[_quizCards[_currentEssayIndex].id] =
+                _essayQuestionStartedAt;
+          }
+        });
+        if (_finished) {
+          this._finishStudySession();
+          this._showResultSheet();
+        } else {
+          if (_currentEssayIndex % 3 == 2) {
+            this._playListeningAudio();
+          }
+        }
+      });
+    } else {
+      this._scrollToNextUnanswered(card);
+    }
   }
-
 
   Future<void> _skipCard(StudyCardItem card) async {
     await this._answerCard(card, '');
   }
-
 
   void _scrollToNextUnanswered(StudyCardItem currentCard) {
     final currentIndex = _quizCards.indexWhere((e) => e.id == currentCard.id);
@@ -281,7 +297,6 @@ $cardsJson
     this._scrollToQuestion(_quizCards[nextIndex].id);
   }
 
-
   void _scrollToFirstWrong() {
     StudyCardItem? wrongCard;
 
@@ -295,7 +310,6 @@ $cardsJson
     if (wrongCard == null) return;
     this._scrollToQuestion(wrongCard.id);
   }
-
 
   void _openWrongReviewFromResult() {
     final wrongCards = _wrongReviewCards;
@@ -320,5 +334,4 @@ $cardsJson
 
     this._showWrongReviewSheet(initialIndex: 0);
   }
-
 }

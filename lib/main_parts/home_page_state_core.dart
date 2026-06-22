@@ -134,6 +134,30 @@ class _HomePageState extends State<HomePage> {
 
   final TextEditingController courseSearchController = TextEditingController();
 
+  List<DropdownMenuItem<String>> buildLanguageItems() {
+    return [
+      DropdownMenuItem(
+        value: "Tiếng Trung Phồn thể (Traditional Chinese)",
+        child: Text("Tiếng Trung Phồn thể"),
+      ),
+      DropdownMenuItem(
+        value: "Tiếng Trung Giản thể (Simplified Chinese)",
+        child: Text("Tiếng Trung Giản thể"),
+      ),
+      DropdownMenuItem(value: "Tiếng Anh (English)", child: Text("Tiếng Anh")),
+      DropdownMenuItem(value: "Tiếng Đức (German)", child: Text("Tiếng Đức")),
+      DropdownMenuItem(
+        value: "Tiếng Nhật (Japanese)",
+        child: Text("Tiếng Nhật"),
+      ),
+      DropdownMenuItem(value: "Tiếng Hàn (Korean)", child: Text("Tiếng Hàn")),
+      DropdownMenuItem(
+        value: "Tiếng Việt (Vietnamese)",
+        child: Text("Tiếng Việt"),
+      ),
+    ];
+  }
+
   @override
   void initState() {
     super.initState();

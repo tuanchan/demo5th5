@@ -23,29 +23,38 @@ part 'main_parts/home_page_state_core.dart';
 part 'main_parts/home_page_state_part_01.dart';
 part 'main_parts/home_page_state_drawer.dart';
 part 'main_parts/home_page_state_part_02.dart';
+part 'main_parts/home_page_state_part_02_split_02.dart';
 part 'main_parts/home_page_state_part_03.dart';
 part 'main_parts/settings_page_state_core.dart';
 part 'main_parts/settings_page_state_part_01.dart';
 part 'main_parts/settings_page_state_part_02.dart';
 part 'main_parts/statistics_page_state_core.dart';
+part 'main_parts/statistics_due_review_part_01.dart';
+part 'main_parts/statistics_due_review_part_02.dart';
 part 'main_parts/statistics_page_state_part_01.dart';
 part 'main_parts/statistics_page_state_part_02.dart';
 part 'main_parts/statistics_page_state_part_03.dart';
 part 'main_parts/statistics_page_state_part_04.dart';
 part 'main_parts/statistics_page_state_part_05.dart';
 part 'main_parts/statistics_page_state_part_06.dart';
+part 'main_parts/statistics_page_state_part_06_split_02.dart';
+part 'main_parts/statistics_page_state_part_06_split_03.dart';
+part 'main_parts/statistics_page_state_part_06_split_04.dart';
 part 'main_parts/create_course_page_state_core.dart';
 part 'main_parts/create_course_page_state_part_01.dart';
 part 'main_parts/create_course_page_state_part_02.dart';
 part 'main_parts/flash_cards_page_state_core.dart';
 part 'main_parts/flash_cards_page_state_part_01.dart';
+part 'main_parts/flash_cards_page_state_part_01_split_02.dart';
 part 'main_parts/flash_cards_page_state_part_02.dart';
 part 'main_parts/flash_cards_page_state_part_03.dart';
 part 'main_parts/flash_cards_page_state_part_04.dart';
 part 'main_parts/flash_cards_page_state_part_05.dart';
 part 'main_parts/flash_cards_page_state_part_06.dart';
 part 'main_parts/review_practice_page_state_core.dart';
+part 'main_parts/review_match_pair_models.dart';
 part 'main_parts/review_practice_page_state_part_01.dart';
+part 'main_parts/review_practice_page_state_part_01_split_02.dart';
 part 'main_parts/review_practice_page_state_part_02.dart';
 part 'main_parts/review_practice_page_state_part_03.dart';
 part 'main_parts/review_practice_page_state_part_04.dart';
@@ -53,6 +62,7 @@ part 'main_parts/review_practice_page_state_part_05.dart';
 part 'main_parts/review_practice_page_state_part_06.dart';
 part 'main_parts/review_practice_page_state_part_07.dart';
 part 'main_parts/review_practice_page_state_part_08.dart';
+part 'main_parts/review_matching_pairs.dart';
 part 'main_parts/pronunciation_overlay_state_core.dart';
 part 'main_parts/pronunciation_overlay_state_part_01.dart';
 part 'main_parts/pronunciation_overlay_state_part_02.dart';
@@ -63,3 +73,21 @@ part 'main_parts/shared_part_04.dart';
 part 'main_parts/shared_part_05.dart';
 part 'main_parts/shared_part_06.dart';
 part 'main_parts/shared_part_07.dart';
+
+Duration getDuration({
+  int days = 0,
+  int hours = 0,
+  int minutes = 0,
+  int seconds = 0,
+  int milliseconds = 0,
+  int microseconds = 0,
+}) {
+  return Duration(
+    days: days,
+    hours: hours,
+    minutes: minutes,
+    seconds: seconds,
+    milliseconds: milliseconds,
+    microseconds: microseconds,
+  );
+}

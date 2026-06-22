@@ -410,44 +410,5 @@ Gợi ý dùng: ...
       ),
     );
   }
-
-
-  List<Map<String, String>> _parseGeminiExamples(String text) {
-    final lines = text
-        .split(RegExp(r'\r?\n'))
-        .map((line) => line.trim())
-        .where((line) => line.isNotEmpty)
-        .toList();
-    final examples = <Map<String, String>>[];
-
-    for (var i = 0; i < lines.length; i++) {
-      final line = lines[i];
-      final exampleMatch = RegExp(
-        r'^Ví dụ\s*\d*\s*:\s*(.+)$',
-        caseSensitive: false,
-      ).firstMatch(line);
-      if (exampleMatch == null) continue;
-
-      final example = exampleMatch.group(1)?.trim() ?? '';
-      var meaning = '';
-      if (i + 1 < lines.length) {
-        final meaningMatch = RegExp(
-          r'^Dịch\s*\d*\s*:\s*(.+)$',
-          caseSensitive: false,
-        ).firstMatch(lines[i + 1]);
-        meaning = meaningMatch?.group(1)?.trim() ?? '';
-      }
-
-      if (example.isNotEmpty) {
-        examples.add({'exampleText': example, 'meaning': meaning});
-      }
-    }
-
-    if (examples.isEmpty && text.trim().isNotEmpty) {
-      examples.add({'exampleText': text.trim(), 'meaning': ''});
-    }
-
-    return examples;
-  }
-
 }
+
