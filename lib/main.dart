@@ -17,62 +17,75 @@ import 'package:flutter/services.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:sqflite/sqflite.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
-import 'database/app_database.dart';
+import 'core/database/app_database.dart';
 
-part 'main_parts/home_page_state_core.dart';
-part 'main_parts/home_page_state_part_01.dart';
-part 'main_parts/home_page_state_drawer.dart';
-part 'main_parts/home_page_state_part_02.dart';
-part 'main_parts/home_page_state_part_02_split_02.dart';
-part 'main_parts/home_page_state_part_03.dart';
-part 'main_parts/settings_page_state_core.dart';
-part 'main_parts/settings_page_state_part_01.dart';
-part 'main_parts/settings_page_state_part_02.dart';
-part 'main_parts/statistics_page_state_core.dart';
-part 'main_parts/statistics_due_review_part_01.dart';
-part 'main_parts/statistics_due_review_part_02.dart';
-part 'main_parts/statistics_page_state_part_01.dart';
-part 'main_parts/statistics_page_state_part_02.dart';
-part 'main_parts/statistics_page_state_part_03.dart';
-part 'main_parts/statistics_page_state_part_04.dart';
-part 'main_parts/statistics_page_state_part_05.dart';
-part 'main_parts/statistics_page_state_part_06.dart';
-part 'main_parts/statistics_page_state_part_06_split_02.dart';
-part 'main_parts/statistics_page_state_part_06_split_03.dart';
-part 'main_parts/statistics_page_state_part_06_split_04.dart';
-part 'main_parts/create_course_page_state_core.dart';
-part 'main_parts/create_course_page_state_part_01.dart';
-part 'main_parts/create_course_page_state_part_02.dart';
-part 'main_parts/flash_cards_page_state_core.dart';
-part 'main_parts/flash_cards_page_state_part_01.dart';
-part 'main_parts/flash_cards_page_state_part_01_split_02.dart';
-part 'main_parts/flash_cards_page_state_part_02.dart';
-part 'main_parts/flash_cards_page_state_part_03.dart';
-part 'main_parts/flash_cards_page_state_part_04.dart';
-part 'main_parts/flash_cards_page_state_part_05.dart';
-part 'main_parts/flash_cards_page_state_part_06.dart';
-part 'main_parts/review_practice_page_state_core.dart';
-part 'main_parts/review_match_pair_models.dart';
-part 'main_parts/review_practice_page_state_part_01.dart';
-part 'main_parts/review_practice_page_state_part_01_split_02.dart';
-part 'main_parts/review_practice_page_state_part_02.dart';
-part 'main_parts/review_practice_page_state_part_03.dart';
-part 'main_parts/review_practice_page_state_part_04.dart';
-part 'main_parts/review_practice_page_state_part_05.dart';
-part 'main_parts/review_practice_page_state_part_06.dart';
-part 'main_parts/review_practice_page_state_part_07.dart';
-part 'main_parts/review_practice_page_state_part_08.dart';
-part 'main_parts/review_matching_pairs.dart';
-part 'main_parts/pronunciation_overlay_state_core.dart';
-part 'main_parts/pronunciation_overlay_state_part_01.dart';
-part 'main_parts/pronunciation_overlay_state_part_02.dart';
-part 'main_parts/shared_part_01.dart';
-part 'main_parts/shared_part_02.dart';
-part 'main_parts/shared_part_03.dart';
-part 'main_parts/shared_part_04.dart';
-part 'main_parts/shared_part_05.dart';
-part 'main_parts/shared_part_06.dart';
-part 'main_parts/shared_part_07.dart';
+part 'core/theme/app_theme_and_settings_part.dart';
+part 'core/utils/app_helpers_part_01.dart';
+part 'features/app/presentation/pages/app_shell_part.dart';
+part 'features/courses/data/datasources/builtin_vocabulary_importer_part.dart';
+part 'features/courses/presentation/pages/create_course_page_state_core.dart';
+part 'features/courses/presentation/pages/create_course_page_state_part_01.dart';
+part 'features/courses/presentation/pages/create_course_page_state_part_02.dart';
+part 'features/flashcards/domain/entities/flashcard_entities_part.dart';
+part 'features/flashcards/presentation/pages/flash_cards_page_state_core.dart';
+part 'features/flashcards/presentation/pages/flash_cards_page_state_part_01.dart';
+part 'features/flashcards/presentation/pages/flash_cards_page_state_part_01_split_02.dart';
+part 'features/flashcards/presentation/pages/flash_cards_page_state_part_02.dart';
+part 'features/flashcards/presentation/pages/flash_cards_page_state_part_03.dart';
+part 'features/flashcards/presentation/pages/flash_cards_page_state_part_04.dart';
+part 'features/flashcards/presentation/pages/flash_cards_page_state_part_05.dart';
+part 'features/flashcards/presentation/pages/flash_cards_page_state_part_06.dart';
+part 'features/home/presentation/pages/home_page_state_core.dart';
+part 'features/home/presentation/pages/home_page_state_part_01.dart';
+part 'features/home/presentation/pages/home_page_state_part_02.dart';
+part 'features/home/presentation/pages/home_page_state_part_02_split_02.dart';
+part 'features/home/presentation/pages/home_page_state_part_03.dart';
+part 'features/home/presentation/widgets/home_page_state_drawer.dart';
+part 'features/pronunciation/presentation/widgets/pronunciation_overlay_state_core.dart';
+part 'features/pronunciation/presentation/widgets/pronunciation_overlay_state_part_01.dart';
+part 'features/pronunciation/presentation/widgets/pronunciation_overlay_state_part_02.dart';
+part 'features/review/domain/entities/review_match_pair_models.dart';
+part 'features/review/presentation/pages/review_practice_page_state_core.dart';
+part 'features/review/presentation/pages/review_practice_page_state_part_01.dart';
+part 'features/review/presentation/pages/review_practice_page_state_part_01_split_02.dart';
+part 'features/review/presentation/pages/review_practice_page_state_part_02.dart';
+part 'features/review/presentation/pages/review_practice_page_state_part_03.dart';
+part 'features/review/presentation/pages/review_practice_page_state_part_04.dart';
+part 'features/review/presentation/pages/review_practice_page_state_part_05.dart';
+part 'features/review/presentation/pages/review_practice_page_state_part_06.dart';
+part 'features/review/presentation/pages/review_practice_page_state_part_07.dart';
+part 'features/review/presentation/pages/review_practice_page_state_part_08.dart';
+part 'features/review/presentation/widgets/review_matching_pairs.dart';
+part 'features/settings/presentation/pages/settings_page_state_core.dart';
+part 'features/settings/presentation/pages/settings_page_state_part_01.dart';
+part 'features/settings/presentation/pages/settings_page_state_part_02.dart';
+part 'features/shared/presentation/widgets/shared_widgets_part.dart';
+part 'features/statistics/domain/entities/statistics_entities_part.dart';
+part 'features/statistics/presentation/pages/statistics_page_state_core.dart';
+part 'features/statistics/presentation/pages/statistics_page_state_part_01.dart';
+part 'features/statistics/presentation/pages/statistics_page_state_part_02.dart';
+part 'features/statistics/presentation/pages/statistics_page_state_part_03.dart';
+part 'features/statistics/presentation/pages/statistics_page_state_part_04.dart';
+part 'features/statistics/presentation/pages/statistics_page_state_part_05.dart';
+part 'features/statistics/presentation/pages/statistics_page_state_part_06.dart';
+part 'features/statistics/presentation/pages/statistics_page_state_part_06_split_02.dart';
+part 'features/statistics/presentation/pages/statistics_page_state_part_06_split_03.dart';
+part 'features/statistics/presentation/pages/statistics_page_state_part_06_split_04.dart';
+part 'features/statistics/presentation/widgets/statistics_due_review_part_01.dart';
+part 'features/statistics/presentation/widgets/statistics_due_review_part_02.dart';
+
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  if (!kIsWeb &&
+      (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfi;
+  }
+
+  runApp(MyApp());
+}
 
 Duration getDuration({
   int days = 0,
