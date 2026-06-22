@@ -385,19 +385,22 @@ class ReviewScheduler {
 
     final previousLevel = _dbInt(previous?['level']);
     final previousEase = _dbDouble(previous?['easeFactor'], 2.5);
-    final nextLevel = isCorrect
-        ? math.min(previousLevel + 1, _intervalsByLevel.length)
-        : 0;
+    final int nextLevel;
+    if (isCorrect) {
+      nextLevel = math.min(previousLevel + 1, _intervalsByLevel.length);
+    } else if (previousLevel >= masteredLevel) {
+      // Already mastered — do NOT reset to 0, only drop 1 level.
+      nextLevel = previousLevel - 1;
+    } else {
+      nextLevel = 0;
+    }
     final nextEase = isCorrect
         ? math.min(previousEase + 0.08, 3.0)
         : math.max(previousEase - 0.2, 1.3);
-    final intervalDays = isCorrect ? intervalDaysForLevel(nextLevel) : 0;
-    final nextReviewAt = isCorrect
-        ? DateTime(
-            now.year,
-            now.month,
-            now.day,
-          ).add(Duration(days: intervalDays))
+    final intervalDays = nextLevel > 0 ? intervalDaysForLevel(nextLevel) : 0;
+    final today = DateTime(now.year, now.month, now.day);
+    final nextReviewAt = nextLevel > 0
+        ? today.add(Duration(days: intervalDays))
         : now;
 
     final values = <String, Object?>{
