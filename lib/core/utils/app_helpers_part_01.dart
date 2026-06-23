@@ -388,11 +388,9 @@ class ReviewScheduler {
     final int nextLevel;
     if (isCorrect) {
       nextLevel = math.min(previousLevel + 1, _intervalsByLevel.length);
-    } else if (previousLevel >= masteredLevel) {
-      // Already mastered — do NOT reset to 0, only drop 1 level.
-      nextLevel = previousLevel - 1;
     } else {
-      nextLevel = 0;
+      // Wrong answers are tracked, but SRS level never goes down.
+      nextLevel = previousLevel;
     }
     final nextEase = isCorrect
         ? math.min(previousEase + 0.08, 3.0)
