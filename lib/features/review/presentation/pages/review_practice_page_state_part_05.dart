@@ -370,6 +370,21 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
                         ),
                       ),
                       SizedBox(height: 12),
+                      if (_essay && !_listening && !_sentenceMode) ...[
+                        SizedBox(
+                          width: double.infinity,
+                          child: this._solidButton(
+                            text: 'Ôn lại câu sai',
+                            icon: Icons.replay_rounded,
+                            color: AppColors.green,
+                            onTap: () {
+                              Navigator.pop(context);
+                              this._startWrongEssayReview();
+                            },
+                          ),
+                        ),
+                        SizedBox(height: 12),
+                      ],
                     ],
                     Row(
                       children: [

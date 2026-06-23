@@ -384,10 +384,26 @@ extension ReviewPracticePageStatePart07 on _ReviewPracticePageState {
   Widget _buildMultipleChoiceMode() {
     return ListView.builder(
       controller: _mcScrollController,
-      padding: EdgeInsets.fromLTRB(16, 18, 16, 100),
-      itemCount: _quizCards.length,
-      itemBuilder: (context, index) =>
-          this._buildQuestionCard(_quizCards[index], index),
+      padding: EdgeInsets.fromLTRB(16, 18, 16, 28),
+      itemCount: _quizCards.length + 1,
+      itemBuilder: (context, index) {
+        if (index < _quizCards.length) {
+          return this._buildQuestionCard(_quizCards[index], index);
+        }
+
+        return Padding(
+          padding: EdgeInsets.fromLTRB(0, 6, 0, 18),
+          child: Align(
+            alignment: Alignment.centerRight,
+            child: this._solidButton(
+              text: _finished ? 'Xem kết quả' : 'Nộp bài',
+              icon: Icons.flag_rounded,
+              color: AppColors.yellow,
+              onTap: _finished ? _showResultSheet : this._submitMultipleChoice,
+            ),
+          ),
+        );
+      },
     );
   }
 

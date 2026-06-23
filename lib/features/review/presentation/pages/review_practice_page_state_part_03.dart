@@ -220,6 +220,56 @@ $cardsJson
     }
   }
 
+  Future<void> _startWrongEssayReview() async {
+    final wrongCards = _wrongReviewCards;
+    if (wrongCards.isEmpty) {
+      this._showMessage('Không có câu sai để ôn lại');
+      return;
+    }
+
+    await this._finishStudySession();
+
+    final selected = List<StudyCardItem>.from(wrongCards);
+    final now = DateTime.now();
+
+    setState(() {
+      _quizCards = selected;
+      _choiceMap = {
+        for (final card in selected) card.id: <String>[],
+      };
+      _questionKeys
+        ..clear()
+        ..addEntries(selected.map((card) => MapEntry(card.id, GlobalKey())));
+      _answeredCards.clear();
+      _correctMap.clear();
+      _selectedAnswerMap.clear();
+      _geminiTextFeedbackMap.clear();
+      _matchPairTiles = [];
+      _selectedMatchPairTileId = null;
+      _matchedPairCardIds.clear();
+      _wrongMatchPairTileIds.clear();
+      _correctMatchPairTileIds.clear();
+      _geminiTextResultScript = '';
+      _isGeminiTextGrading = false;
+      _selectedListeningAnswer = null;
+      _recordedResultCardIds.clear();
+      _cardStartedAtMap
+        ..clear()
+        ..addEntries(selected.map((card) => MapEntry(card.id, now)));
+      _finished = false;
+      _isGeneratingSentenceQuiz = false;
+      _showSetup = false;
+      _currentEssayIndex = 0;
+      _essayQuestionStartedAt = now;
+      _essayController.clear();
+    });
+
+    await this._startStudySession(
+      mode: 'review_essay_wrong',
+      totalCards: selected.length,
+    );
+  }
+
   Future<void> _restart() async {
     await this._finishStudySession();
     setState(() {

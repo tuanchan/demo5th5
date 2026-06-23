@@ -192,40 +192,6 @@ extension ReviewPracticePageStatePart01 on _ReviewPracticePageState {
                 ),
               ],
             ),
-            if (!_showSetup && _quizCards.isNotEmpty && _multipleChoice)
-              Positioned(
-                left: 14,
-                right: 14,
-                bottom: 14,
-                child: Container(
-                  padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: AppColors.activeIsDark ? AppColors.panel2.withOpacity(0.86) : Colors.white.withOpacity(0.86),
-                    borderRadius: BorderRadius.circular(22),
-                    border: Border.all(
-                      color: AppColors.border.withOpacity(0.18),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      if (!_finished)
-                        this._statChip(
-                          text: 'Đã chọn $_done/$_total',
-                          color: AppColors.blue,
-                        ),
-                      Spacer(),
-                      this._solidButton(
-                        text: _finished ? 'Xem kết quả' : 'Nộp bài',
-                        icon: Icons.flag_rounded,
-                        color: AppColors.yellow,
-                        onTap: _finished
-                            ? _showResultSheet
-                            : this._submitMultipleChoice,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
             if (!_showSetup &&
                 _quizCards.isNotEmpty &&
                 _matchingPairs &&

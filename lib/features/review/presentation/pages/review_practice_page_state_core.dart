@@ -90,7 +90,7 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
           tileId: i * 2,
           cardId: card.id,
           text: card.term,
-          subText: card.pronunciation,
+          subText: '',
           isTerm: true,
         ),
       );

@@ -38,20 +38,15 @@ extension FlashCardsPageStatePart06 on _FlashCardsPageState {
               child: Row(
                 children: [
                   if (showLabelChip)
-                    Container(
+                    Padding(
                       padding: EdgeInsets.symmetric(
-                        horizontal: 11,
+                        horizontal: 4,
                         vertical: 7,
-                      ),
-                      decoration: BoxDecoration(
-                        color: isBack ? AppColors.yellow : AppColors.red,
-                        borderRadius: BorderRadius.circular(99),
-                        border: Border.all(color: AppColors.border, width: 1.2),
                       ),
                       child: Text(
                         label,
                         style: TextStyle(
-                          color: AppColors.border,
+                          color: AppColors.text,
                           fontWeight: FontWeight.w900,
                           fontSize: 13,
                         ),
@@ -284,10 +279,6 @@ extension FlashCardsPageStatePart06 on _FlashCardsPageState {
       child: Stack(
         alignment: Alignment.center,
         children: [
-          Positioned(
-            left: 0,
-            child: this.buildProgressToggleButton(),
-          ),
           Row(
             mainAxisSize: MainAxisSize.min,
             mainAxisAlignment: MainAxisAlignment.center,
@@ -300,14 +291,14 @@ extension FlashCardsPageStatePart06 on _FlashCardsPageState {
                     ? () => this.moveCard(-1)
                     : (canPrev ? () => this.moveCard(-1) : null),
                 color: progressTracking ? AppColors.red : AppColors.panel,
+                iconColor: progressTracking ? AppColors.red : null,
+                chromeless: progressTracking,
               ),
               Container(
                 width: 76,
                 alignment: Alignment.center,
                 child: Text(
-                  progressTracking
-                      ? "✓$progressKnownCount  ✕$progressUnknownCount\n$displayIndex / $displayTotal"
-                      : "$displayIndex / $displayTotal",
+                  "$displayIndex / $displayTotal",
                   style: TextStyle(
                     color: AppColors.text,
                     fontWeight: FontWeight.w900,
@@ -318,6 +309,8 @@ extension FlashCardsPageStatePart06 on _FlashCardsPageState {
                 icon: progressTracking ? Icons.check : Icons.chevron_right,
                 onTap: showCompletion ? null : () => this.moveCard(1),
                 color: progressTracking ? AppColors.green : AppColors.panel,
+                iconColor: progressTracking ? AppColors.green : null,
+                chromeless: progressTracking,
               ),
             ],
           ),
@@ -357,42 +350,12 @@ extension FlashCardsPageStatePart06 on _FlashCardsPageState {
     );
   }
 
-  Widget buildProgressToggleButton() {
-    return GestureDetector(
-      onTap: this.toggleProgressMode,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 28,
-            height: 28,
-            decoration: BoxDecoration(
-              color: progressTracking ? AppColors.green : AppColors.panel,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: AppColors.border, width: 1.4),
-            ),
-            child: progressTracking
-                ? Icon(Icons.check, color: AppColors.onIconButton, size: 18)
-                : SizedBox.shrink(),
-          ),
-          SizedBox(height: 3),
-          Text(
-            'Tiến độ',
-            style: TextStyle(
-              color: AppColors.muted,
-              fontSize: 10,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget buildRoundNavButton({
     required IconData icon,
     required VoidCallback? onTap,
     required Color color,
+    Color? iconColor,
+    bool chromeless = false,
   }) {
     return Opacity(
       opacity: onTap == null ? 0.42 : 1,
@@ -401,19 +364,21 @@ extension FlashCardsPageStatePart06 on _FlashCardsPageState {
         child: Container(
           width: 54,
           height: 54,
-          decoration: BoxDecoration(
-            color: color,
-            shape: BoxShape.circle,
-            border: Border.all(color: AppColors.border, width: 1.4),
-            boxShadow: [
-              BoxShadow(
-                color: AppColors.border,
-                offset: Offset(0, 4),
-                blurRadius: 0,
-              ),
-            ],
-          ),
-          child: Icon(icon, color: AppColors.onIconButton, size: 30),
+          decoration: chromeless
+              ? null
+              : BoxDecoration(
+                  color: color,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: AppColors.border, width: 1.4),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppColors.border,
+                      offset: Offset(0, 4),
+                      blurRadius: 0,
+                    ),
+                  ],
+                ),
+          child: Icon(icon, color: iconColor ?? AppColors.onIconButton, size: 34),
         ),
       ),
     );
