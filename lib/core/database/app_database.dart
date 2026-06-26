@@ -24,7 +24,7 @@ class AppDatabase {
 
     return await openDatabase(
       path,
-      version: 2,
+      version: 3,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
@@ -48,8 +48,19 @@ class AppDatabase {
     ''');
 
     await db.execute('''
+      CREATE TABLE topics (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT,
+        deletedAt TEXT
+      )
+    ''');
+
+    await db.execute('''
       CREATE TABLE courses (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        topicId INTEGER,
         title TEXT NOT NULL,
         description TEXT,
         languageId INTEGER,
@@ -62,6 +73,7 @@ class AppDatabase {
         updatedAt TEXT,
         deletedAt TEXT,
 
+        FOREIGN KEY (topicId) REFERENCES topics(id) ON DELETE SET NULL,
         FOREIGN KEY (languageId) REFERENCES languages(id)
       )
     ''');
@@ -227,6 +239,147 @@ class AppDatabase {
     if (oldVersion < 2) {
       await _createReviewSentenceQuestionsTable(db);
     }
+    if (oldVersion < 3) {
+      await _ensureTopicSchema(db);
+    }
+  }
+
+  Future<void> ensureTopicSchema() async {
+    final db = await database;
+    await _ensureTopicSchema(db);
+  }
+
+  Future<void> _ensureTopicSchema(Database db) async {
+    await _createTopicsTable(db);
+    await _addTopicIdToCourses(db);
+    await _backfillCourseTopics(db);
+    await _normalizeBuiltInCourseTopics(db);
+    await _createTopicIndexes(db);
+  }
+
+  Future<void> _createTopicsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS topics (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT,
+        deletedAt TEXT
+      )
+    ''');
+  }
+
+  Future<void> _addTopicIdToCourses(Database db) async {
+    final columns = await db.rawQuery('PRAGMA table_info(courses)');
+    final hasTopicId = columns.any((column) => column['name'] == 'topicId');
+    if (hasTopicId) return;
+
+    await db.execute('ALTER TABLE courses ADD COLUMN topicId INTEGER');
+  }
+
+  Future<int> _ensureTopic(Database db, String name, String now) async {
+    final normalized = name.trim().isEmpty ? 'Chủ đề mới' : name.trim();
+    final rows = await db.query(
+      'topics',
+      columns: ['id'],
+      where: 'lower(trim(name)) = ? AND deletedAt IS NULL',
+      whereArgs: [normalized.toLowerCase()],
+      limit: 1,
+    );
+    if (rows.isNotEmpty) return rows.first['id'] as int;
+
+    return await db.insert('topics', {
+      'name': normalized,
+      'createdAt': now,
+      'updatedAt': now,
+    });
+  }
+
+  Future<void> _backfillCourseTopics(Database db) async {
+    final now = DateTime.now().toIso8601String();
+    final rows = await db.query(
+      'courses',
+      columns: ['id', 'title', 'description', 'topicId'],
+      where: 'deletedAt IS NULL',
+    );
+
+    for (final row in rows) {
+      if (row['topicId'] != null) continue;
+
+      final description = row['description']?.toString() ?? '';
+      final title = row['title']?.toString() ?? '';
+      String topicName;
+
+      if (description.contains('assets/TOEIC/')) {
+        topicName = 'TOEIC';
+      } else if (description.contains('assets/TOCFL/')) {
+        topicName = 'Tiếng Trung B1';
+      } else {
+        topicName = title.trim().isEmpty ? 'Chủ đề mới' : title.trim();
+      }
+
+      final topicId = await _ensureTopic(db, topicName, now);
+      await db.update(
+        'courses',
+        {'topicId': topicId, 'updatedAt': now},
+        where: 'id = ?',
+        whereArgs: [row['id']],
+      );
+    }
+  }
+
+  Future<void> _normalizeBuiltInCourseTopics(Database db) async {
+    final now = DateTime.now().toIso8601String();
+    await _normalizeBuiltInTopic(
+      db: db,
+      topicName: 'TOEIC',
+      now: now,
+      where:
+          "deletedAt IS NULL AND (description LIKE ? OR (languageCode = ? AND lower(title) LIKE ?))",
+      whereArgs: ['%assets/TOEIC/%', 'en-US', 'day%'],
+    );
+    await _normalizeBuiltInTopic(
+      db: db,
+      topicName: 'Tiếng Trung B1',
+      now: now,
+      where:
+          "deletedAt IS NULL AND (description LIKE ? OR title LIKE ? OR title LIKE ?)",
+      whereArgs: ['%assets/TOCFL/%', '%_TOCFL%', '% TOCFL%'],
+    );
+  }
+
+  Future<void> _normalizeBuiltInTopic({
+    required Database db,
+    required String topicName,
+    required String now,
+    required String where,
+    required List<Object?> whereArgs,
+  }) async {
+    final rows = await db.query(
+      'courses',
+      columns: ['id'],
+      where: where,
+      whereArgs: whereArgs,
+      limit: 1,
+    );
+    if (rows.isEmpty) return;
+
+    final topicId = await _ensureTopic(db, topicName, now);
+    await db.update(
+      'courses',
+      {'topicId': topicId, 'updatedAt': now},
+      where: where,
+      whereArgs: whereArgs,
+    );
+  }
+
+  Future<void> _createTopicIndexes(Database db) async {
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_courses_topicId ON courses(topicId)',
+    );
+    await db.execute(
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_topics_name_unique ON topics(lower(trim(name))) WHERE deletedAt IS NULL',
+    );
   }
 
   Future<void> _createReviewSentenceQuestionsTable(Database db) async {
@@ -264,6 +417,7 @@ class AppDatabase {
     await db.execute(
       'CREATE INDEX idx_courses_languageCode ON courses(languageCode)',
     );
+    await _createTopicIndexes(db);
 
     await db.execute(
       'CREATE INDEX idx_cards_courseId ON cards(courseId)',

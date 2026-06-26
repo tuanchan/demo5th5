@@ -254,23 +254,48 @@ extension HomePageStatePart02Split02 on _HomePageState {
     });
 
     try {
+      await AppDatabase.instance.ensureTopicSchema();
       final db = await AppDatabase.instance.database;
 
       final rows = await db.rawQuery('''
       SELECT 
         c.id,
+        c.topicId,
+        COALESCE(t.name, 'Chủ đề khác') AS topicName,
         c.title,
         c.languageCode,
         COUNT(cards.id) AS cardCount
       FROM courses c
+      LEFT JOIN topics t
+        ON t.id = c.topicId
+        AND t.deletedAt IS NULL
       LEFT JOIN cards 
         ON cards.courseId = c.id 
         AND cards.deletedAt IS NULL
         AND cards.isHidden = 0
       WHERE c.deletedAt IS NULL
-      GROUP BY c.id, c.title, c.languageCode
+      GROUP BY c.id, c.topicId, t.name, c.title, c.languageCode
       ORDER BY COALESCE(c.updatedAt, c.createdAt) DESC
     ''');
+      final topicRows = await db.rawQuery('''
+        SELECT
+          t.id,
+          t.name,
+          COUNT(DISTINCT c.id) AS courseCount,
+          COUNT(cards.id) AS cardCount,
+          MAX(COALESCE(c.updatedAt, c.createdAt, t.updatedAt, t.createdAt)) AS latestCourseAt
+        FROM topics t
+        LEFT JOIN courses c
+          ON c.topicId = t.id
+          AND c.deletedAt IS NULL
+        LEFT JOIN cards
+          ON cards.courseId = c.id
+          AND cards.deletedAt IS NULL
+          AND cards.isHidden = 0
+        WHERE t.deletedAt IS NULL
+        GROUP BY t.id, t.name
+        ORDER BY lower(t.name) ASC
+      ''');
 
       debugPrint("DRAWER COURSES COUNT: ${rows.length}");
       debugPrint("DRAWER COURSES DATA: $rows");
@@ -298,6 +323,7 @@ extension HomePageStatePart02Split02 on _HomePageState {
 
       setState(() {
         courses = loadedCourses;
+        topics = topicRows.map((e) => CourseTopicItem.fromMap(e)).toList();
         courseLanguageFilter = nextLanguageFilter;
         if (selectedHomeCourse != null) {
           final stillExists = courses.where(
@@ -305,6 +331,13 @@ extension HomePageStatePart02Split02 on _HomePageState {
           );
           selectedHomeCourse = stillExists.isEmpty ? null : stillExists.first;
         }
+        if (expandedTopicIds.isEmpty && topics.isNotEmpty) {
+          final selectedTopicId = selectedHomeCourse?.topicId;
+          expandedTopicIds.add(selectedTopicId ?? topics.first.id);
+        }
+        expandedTopicIds.removeWhere(
+          (id) => !topics.any((topic) => topic.id == id),
+        );
         isLoadingCourses = false;
       });
     } catch (e) {

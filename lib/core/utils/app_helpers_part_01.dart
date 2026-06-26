@@ -293,12 +293,16 @@ class TtsAudioCache {
 
 class CourseListItem {
   final int id;
+  final int? topicId;
+  final String topicName;
   final String title;
   final String languageCode;
   final int cardCount;
 
   CourseListItem({
     required this.id,
+    required this.topicId,
+    required this.topicName,
     required this.title,
     required this.languageCode,
     required this.cardCount,
@@ -307,9 +311,38 @@ class CourseListItem {
   factory CourseListItem.fromMap(Map<String, Object?> map) {
     return CourseListItem(
       id: map['id'] as int,
+      topicId: map['topicId'] as int?,
+      topicName: map['topicName']?.toString() ?? 'Chủ đề khác',
       title: map['title']?.toString() ?? '',
       languageCode: map['languageCode']?.toString() ?? '',
       cardCount: map['cardCount'] as int? ?? 0,
+    );
+  }
+}
+
+
+class CourseTopicItem {
+  final int id;
+  final String name;
+  final int courseCount;
+  final int cardCount;
+  final String latestCourseAt;
+
+  CourseTopicItem({
+    required this.id,
+    required this.name,
+    required this.courseCount,
+    required this.cardCount,
+    required this.latestCourseAt,
+  });
+
+  factory CourseTopicItem.fromMap(Map<String, Object?> map) {
+    return CourseTopicItem(
+      id: map['id'] as int,
+      name: map['name']?.toString() ?? '',
+      courseCount: map['courseCount'] as int? ?? 0,
+      cardCount: map['cardCount'] as int? ?? 0,
+      latestCourseAt: map['latestCourseAt']?.toString() ?? '',
     );
   }
 }

@@ -4,6 +4,8 @@ class _CreateCoursePageState extends State<CreateCoursePage> {
   String termSeparatorType = "tab";
   String cardSeparatorType = "newline";
   String selectedLanguage = "Tiếng Trung Phồn thể (Traditional Chinese)";
+  List<CourseTopicItem> availableTopics = [];
+  int? selectedTopicId;
 
   bool showPreview = false;
   List<FlashCardItem> previewItems = [];

@@ -176,16 +176,21 @@ extension FlashCardsPageStatePart01 on _FlashCardsPageState {
       final rows = await db.rawQuery('''
         SELECT 
           c.id,
+          c.topicId,
+          COALESCE(t.name, 'Chủ đề khác') AS topicName,
           c.title,
           c.languageCode,
           COUNT(cards.id) AS cardCount
         FROM courses c
+        LEFT JOIN topics t
+          ON t.id = c.topicId
+          AND t.deletedAt IS NULL
         LEFT JOIN cards 
           ON cards.courseId = c.id 
           AND cards.deletedAt IS NULL
           AND cards.isHidden = 0
         WHERE c.deletedAt IS NULL
-        GROUP BY c.id, c.title, c.languageCode
+        GROUP BY c.id, c.topicId, t.name, c.title, c.languageCode
         ORDER BY COALESCE(c.updatedAt, c.createdAt) DESC
       ''');
 

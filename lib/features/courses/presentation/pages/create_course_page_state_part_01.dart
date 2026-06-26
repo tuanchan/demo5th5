@@ -73,7 +73,43 @@ extension CreateCoursePageStatePart01 on _CreateCoursePageState {
         customCardSepController.text = savedCustomCardSep;
       }
       if (savedLanguage != null && savedLanguage.isNotEmpty) {
-        selectedLanguage = savedLanguage;
+        selectedLanguage = this.normalizeLanguageName(savedLanguage);
+      }
+    });
+
+    await this.loadAvailableTopics();
+  }
+
+
+  Future<void> loadAvailableTopics() async {
+    await AppDatabase.instance.ensureTopicSchema();
+    final db = await AppDatabase.instance.database;
+    final rows = await db.rawQuery('''
+      SELECT
+        t.id,
+        t.name,
+        COUNT(DISTINCT c.id) AS courseCount,
+        COUNT(cards.id) AS cardCount
+      FROM topics t
+      LEFT JOIN courses c
+        ON c.topicId = t.id
+        AND c.deletedAt IS NULL
+      LEFT JOIN cards
+        ON cards.courseId = c.id
+        AND cards.deletedAt IS NULL
+        AND cards.isHidden = 0
+      WHERE t.deletedAt IS NULL
+      GROUP BY t.id, t.name
+      ORDER BY lower(t.name) ASC
+    ''');
+
+    if (!mounted) return;
+
+    setState(() {
+      availableTopics = rows.map((e) => CourseTopicItem.fromMap(e)).toList();
+      if (selectedTopicId != null &&
+          !availableTopics.any((topic) => topic.id == selectedTopicId)) {
+        selectedTopicId = null;
       }
     });
   }
@@ -93,6 +129,27 @@ extension CreateCoursePageStatePart01 on _CreateCoursePageState {
       ),
       AppSettingsStore.setString('create.selectedLanguage', selectedLanguage),
     ]);
+  }
+
+
+  String normalizeLanguageName(String value) {
+    if (value.contains("Giản thể") || value.contains("Giáº£n thá»ƒ")) {
+      return "Tiếng Trung Giản thể (Simplified Chinese)";
+    }
+    if (value.contains("Anh")) return "Tiếng Anh (English)";
+    if (value.contains("Đức") || value.contains("Äá»©c")) {
+      return "Tiếng Đức (German)";
+    }
+    if (value.contains("Nhật") || value.contains("Nháº­t")) {
+      return "Tiếng Nhật (Japanese)";
+    }
+    if (value.contains("Hàn") || value.contains("HÃ n")) {
+      return "Tiếng Hàn (Korean)";
+    }
+    if (value.contains("Việt") || value.contains("Viá»‡t")) {
+      return "Tiếng Việt (Vietnamese)";
+    }
+    return "Tiếng Trung Phồn thể (Traditional Chinese)";
   }
 
 
@@ -274,8 +331,15 @@ extension CreateCoursePageStatePart01 on _CreateCoursePageState {
       }
     }
 
+    await AppDatabase.instance.ensureTopicSchema();
     final db = await AppDatabase.instance.database;
     final now = DateTime.now().toIso8601String();
+    final hasExistingTopics = availableTopics.isNotEmpty;
+
+    if (hasExistingTopics && selectedTopicId == null) {
+      this.showMessage("Vui lòng chọn chủ đề");
+      return;
+    }
 
     final normalizedTitle = title.trim().toLowerCase();
 
@@ -297,7 +361,17 @@ extension CreateCoursePageStatePart01 on _CreateCoursePageState {
 
     try {
       await db.transaction((txn) async {
+        var topicId = selectedTopicId;
+        if (topicId == null) {
+          topicId = await txn.insert('topics', {
+            'name': title,
+            'createdAt': now,
+            'updatedAt': now,
+          });
+        }
+
         final courseId = await txn.insert('courses', {
+          'topicId': topicId,
           'title': title,
           'description': '',
           'languageName': selectedLanguage,

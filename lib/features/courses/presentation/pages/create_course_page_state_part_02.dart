@@ -42,11 +42,7 @@ extension CreateCoursePageStatePart02 on _CreateCoursePageState {
                     children: [
                       Row(
                         children: [
-                          Icon(
-                            Icons.settings,
-                            color: AppColors.border,
-                            size: 26,
-                          ),
+                          Icon(Icons.settings, color: AppColors.border, size: 26),
                           SizedBox(width: 10),
                           Expanded(
                             child: Text(
@@ -65,7 +61,6 @@ extension CreateCoursePageStatePart02 on _CreateCoursePageState {
                         ],
                       ),
                       SizedBox(height: 16),
-
                       CompactSelectBox(
                         title: "GIỮA THUẬT NGỮ VÀ ĐỊNH NGHĨA",
                         value: termSeparatorType,
@@ -75,15 +70,11 @@ extension CreateCoursePageStatePart02 on _CreateCoursePageState {
                             value: "underscore",
                             label: "Gạch dưới _",
                           ),
-                          CompactSelectItem(
-                            value: "custom",
-                            label: "Tùy chỉnh",
-                          ),
+                          CompactSelectItem(value: "custom", label: "Tùy chỉnh"),
                         ],
                         onChanged: (value) {
-                          termSeparatorType = value == "comma"
-                              ? "underscore"
-                              : value;
+                          termSeparatorType =
+                              value == "comma" ? "underscore" : value;
                           this.saveCreateCourseSettings();
                           refresh();
                         },
@@ -95,25 +86,17 @@ extension CreateCoursePageStatePart02 on _CreateCoursePageState {
                           refresh();
                         },
                       ),
-
                       SizedBox(height: 14),
-
                       CompactSelectBox(
                         title: "GIỮA CÁC THẺ",
                         value: cardSeparatorType,
                         items: [
-                          CompactSelectItem(
-                            value: "newline",
-                            label: "Dòng mới",
-                          ),
+                          CompactSelectItem(value: "newline", label: "Dòng mới"),
                           CompactSelectItem(
                             value: "semicolon",
                             label: "Chấm phẩy ;",
                           ),
-                          CompactSelectItem(
-                            value: "custom",
-                            label: "Tùy chỉnh",
-                          ),
+                          CompactSelectItem(value: "custom", label: "Tùy chỉnh"),
                         ],
                         onChanged: (value) {
                           cardSeparatorType = value;
@@ -128,13 +111,11 @@ extension CreateCoursePageStatePart02 on _CreateCoursePageState {
                           refresh();
                         },
                       ),
-
                       SizedBox(height: 14),
-
+                      this.buildTopicSetting(modalSetState),
+                      SizedBox(height: 14),
                       this.buildLanguageSetting(modalSetState),
-
                       SizedBox(height: 18),
-
                       BigPopupButton(
                         text: "Xong",
                         icon: Icons.check,
@@ -155,6 +136,76 @@ extension CreateCoursePageStatePart02 on _CreateCoursePageState {
     );
   }
 
+  Widget buildTopicSetting(StateSetter modalSetState) {
+    return Container(
+      padding: EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.panel2,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SectionTitle("CHỦ ĐỀ HỌC PHẦN"),
+          SizedBox(height: 10),
+          if (availableTopics.isEmpty)
+            Text(
+              "Chưa có chủ đề. Khi lưu sẽ tự tạo theo tên học phần.",
+              style: TextStyle(
+                color: AppColors.muted,
+                fontWeight: FontWeight.w700,
+                height: 1.35,
+              ),
+            )
+          else
+            Container(
+              height: 48,
+              padding: EdgeInsets.symmetric(horizontal: 14),
+              decoration: BoxDecoration(
+                color: AppColors.inputFill,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<int>(
+                  value: selectedTopicId,
+                  hint: Text(
+                    "Chọn chủ đề",
+                    style: TextStyle(
+                      color: AppColors.muted,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  isExpanded: true,
+                  dropdownColor: AppColors.dropdownFill,
+                  iconEnabledColor: AppColors.onIconButton,
+                  style: TextStyle(
+                    color: AppColors.text,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                  ),
+                  items: availableTopics
+                      .map(
+                        (topic) => DropdownMenuItem<int>(
+                          value: topic.id,
+                          child: Text(topic.name),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (value) {
+                    modalSetState(() {
+                      selectedTopicId = value;
+                    });
+                    setState(() {});
+                  },
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 
   Widget buildLanguageSetting(StateSetter modalSetState) {
     return Container(
@@ -234,7 +285,6 @@ extension CreateCoursePageStatePart02 on _CreateCoursePageState {
     );
   }
 
-
   Widget buildTopBar() {
     return Padding(
       padding: EdgeInsets.fromLTRB(10, 10, 10, 8),
@@ -276,7 +326,6 @@ extension CreateCoursePageStatePart02 on _CreateCoursePageState {
     );
   }
 
-
   Widget buildDataInput() {
     return Container(
       height: MediaQuery.of(context).size.height * 0.58,
@@ -312,14 +361,12 @@ extension CreateCoursePageStatePart02 on _CreateCoursePageState {
         decoration: InputDecoration(
           border: InputBorder.none,
           contentPadding: EdgeInsets.all(16),
-          hintText:
-              "Từ 1\tĐịnh nghĩa 1\nTừ 2\tĐịnh nghĩa 2\nTừ 3\tĐịnh nghĩa 3",
+          hintText: "Từ 1\tĐịnh nghĩa 1\nTừ 2\tĐịnh nghĩa 2\nTừ 3\tĐịnh nghĩa 3",
           hintStyle: TextStyle(color: AppColors.muted, fontFamily: "monospace"),
         ),
       ),
     );
   }
-
 
   Widget buildPreviewTitle() {
     return Row(
@@ -337,7 +384,6 @@ extension CreateCoursePageStatePart02 on _CreateCoursePageState {
       ],
     );
   }
-
 
   Widget buildPreviewBox() {
     return Container(

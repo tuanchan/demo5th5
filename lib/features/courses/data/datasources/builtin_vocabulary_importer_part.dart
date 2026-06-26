@@ -14,6 +14,7 @@ class BuiltInVocabularyImporter {
       );
     }
 
+    await AppDatabase.instance.ensureTopicSchema();
     final db = await AppDatabase.instance.database;
     final now = DateTime.now();
     var importedCourses = 0;
@@ -42,7 +43,13 @@ class BuiltInVocabularyImporter {
         final createdAt = now
             .add(Duration(milliseconds: importedCourses))
             .toIso8601String();
+        final topicId = await _ensureTopicForAsset(
+          txn: txn,
+          assetPath: assetPath,
+          nowIso: createdAt,
+        );
         final courseId = await txn.insert('courses', {
+          'topicId': topicId,
           'title': title,
           'description': 'Built-in vocabulary from $assetPath',
           'languageName': _languageNameForAsset(languageCode),
@@ -168,6 +175,31 @@ class BuiltInVocabularyImporter {
   static String _languageNameForAsset(String languageCode) {
     if (languageCode == 'en-US') return 'Tiếng Anh (English)';
     return 'Tiếng Trung Phồn thể (Traditional Chinese)';
+  }
+
+  static Future<int> _ensureTopicForAsset({
+    required Transaction txn,
+    required String assetPath,
+    required String nowIso,
+  }) async {
+    final topicName = _assetFolder(assetPath) == 'TOEIC'
+        ? 'TOEIC'
+        : 'Tiếng Trung B1';
+
+    final rows = await txn.query(
+      'topics',
+      columns: ['id'],
+      where: 'lower(trim(name)) = ? AND deletedAt IS NULL',
+      whereArgs: [topicName.toLowerCase()],
+      limit: 1,
+    );
+    if (rows.isNotEmpty) return rows.first['id'] as int;
+
+    return await txn.insert('topics', {
+      'name': topicName,
+      'createdAt': nowIso,
+      'updatedAt': nowIso,
+    });
   }
 
   static List<FlashCardItem> _parseVocabularyText({

@@ -61,10 +61,12 @@ class _HomePageState extends State<HomePage> {
 
   bool isLoadingCourses = false;
   bool _duePopupShown = false;
+  List<CourseTopicItem> topics = [];
   List<CourseListItem> courses = [];
   CourseListItem? selectedHomeCourse;
   String courseSortType = "updatedDesc";
   String courseLanguageFilter = "all";
+  final Set<int> expandedTopicIds = {};
 
 
   List<String> get courseLanguageFilters {
@@ -103,6 +105,87 @@ class _HomePageState extends State<HomePage> {
         filtered.sort(
           (a, b) => _naturalCompareText(b.title, a.title),
         );
+        break;
+      case "cardsDesc":
+        filtered.sort((a, b) => b.cardCount.compareTo(a.cardCount));
+        break;
+      case "cardsAsc":
+        filtered.sort((a, b) => a.cardCount.compareTo(b.cardCount));
+        break;
+      default:
+        break;
+    }
+
+    return filtered;
+  }
+
+  List<CourseTopicItem> get visibleTopics {
+    final keyword = courseSearchController.text.trim().toLowerCase();
+    if (keyword.isEmpty) {
+      final allTopics = topics.toList();
+      this.sortVisibleTopics(allTopics);
+      return allTopics;
+    }
+
+    final topicIds = visibleCourses
+        .map((course) => course.topicId)
+        .whereType<int>()
+        .toSet();
+    final filtered = topics.where((topic) {
+      return topic.name.toLowerCase().contains(keyword) ||
+          topicIds.contains(topic.id);
+    }).toList();
+    this.sortVisibleTopics(filtered);
+    return filtered;
+  }
+
+  void sortVisibleTopics(List<CourseTopicItem> items) {
+    switch (courseSortType) {
+      case "az":
+        items.sort((a, b) => _naturalCompareText(a.name, b.name));
+        break;
+      case "za":
+        items.sort((a, b) => _naturalCompareText(b.name, a.name));
+        break;
+      case "cardsDesc":
+        items.sort((a, b) {
+          final compare = b.cardCount.compareTo(a.cardCount);
+          return compare != 0 ? compare : _naturalCompareText(a.name, b.name);
+        });
+        break;
+      case "cardsAsc":
+        items.sort((a, b) {
+          final compare = a.cardCount.compareTo(b.cardCount);
+          return compare != 0 ? compare : _naturalCompareText(a.name, b.name);
+        });
+        break;
+      default:
+        items.sort((a, b) {
+          final compare = b.latestCourseAt.compareTo(a.latestCourseAt);
+          return compare != 0 ? compare : _naturalCompareText(a.name, b.name);
+        });
+        break;
+    }
+  }
+
+  List<CourseListItem> visibleCoursesForTopic(int topicId) {
+    final keyword = courseSearchController.text.trim().toLowerCase();
+    final filtered = courses.where((course) {
+      if (course.topicId != topicId) return false;
+      if (keyword.isEmpty) return true;
+
+      final courseLanguage = course.languageCode.trim();
+      return course.title.toLowerCase().contains(keyword) ||
+          courseLanguage.toLowerCase().contains(keyword) ||
+          this.languageNameFromCode(courseLanguage).toLowerCase().contains(keyword);
+    }).toList();
+
+    switch (courseSortType) {
+      case "az":
+        filtered.sort((a, b) => _naturalCompareText(a.title, b.title));
+        break;
+      case "za":
+        filtered.sort((a, b) => _naturalCompareText(b.title, a.title));
         break;
       case "cardsDesc":
         filtered.sort((a, b) => b.cardCount.compareTo(a.cardCount));
