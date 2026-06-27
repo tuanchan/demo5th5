@@ -14,7 +14,25 @@ extension CreateCoursePageStatePart01 on _CreateCoursePageState {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    SectionTitle("NHẬP DỮ LIỆU"),
+                    Row(
+                      children: [
+                        SectionTitle("NHẬP DỮ LIỆU"),
+                        Spacer(),
+                        _ImportActionChip(
+                          icon: Icons.grid_on_rounded,
+                          label: "Tạo thủ công",
+                          color: AppColors.yellow,
+                          onTap: this.openManualTableDialog,
+                        ),
+                        SizedBox(width: 8),
+                        _ImportActionChip(
+                          icon: Icons.file_open_rounded,
+                          label: "Import TXT",
+                          color: AppColors.green,
+                          onTap: this.importTxtFiles,
+                        ),
+                      ],
+                    ),
                     SizedBox(height: 8),
                     this.buildDataInput(),
 
