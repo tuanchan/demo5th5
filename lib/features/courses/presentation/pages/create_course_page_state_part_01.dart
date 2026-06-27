@@ -14,24 +14,35 @@ extension CreateCoursePageStatePart01 on _CreateCoursePageState {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        SectionTitle("NHẬP DỮ LIỆU"),
-                        Spacer(),
-                        _ImportActionChip(
-                          icon: Icons.grid_on_rounded,
-                          label: "Tạo thủ công",
-                          color: AppColors.yellow,
-                          onTap: this.openManualTableDialog,
-                        ),
-                        SizedBox(width: 8),
-                        _ImportActionChip(
-                          icon: Icons.file_open_rounded,
-                          label: "Import TXT",
-                          color: AppColors.green,
-                          onTap: this.importTxtFiles,
-                        ),
-                      ],
+                    SizedBox(
+                      width: double.infinity,
+                      child: Wrap(
+                        alignment: WrapAlignment.spaceBetween,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          SectionTitle("NHẬP DỮ LIỆU"),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              _ImportActionChip(
+                                icon: Icons.grid_on_rounded,
+                                label: "Tạo thủ công",
+                                color: AppColors.yellow,
+                                onTap: this.openManualTableDialog,
+                              ),
+                              SizedBox(width: 8),
+                              _ImportActionChip(
+                                icon: Icons.file_open_rounded,
+                                label: "Import TXT",
+                                color: AppColors.green,
+                                onTap: this.importTxtFiles,
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
                     SizedBox(height: 8),
                     this.buildDataInput(),

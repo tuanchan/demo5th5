@@ -66,8 +66,10 @@ extension CreateCourseImportPart on _CreateCoursePageState {
 
       if (result == null || result.files.isEmpty) return;
 
-      int totalImported = 0;
-      int totalSkipped = 0;
+      final List<_PendingTxtImportSet> pendingSets = [];
+      final List<String> skippedNames = [];
+
+      final db = await AppDatabase.instance.database;
 
       for (final file in result.files) {
         final fileName = file.name;
@@ -76,7 +78,7 @@ extension CreateCourseImportPart on _CreateCoursePageState {
             : fileName;
 
         if (courseName.trim().isEmpty) {
-          totalSkipped++;
+          skippedNames.add(fileName);
           continue;
         }
 
@@ -91,7 +93,7 @@ extension CreateCourseImportPart on _CreateCoursePageState {
         }
 
         if (content == null || content.trim().isEmpty) {
-          totalSkipped++;
+          skippedNames.add(courseName);
           continue;
         }
 
@@ -99,12 +101,11 @@ extension CreateCourseImportPart on _CreateCoursePageState {
         final items = _parseTxtContent(content);
 
         if (items.isEmpty) {
-          totalSkipped++;
+          skippedNames.add(courseName);
           continue;
         }
 
         // Check duplicate course name
-        final db = await AppDatabase.instance.database;
         final existed = await db.query(
           'courses',
           columns: ['id'],
@@ -114,26 +115,70 @@ extension CreateCourseImportPart on _CreateCoursePageState {
         );
 
         if (existed.isNotEmpty) {
-          totalSkipped++;
-          this.showMessage("\"$courseName\" đã tồn tại, bỏ qua");
+          skippedNames.add(courseName);
           continue;
         }
 
-        // Save course to DB
-        await _saveTxtCourse(courseName: courseName, items: items);
-        totalImported++;
+        final topicName = selectedTopicId != null
+            ? availableTopics
+                .firstWhere(
+                  (t) => t.id == selectedTopicId,
+                  orElse: () => CourseTopicItem(
+                    id: -1,
+                    name: 'Chưa chọn',
+                    courseCount: 0,
+                    cardCount: 0,
+                    latestCourseAt: '',
+                  ),
+                )
+                .name
+            : courseName; // Auto-created topic uses the courseName
+
+        pendingSets.add(_PendingTxtImportSet(
+          courseName: courseName,
+          items: items,
+          topicName: topicName,
+          languageName: selectedLanguage,
+        ));
+      }
+
+      if (pendingSets.isEmpty) {
+        this.showMessage(
+          "Không có học phần nào hợp lệ để import" +
+              (skippedNames.isNotEmpty
+                  ? " (bỏ qua ${skippedNames.length} trùng hoặc rỗng)"
+                  : ""),
+        );
+        return;
       }
 
       if (!mounted) return;
 
-      if (totalImported > 0) {
-        this.showMessage(
-          "Đã import $totalImported file${totalSkipped > 0 ? ' (bỏ qua $totalSkipped)' : ''}",
-        );
+      // Show Dialog to confirm import preview
+      final confirmed = await showDialog<bool>(
+        context: context,
+        barrierColor: Colors.black.withOpacity(0.5),
+        builder: (dialogContext) {
+          return _TxtImportPreviewDialog(
+            importSets: pendingSets,
+            skippedNames: skippedNames,
+            onSave: (setsToSave) async {
+              for (final set in setsToSave) {
+                await _saveTxtCourse(
+                  courseName: set.courseName,
+                  items: set.items,
+                );
+              }
+            },
+          );
+        },
+      );
+
+      if (confirmed == true) {
+        if (!mounted) return;
+        this.showMessage("Đã import thành công ${pendingSets.length} học phần");
         // Go back to home and refresh
         Navigator.pop(context, true);
-      } else if (totalSkipped > 0) {
-        this.showMessage("Không có file nào import được ($totalSkipped bỏ qua)");
       }
     } catch (e) {
       this.showMessage("Import thất bại: $e");
@@ -779,6 +824,351 @@ class _ImportActionChipState extends State<_ImportActionChip> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+
+// ─── Txt Import Preview Dialog ──────────────────────────────────────────────
+
+class _PendingTxtImportSet {
+  final String courseName;
+  final List<FlashCardItem> items;
+  final String topicName;
+  final String languageName;
+
+  _PendingTxtImportSet({
+    required this.courseName,
+    required this.items,
+    required this.topicName,
+    required this.languageName,
+  });
+}
+
+class _TxtImportPreviewDialog extends StatefulWidget {
+  final List<_PendingTxtImportSet> importSets;
+  final List<String> skippedNames;
+  final Future<void> Function(List<_PendingTxtImportSet> setsToSave) onSave;
+
+  _TxtImportPreviewDialog({
+    required this.importSets,
+    required this.skippedNames,
+    required this.onSave,
+  });
+
+  @override
+  State<_TxtImportPreviewDialog> createState() =>
+      _TxtImportPreviewDialogState();
+}
+
+class _TxtImportPreviewDialogState extends State<_TxtImportPreviewDialog> {
+  bool _isSaving = false;
+
+  Future<void> _handleSave() async {
+    setState(() {
+      _isSaving = true;
+    });
+    try {
+      await widget.onSave(widget.importSets);
+      if (mounted) Navigator.pop(context, true);
+    } catch (e) {
+      debugPrint("Save error: $e");
+      if (mounted) {
+        showAppToast(context, "Lưu thất bại: $e");
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSaving = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: EdgeInsets.all(16),
+      child: Container(
+        constraints: BoxConstraints(
+          maxWidth: 600,
+          maxHeight: MediaQuery.of(context).size.height * 0.8,
+        ),
+        decoration: BoxDecoration(
+          color: AppColors.panel,
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: AppColors.border, width: 1.4),
+          boxShadow: [
+            BoxShadow(
+              color: AppColors.border,
+              offset: Offset(0, 7),
+              blurRadius: 0,
+            ),
+            BoxShadow(
+              color: Color(0x22000000),
+              offset: Offset(0, 20),
+              blurRadius: 26,
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildHeader(),
+            if (widget.skippedNames.isNotEmpty) _buildSkippedAlert(),
+            Flexible(child: _buildSetsList()),
+            _buildFooter(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeader() {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(20, 16, 12, 12),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              "Xác nhận Import TXT",
+              style: TextStyle(
+                color: AppColors.text,
+                fontSize: 22,
+                fontWeight: FontWeight.w900,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ),
+          GestureDetector(
+            onTap: () => Navigator.pop(context),
+            child: Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: AppColors.red,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppColors.border, width: 1.3),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.border,
+                    offset: Offset(0, 3),
+                    blurRadius: 0,
+                  ),
+                ],
+              ),
+              child: Icon(Icons.close, color: AppColors.onIconButton, size: 20),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSkippedAlert() {
+    return Container(
+      margin: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.red.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.red.withOpacity(0.5)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.warning_amber_rounded, color: AppColors.red, size: 20),
+          SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              "Bỏ qua ${widget.skippedNames.length} file trùng tên hoặc không có thẻ: ${widget.skippedNames.join(', ')}",
+              style: TextStyle(
+                color: AppColors.text,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSetsList() {
+    return ListView.builder(
+      shrinkWrap: true,
+      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      itemCount: widget.importSets.length,
+      itemBuilder: (context, index) {
+        final set = widget.importSets[index];
+        return Container(
+          margin: EdgeInsets.only(bottom: 12),
+          padding: EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: AppColors.panel2,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: AppColors.border, width: 1.3),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.border.withOpacity(0.2),
+                offset: Offset(0, 3),
+                blurRadius: 0,
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: AppColors.blue.withOpacity(0.25),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: AppColors.border, width: 1.2),
+                    ),
+                    child: Icon(
+                      Icons.text_snippet,
+                      color: AppColors.text,
+                      size: 20,
+                    ),
+                  ),
+                  SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          set.courseName,
+                          style: TextStyle(
+                            color: AppColors.text,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        SizedBox(height: 4),
+                        Text(
+                          "${set.items.length} thẻ",
+                          style: TextStyle(
+                            color: AppColors.text.withOpacity(0.85),
+                            fontSize: 14,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              Divider(color: AppColors.border.withOpacity(0.15), height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          "CHỦ ĐỀ",
+                          style: TextStyle(
+                            color: AppColors.muted,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        SizedBox(height: 3),
+                        Text(
+                          set.topicName,
+                          style: TextStyle(
+                            color: AppColors.text,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          "NGÔN NGỮ",
+                          style: TextStyle(
+                            color: AppColors.muted,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        SizedBox(height: 3),
+                        Text(
+                          set.languageName,
+                          style: TextStyle(
+                            color: AppColors.text,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildFooter() {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(16, 12, 16, 16),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          GestureDetector(
+            onTap: () => Navigator.pop(context),
+            child: Container(
+              padding: EdgeInsets.symmetric(horizontal: 22, vertical: 12),
+              decoration: BoxDecoration(
+                color: AppColors.panel2,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: AppColors.border, width: 1.4),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.border,
+                    offset: Offset(0, 5),
+                    blurRadius: 0,
+                  ),
+                ],
+              ),
+              child: Text(
+                "Hủy",
+                style: TextStyle(
+                  color: AppColors.text,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+          ),
+          SizedBox(width: 12),
+          _SaveButton(
+            isSaving: _isSaving,
+            onTap: _handleSave,
+          ),
+        ],
       ),
     );
   }
