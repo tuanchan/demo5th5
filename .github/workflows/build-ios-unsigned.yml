@@ -10,7 +10,8 @@ on:
       - clean-restructure
 
 env:
-  FLUTTER_VERSION: "3.38.9"
+  # pubspec.lock requires Flutter >=3.44.0 / Dart >=3.12.0.
+  FLUTTER_VERSION: "3.44.0"
   IPA_NAME: flutterflashcard-unsigned.ipa
 
 jobs:

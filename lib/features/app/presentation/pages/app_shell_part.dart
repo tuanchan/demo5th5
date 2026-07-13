@@ -160,6 +160,25 @@ class _MyAppState extends State<MyApp> {
             ),
           ),
           home: AppThemeLoader(child: HomePage()),
+          routes: {
+            '/login-callback/': (context) => AppThemeLoader(child: HomePage()),
+            '/login-callback': (context) => AppThemeLoader(child: HomePage()),
+          },
+          onGenerateRoute: (settings) {
+            if (settings.name != null && settings.name!.contains('login-callback')) {
+              return MaterialPageRoute(
+                builder: (context) => AppThemeLoader(child: HomePage()),
+                settings: settings,
+              );
+            }
+            return null;
+          },
+          onUnknownRoute: (settings) {
+            return MaterialPageRoute(
+              builder: (context) => AppThemeLoader(child: HomePage()),
+              settings: settings,
+            );
+          },
         );
       },
     );
@@ -178,6 +197,22 @@ class AppThemeLoader extends StatefulWidget {
 
 class _AppThemeLoaderState extends State<AppThemeLoader> {
   bool loaded = false;
+  late final _authSubscription;
+
+  @override
+  void initState() {
+    super.initState();
+    // Listen for auth state changes (e.g., Google OAuth redirect callback)
+    _authSubscription = SupabaseConfig.onAuthStateChange.listen((data) {
+      final event = data.event;
+      if (event == AuthChangeEvent.signedIn) {
+        // Auto-sync when user signs in
+        SupabaseSyncService.instance.syncAll().then((result) {
+          debugPrint('AUTO-SYNC after login: $result');
+        });
+      }
+    });
+  }
 
   @override
   void didChangeDependencies() {
@@ -188,6 +223,12 @@ class _AppThemeLoaderState extends State<AppThemeLoader> {
         if (mounted) AppThemeController.instance.bump();
       });
     }
+  }
+
+  @override
+  void dispose() {
+    _authSubscription.cancel();
+    super.dispose();
   }
 
   @override
@@ -205,6 +246,31 @@ class HomePage extends StatefulWidget {
 
 class BackupManager {
   BackupManager._();
+
+  static Future<String> exportToProjectAssets() async {
+    final db = await AppDatabase.instance.database;
+    await db.rawQuery('PRAGMA wal_checkpoint(FULL)');
+
+    final dbPath = await getDatabasesPath();
+    final dbFile = File(p.join(dbPath, 'list_card.db'));
+    if (!await dbFile.exists()) {
+      throw Exception('Không tìm thấy file database nguồn tại: ${dbFile.path}');
+    }
+
+    final projectAssetsDir = Directory(p.join(Directory.current.path, 'assets'));
+    if (!await projectAssetsDir.exists()) {
+      throw Exception('Không tìm thấy thư mục assets ở root project: ${projectAssetsDir.path}');
+    }
+
+    final targetFile = File(p.join(projectAssetsDir.path, 'list_card.db'));
+    await dbFile.copy(targetFile.path);
+    return 'Đã xuất database thành công sang:\n${targetFile.path}';
+  }
+
+  static Future<void> openDbFolder() async {
+    final dbPath = await getDatabasesPath();
+    await openFolderIfPossible(dbPath);
+  }
 
   static Future<Directory> _backupRoot() async {
     final docDir = await getApplicationDocumentsDirectory();
@@ -405,4 +471,3 @@ class SettingsPage extends StatefulWidget {
   @override
   State<SettingsPage> createState() => _SettingsPageState();
 }
-

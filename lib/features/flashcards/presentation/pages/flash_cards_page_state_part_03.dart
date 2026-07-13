@@ -122,121 +122,228 @@ extension FlashCardsPageStatePart03 on _FlashCardsPageState {
 
 
   void openSettingsSheet() {
-    showModalBottomSheet(
+    showDialog<void>(
       context: context,
-      backgroundColor: Colors.transparent,
-      builder: (_) {
+      barrierColor: Colors.black.withOpacity(0.55),
+      builder: (dialogContext) {
         return StatefulBuilder(
-          builder: (sheetContext, setSheetState) {
-            Widget settingRow({
-              required String title,
+          builder: (context, setDialogState) {
+            Widget settingsToggle({
               required bool value,
               required VoidCallback onTap,
             }) {
-              return Padding(
-                padding: EdgeInsets.only(bottom: 12),
-                child: InkWell(
-                  onTap: () {
-                    onTap();
-                    setSheetState(() {});
-                  },
-                  borderRadius: BorderRadius.circular(16),
+              return GestureDetector(
+                onTap: () {
+                  onTap();
+                  setDialogState(() {});
+                },
+                child: AnimatedContainer(
+                  duration: Duration(milliseconds: 200),
+                  width: 44,
+                  height: 24,
+                  padding: EdgeInsets.all(2),
+                  alignment:
+                      value ? Alignment.centerRight : Alignment.centerLeft,
+                  decoration: BoxDecoration(
+                    color: value ? Color(0xff3e5cff) : Color(0xff464650),
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: value
+                        ? [
+                            BoxShadow(
+                              color: Color(0x8c3e5cff),
+                              blurRadius: 14,
+                            ),
+                          ]
+                        : null,
+                  ),
                   child: Container(
-                    padding: EdgeInsets.all(14),
+                    width: 20,
+                    height: 20,
                     decoration: BoxDecoration(
-                      color: AppColors.panel2,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: AppColors.border, width: 1.2),
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            title,
-                            style: TextStyle(
-                              color: AppColors.text,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ),
-                        AnimatedContainer(
-                          duration: Duration(milliseconds: 200),
-                          width: 48,
-                          height: 26,
-                          padding: EdgeInsets.all(3),
-                          decoration: BoxDecoration(
-                            color: value ? AppColors.border : AppColors.muted,
-                            borderRadius: BorderRadius.circular(99),
-                          ),
-                          alignment: value
-                              ? Alignment.centerRight
-                              : Alignment.centerLeft,
-                          child: Container(
-                            width: 20,
-                            height: 20,
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                        ),
-                      ],
+                      color: Colors.white,
+                      shape: BoxShape.circle,
                     ),
                   ),
                 ),
               );
             }
 
-            return Container(
-              padding: EdgeInsets.fromLTRB(18, 14, 18, 24),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-              ),
-              child: SafeArea(
-                top: false,
+            Widget settingsRow({
+              required String title,
+              String? description,
+              required bool value,
+              required VoidCallback onTap,
+              bool last = false,
+            }) {
+              return Container(
+                width: double.infinity,
+                padding: EdgeInsets.only(bottom: last ? 0 : 20),
+                margin: EdgeInsets.only(bottom: last ? 0 : 20),
+                decoration: BoxDecoration(
+                  border: last
+                      ? null
+                      : Border(
+                          bottom: BorderSide(color: Color(0x14ffffff)),
+                        ),
+                ),
                 child: Column(
-                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Container(
-                      width: 44,
-                      height: 5,
-                      margin: EdgeInsets.only(bottom: 16),
-                      decoration: BoxDecoration(
-                        color: AppColors.border.withOpacity(0.18),
-                        borderRadius: BorderRadius.circular(99),
-                      ),
-                    ),
                     Text(
-                      "Cài đặt Flash Card",
+                      title.toUpperCase(),
                       style: TextStyle(
-                        color: AppColors.text,
-                        fontSize: 20,
-                        fontWeight: FontWeight.w900,
+                        color: Color(0xffe6e6f0),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
                       ),
                     ),
-                    SizedBox(height: 18),
-                    settingRow(
-                      title: "Chỉ học thẻ đã gắn sao",
-                      value: starredOnly,
-                      onTap: this.toggleStarredOnly,
-                    ),
-                    settingRow(
-                      title: "Trộn thẻ",
-                      value: shuffleEnabled,
-                      onTap: this.toggleShuffle,
-                    ),
-                    settingRow(
-                      title: "Theo dõi tiến độ",
-                      value: progressTracking,
-                      onTap: this.toggleProgressMode,
-                    ),
-                    settingRow(
-                      title: "Tự động phát âm",
-                      value: autoPlayAudio,
-                      onTap: this.toggleAutoPlayAudio,
-                    ),
+                    if (description != null) ...[
+                      SizedBox(height: 6),
+                      Text(
+                        description,
+                        style: TextStyle(
+                          color: Color(0xffa0a0b0),
+                          fontSize: 10,
+                          height: 1.4,
+                        ),
+                      ),
+                    ],
+                    SizedBox(height: 10),
+                    settingsToggle(value: value, onTap: onTap),
                   ],
+                ),
+              );
+            }
+
+            final screenHeight = MediaQuery.sizeOf(context).height;
+            return Dialog(
+              backgroundColor: Colors.transparent,
+              insetPadding: EdgeInsets.symmetric(horizontal: 18, vertical: 24),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: 520),
+                child: Container(
+                  padding: EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                    color: Color(0xff141428),
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(color: Color(0x405a78ff)),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'Tùy chọn',
+                              style: TextStyle(
+                                color: Color(0xffe6e6f0),
+                                fontSize: 18,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Đóng',
+                            onPressed: () => Navigator.pop(dialogContext),
+                            icon: Icon(
+                              Icons.close_rounded,
+                              color: Color(0xffe6e6f0),
+                              size: 20,
+                            ),
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: 18),
+                      ConstrainedBox(
+                        constraints: BoxConstraints(maxHeight: screenHeight * 0.6),
+                        child: SingleChildScrollView(
+                          child: Column(
+                            children: [
+                              settingsRow(
+                                title: 'Theo dõi tiến độ',
+                                description:
+                                    'Sắp xếp thẻ để theo dõi những gì bạn đã biết và đang học.',
+                                value: progressTracking,
+                                onTap: this.toggleProgressMode,
+                              ),
+                              settingsRow(
+                                title: 'Chỉ học thuật ngữ có gắn sao',
+                                value: starredOnly,
+                                onTap: this.toggleStarredOnly,
+                              ),
+                              settingsRow(
+                                title: 'Trộn thẻ',
+                                value: shuffleEnabled,
+                                onTap: this.toggleShuffle,
+                              ),
+                              settingsRow(
+                                title: 'Tự động phát âm',
+                                description:
+                                    'Tự động đọc thuật ngữ khi đổi hoặc lật thẻ.',
+                                value: autoPlayAudio,
+                                onTap: this.toggleAutoPlayAudio,
+                                last: true,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      SizedBox(height: 18),
+                      Divider(color: Color(0x14ffffff), height: 1),
+                      SizedBox(height: 14),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          OutlinedButton(
+                            onPressed: () => Navigator.pop(dialogContext),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Color(0xffe6e6f0),
+                              backgroundColor: Color(0x14ffffff),
+                              side: BorderSide(color: Color(0x1affffff)),
+                              padding: EdgeInsets.symmetric(
+                                horizontal: 18,
+                                vertical: 10,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            child: Text(
+                              'Hủy',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                          SizedBox(width: 10),
+                          ElevatedButton(
+                            onPressed: () => Navigator.pop(dialogContext),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Color(0xff3e5cff),
+                              foregroundColor: Colors.white,
+                              elevation: 0,
+                              padding: EdgeInsets.symmetric(
+                                horizontal: 28,
+                                vertical: 10,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            child: Text(
+                              'Lưu',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
             );
@@ -245,5 +352,4 @@ extension FlashCardsPageStatePart03 on _FlashCardsPageState {
       },
     );
   }
-
 }

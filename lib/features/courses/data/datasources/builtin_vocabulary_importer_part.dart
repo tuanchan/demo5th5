@@ -5,6 +5,50 @@ class BuiltInVocabularyImporter {
 
   static const List<String> _assetRoots = ['assets/TOEIC/', 'assets/TOCFL/'];
 
+  static Future<void> removeBundledDefaults() async {
+    await AppDatabase.instance.ensureTopicSchema();
+    final db = await AppDatabase.instance.database;
+    await db.transaction((txn) async {
+      // Bundled vocabulary is reference data shipped with the app, not user
+      // data. Delete it physically so it cannot create hundreds of sync
+      // tombstones. The sync service independently removes old cloud copies.
+      await txn.rawDelete(
+        '''
+        DELETE FROM cards
+        WHERE courseId IN (
+            SELECT id FROM courses
+            WHERE description LIKE ? OR description LIKE ?
+          )
+        ''',
+        ['%assets/TOEIC/%', '%assets/TOCFL/%'],
+      );
+      await txn.rawDelete(
+        '''
+        DELETE FROM courses
+        WHERE description LIKE ? OR description LIKE ?
+        ''',
+        ['%assets/TOEIC/%', '%assets/TOCFL/%'],
+      );
+      await txn.rawDelete(
+        '''
+        DELETE FROM topics
+        WHERE lower(trim(name)) IN (?, ?, ?)
+          AND NOT EXISTS (
+            SELECT 1
+            FROM courses c
+            WHERE c.topicId = topics.id
+          )
+        ''',
+        ['chủ đề khác', 'toeic', 'tiếng trung b1'],
+      );
+      await txn.delete(
+        'import_exports',
+        where: 'filePath LIKE ? OR filePath LIKE ?',
+        whereArgs: ['assets/TOEIC/%', 'assets/TOCFL/%'],
+      );
+    });
+  }
+
   static Future<BuiltInVocabularyImportResult> importMissing() async {
     final assetPaths = await _loadVocabularyAssetPaths();
     if (assetPaths.isEmpty) {
@@ -186,20 +230,11 @@ class BuiltInVocabularyImporter {
         ? 'TOEIC'
         : 'Tiếng Trung B1';
 
-    final rows = await txn.query(
-      'topics',
-      columns: ['id'],
-      where: 'lower(trim(name)) = ? AND deletedAt IS NULL',
-      whereArgs: [topicName.toLowerCase()],
-      limit: 1,
+    return AppDatabase.instance.ensureActiveTopicByName(
+      txn,
+      name: topicName,
+      now: nowIso,
     );
-    if (rows.isNotEmpty) return rows.first['id'] as int;
-
-    return await txn.insert('topics', {
-      'name': topicName,
-      'createdAt': nowIso,
-      'updatedAt': nowIso,
-    });
   }
 
   static List<FlashCardItem> _parseVocabularyText({

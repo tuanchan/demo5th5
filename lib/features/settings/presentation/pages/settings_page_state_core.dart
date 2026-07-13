@@ -8,6 +8,9 @@ class _SettingsPageState extends State<SettingsPage> {
   String themeMode = 'light';
   bool showGeminiApiKey = false;
   String geminiKeyMessage = '';
+  bool accountSyncing = false;
+  bool? accountSyncSucceeded;
+  String accountSyncMessage = '';
 
   final Map<String, String> colorNames = {
     'bg': 'Nền app',
@@ -46,6 +49,7 @@ class _SettingsPageState extends State<SettingsPage> {
   void initState() {
     super.initState();
     this.loadSettings();
+    this._resumeAccountSyncStatus();
   }
 
   @override

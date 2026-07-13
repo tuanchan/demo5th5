@@ -422,7 +422,9 @@ class LanguageDonutPainter extends CustomPainter {
 
 
 class CreateCoursePage extends StatefulWidget {
-  CreateCoursePage({super.key});
+  final int? initialTopicId;
+
+  CreateCoursePage({super.key, this.initialTopicId});
 
   @override
   State<CreateCoursePage> createState() => _CreateCoursePageState();

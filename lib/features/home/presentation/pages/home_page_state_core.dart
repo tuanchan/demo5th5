@@ -54,8 +54,23 @@ int _naturalCompareText(String a, String b) {
   return left.compareTo(right);
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends State<HomePage>
+    with SingleTickerProviderStateMixin {
   bool isOpen = false;
+  bool _isHomeNavExpanded = false;
+  late final AnimationController _homeLogoAnimation;
+  final ScrollController _homeCourseScrollController = ScrollController();
+  final ScrollController _homeTopicScrollController = ScrollController();
+  late final StreamSubscription<SyncResult> _homeSyncSubscription;
+  final GlobalKey _homeCourseViewportKey = GlobalKey();
+  final GlobalKey _homeBackCardKey = GlobalKey();
+  final GlobalKey _homeTopicViewportKey = GlobalKey();
+  final GlobalKey _homeCreateTopicCardKey = GlobalKey();
+  int _homeCoursePage = 1;
+  bool _showFloatingTopicBack = false;
+  bool _showFloatingTopicTop = false;
+  bool _showHomePagination = true;
+  double _lastHomeCourseOffset = 0;
   double _homeDragStartX = 0;
   bool _openedByEdgeSwipe = false;
 
@@ -63,6 +78,7 @@ class _HomePageState extends State<HomePage> {
   bool _duePopupShown = false;
   List<CourseTopicItem> topics = [];
   List<CourseListItem> courses = [];
+  CourseTopicItem? _activeHomeTopic;
   CourseListItem? selectedHomeCourse;
   String courseSortType = "updatedDesc";
   String courseLanguageFilter = "all";
@@ -244,11 +260,75 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+    _homeSyncSubscription = SupabaseSyncService.instance.syncCompleted.listen(
+      (_) {
+        if (mounted) this.loadCourses();
+      },
+    );
+    _homeLogoAnimation = AnimationController(
+      vsync: this,
+      duration: Duration(seconds: 3),
+    )..repeat();
+    _homeCourseScrollController.addListener(() {
+      if (!_homeCourseScrollController.hasClients) return;
+      final offset = _homeCourseScrollController.offset;
+      final delta = offset - _lastHomeCourseOffset;
+      var shouldShowBack = offset >= 390;
+      final backBox = _homeBackCardKey.currentContext?.findRenderObject();
+      final viewportBox =
+          _homeCourseViewportKey.currentContext?.findRenderObject();
+      if (backBox is RenderBox && viewportBox is RenderBox) {
+        final backBottom =
+            backBox.localToGlobal(Offset(0, backBox.size.height)).dy;
+        final viewportTop = viewportBox.localToGlobal(Offset.zero).dy;
+        shouldShowBack = backBottom <= viewportTop;
+      }
+      var shouldShowPagination = _showHomePagination;
+      if (offset <= 0) {
+        shouldShowPagination = true;
+      } else if (delta > 3) {
+        shouldShowPagination = false;
+      } else if (delta < -3) {
+        shouldShowPagination = true;
+      }
+      _lastHomeCourseOffset = offset;
+
+      if (mounted &&
+          (shouldShowBack != _showFloatingTopicBack ||
+              shouldShowPagination != _showHomePagination)) {
+        setState(() {
+          _showFloatingTopicBack = shouldShowBack;
+          _showHomePagination = shouldShowPagination;
+        });
+      }
+    });
+    _homeTopicScrollController.addListener(() {
+      if (!_homeTopicScrollController.hasClients) return;
+      var shouldShow = _homeTopicScrollController.offset >= 390;
+      final createCardBox =
+          _homeCreateTopicCardKey.currentContext?.findRenderObject();
+      final viewportBox =
+          _homeTopicViewportKey.currentContext?.findRenderObject();
+      if (createCardBox is RenderBox && viewportBox is RenderBox) {
+        final cardBottom = createCardBox
+            .localToGlobal(Offset(0, createCardBox.size.height))
+            .dy;
+        final viewportTop = viewportBox.localToGlobal(Offset.zero).dy;
+        shouldShow = cardBottom <= viewportTop;
+      }
+      if (mounted && shouldShow != _showFloatingTopicTop) {
+        setState(() => _showFloatingTopicTop = shouldShow);
+      }
+    });
     this.loadInitialCourses();
   }
 
   @override
   void dispose() {
+    _homeSyncSubscription.cancel();
+    _homeLogoAnimation.dispose();
+    _homeCourseScrollController.dispose();
+    _homeTopicScrollController.dispose();
     courseSearchController.dispose();
     super.dispose();
   }

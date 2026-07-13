@@ -46,6 +46,7 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
   file_picker: ^11.0.2
+  supabase_flutter: ^2.16.0
 
 dev_dependencies:
   flutter_test:
@@ -74,9 +75,15 @@ flutter:
   assets:
     - assets/icon/gemini-color.svg
     - assets/icon/chevron-down-solid-full.svg
+    - assets/icon/arrow-up-solid-full.svg
+    - assets/icon/brain-solid-full.svg
+    - assets/icon/google-icon-logo-svgrepo-com.svg
+    - assets/icon/facebook-svgrepo-com.svg
+    - codebaseUIUX/Webviews/icon/icon.png
     - assets/TOEIC/
     - assets/TOCFL/
     - assets/audios/
+    - assets/list_card.db
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

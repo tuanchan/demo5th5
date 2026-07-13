@@ -8,39 +8,49 @@ extension HomePageStatePart02Split02 on _HomePageState {
     required ValueChanged<int> onChanged,
   }) {
     return Container(
-      height: 48,
+      height: 46,
+      padding: EdgeInsets.only(left: 12, right: 5),
       decoration: BoxDecoration(
-        color: AppColors.inputFill,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.border, width: 1.3),
+        color: Color(0x0fffffff),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Color(0xff2a334a)),
       ),
       child: Row(
         children: [
-          IconButton(
-            onPressed: value <= min ? null : () => onChanged(value - 1),
-            icon: Icon(
-              Icons.remove_rounded,
-              color: value <= min ? AppColors.muted.withOpacity(0.45) : AppColors.onIconButton,
-            ),
-          ),
           Expanded(
-            child: Center(
-              child: Text(
-                '$value',
-                style: TextStyle(
-                  color: AppColors.text,
-                  fontWeight: FontWeight.w900,
-                  fontSize: 16,
-                ),
+            child: Text(
+              '$value',
+              style: TextStyle(
+                color: Color(0xffeaf1ff),
+                fontWeight: FontWeight.w900,
+                fontSize: 16,
               ),
             ),
           ),
-          IconButton(
-            onPressed: value >= max ? null : () => onChanged(value + 1),
-            icon: Icon(
-              Icons.add_rounded,
-              color: value >= max ? AppColors.muted.withOpacity(0.45) : AppColors.onIconButton,
-            ),
+          Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              InkWell(
+                onTap: value >= max ? null : () => onChanged(value + 1),
+                child: Icon(
+                  Icons.arrow_drop_up_rounded,
+                  size: 18,
+                  color: value >= max
+                      ? Color(0xff59657f)
+                      : Color(0xffeaf1ff),
+                ),
+              ),
+              InkWell(
+                onTap: value <= min ? null : () => onChanged(value - 1),
+                child: Icon(
+                  Icons.arrow_drop_down_rounded,
+                  size: 18,
+                  color: value <= min
+                      ? Color(0xff59657f)
+                      : Color(0xffeaf1ff),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -55,27 +65,44 @@ extension HomePageStatePart02Split02 on _HomePageState {
     required bool value,
     required ValueChanged<bool> onChanged,
   }) {
-    return Padding(
-      padding: EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              text,
-              style: TextStyle(
-                color: AppColors.text,
-                fontWeight: FontWeight.w900,
-                fontSize: 15,
+    return GestureDetector(
+      onTap: () => onChanged(!value),
+      behavior: HitTestBehavior.opaque,
+      child: Padding(
+        padding: EdgeInsets.symmetric(vertical: 5),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                text,
+                style: TextStyle(
+                  color: Color(0xffeaf1ff),
+                  fontWeight: FontWeight.w900,
+                  fontSize: 15,
+                ),
               ),
             ),
-          ),
-          Switch(
-            value: value,
-            activeColor: AppColors.border,
-            activeTrackColor: AppColors.green,
-            onChanged: onChanged,
-          ),
-        ],
+            AnimatedContainer(
+              duration: Duration(milliseconds: 180),
+              width: 56,
+              height: 30,
+              padding: EdgeInsets.all(2),
+              alignment: value ? Alignment.centerRight : Alignment.centerLeft,
+              decoration: BoxDecoration(
+                color: value ? Color(0xf23e5cff) : Color(0x8094a3b8),
+                borderRadius: BorderRadius.circular(99),
+              ),
+              child: Container(
+                width: 26,
+                height: 26,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -89,40 +116,21 @@ extension HomePageStatePart02Split02 on _HomePageState {
     required Color color,
     required VoidCallback onTap,
   }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        height: 50,
-        padding: EdgeInsets.symmetric(horizontal: 14),
-        decoration: BoxDecoration(
-          color: color,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppColors.border, width: 1.4),
-          boxShadow: [
-            BoxShadow(
-              color: AppColors.border,
-              offset: Offset(0, 4),
-              blurRadius: 0,
-            ),
-          ],
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, color: AppColors.onSolidButton, size: 20),
-            SizedBox(width: 7),
-            Flexible(
-              child: Text(
-                text,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: AppColors.onSolidButton,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-            ),
-          ],
+    return ElevatedButton.icon(
+      onPressed: onTap,
+      icon: Icon(icon, size: 18),
+      label: Text(
+        text,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(fontWeight: FontWeight.w900),
+      ),
+      style: ElevatedButton.styleFrom(
+        elevation: 0,
+        backgroundColor: color,
+        foregroundColor: Colors.white,
+        padding: EdgeInsets.symmetric(horizontal: 18, vertical: 15),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
         ),
       ),
     );
@@ -149,7 +157,13 @@ extension HomePageStatePart02Split02 on _HomePageState {
       context,
       MaterialPageRoute(builder: (_) => SettingsPage()),
     );
-    if (mounted) setState(() {});
+    if (!mounted) return;
+
+    final activeSync = SupabaseSyncService.instance.activeSync;
+    if (activeSync == null) {
+      await this.loadCourses();
+    }
+    // If a sync is active, Home is refreshed by the service completion stream.
   }
 
 
@@ -197,24 +211,7 @@ extension HomePageStatePart02Split02 on _HomePageState {
 
 
   Future<void> loadInitialCourses() async {
-    if (mounted) {
-      setState(() {
-        isLoadingCourses = true;
-      });
-    }
-
     await this.loadCourseListSettings();
-
-    try {
-      final result = await BuiltInVocabularyImporter.importMissing();
-      if (mounted && result.importedCourses > 0) {
-        this.showHomeMessage(
-          'Đã thêm ${result.importedCourses} học phần TOEIC/TOCFL (${result.importedCards} thẻ)',
-        );
-      }
-    } catch (e) {
-      debugPrint('BUILT-IN VOCABULARY IMPORT ERROR: $e');
-    }
 
     await this.loadCourses();
 
@@ -247,7 +244,7 @@ extension HomePageStatePart02Split02 on _HomePageState {
 
 
   Future<void> loadCourses() async {
-    if (!mounted) return;
+    if (!mounted || isLoadingCourses) return;
 
     setState(() {
       isLoadingCourses = true;
@@ -255,6 +252,7 @@ extension HomePageStatePart02Split02 on _HomePageState {
 
     try {
       await AppDatabase.instance.ensureTopicSchema();
+      await BuiltInVocabularyImporter.removeBundledDefaults();
       final db = await AppDatabase.instance.database;
 
       final rows = await db.rawQuery('''
@@ -294,6 +292,8 @@ extension HomePageStatePart02Split02 on _HomePageState {
           AND cards.isHidden = 0
         WHERE t.deletedAt IS NULL
         GROUP BY t.id, t.name
+        HAVING COUNT(DISTINCT c.id) > 0
+          OR lower(trim(t.name)) NOT IN ('chủ đề khác', 'toeic', 'tiếng trung b1')
         ORDER BY lower(t.name) ASC
       ''');
 
@@ -325,6 +325,11 @@ extension HomePageStatePart02Split02 on _HomePageState {
         courses = loadedCourses;
         topics = topicRows.map((e) => CourseTopicItem.fromMap(e)).toList();
         courseLanguageFilter = nextLanguageFilter;
+        if (_activeHomeTopic != null) {
+          final activeTopicId = _activeHomeTopic!.id;
+          final stillExists = topics.where((topic) => topic.id == activeTopicId);
+          _activeHomeTopic = stillExists.isEmpty ? null : stillExists.first;
+        }
         if (selectedHomeCourse != null) {
           final stillExists = courses.where(
             (e) => e.id == selectedHomeCourse!.id,

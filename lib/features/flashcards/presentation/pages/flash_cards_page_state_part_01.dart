@@ -5,7 +5,7 @@ extension FlashCardsPageStatePart01 on _FlashCardsPageState {
     final card = currentCard;
 
     return Scaffold(
-      backgroundColor: AppColors.bg,
+      backgroundColor: Color(0xff000000),
       body: SafeArea(
         child: Stack(
           children: [
@@ -19,6 +19,8 @@ extension FlashCardsPageStatePart01 on _FlashCardsPageState {
                             color: AppColors.border,
                           ),
                         )
+                      : flashcardTableVisible
+                      ? this.buildVocabularyTableView()
                       : allCards.isEmpty
                       ? this.buildEmptyState(
                           title: "Học phần chưa có thẻ",
@@ -26,28 +28,53 @@ extension FlashCardsPageStatePart01 on _FlashCardsPageState {
                               "Hãy thêm thuật ngữ và định nghĩa cho học phần.",
                         )
                       : visibleOrder.isEmpty
-                      ? this.buildEmptyState(
-                          title: widget.dueOnly
-                              ? "Không có thẻ đến hạn"
-                              : "Không có thẻ phù hợp",
-                          message: widget.dueOnly
-                              ? "Hôm nay chưa có thẻ đến hạn để học."
-                              : "Tắt chế độ chỉ học thẻ gắn sao hoặc gắn sao thêm thẻ.",
+                      ? Column(
+                          children: [
+                            Expanded(
+                              child: this.buildEmptyState(
+                                title: widget.dueOnly
+                                    ? "Không có thẻ đến hạn"
+                                    : "Không có thẻ phù hợp",
+                                message: widget.dueOnly
+                                    ? "Hôm nay chưa có thẻ đến hạn để học."
+                                    : "Tắt chế độ chỉ học thẻ gắn sao hoặc gắn sao thêm thẻ.",
+                              ),
+                            ),
+                            this.buildBottomBar(),
+                          ],
                         )
                       : Column(
                           children: [
                             Expanded(
-                              child: Padding(
-                                padding: EdgeInsets.fromLTRB(18, 16, 18, 8),
-                                child: Stack(
-                                  children: [
-                                    this.buildPeekCard(),
-                                    this.buildFlashCard(card!),
-
-                                    if (showCompletion)
-                                      this.buildCompletionOverlay(),
-                                  ],
-                                ),
+                              child: LayoutBuilder(
+                                builder: (context, constraints) {
+                                  final compact = constraints.maxWidth < 700;
+                                  return Padding(
+                                    padding: EdgeInsets.fromLTRB(
+                                      compact ? 12 : 60,
+                                      compact ? 12 : 36,
+                                      compact ? 12 : 60,
+                                      compact ? 8 : 16,
+                                    ),
+                                    child: Center(
+                                      child: ConstrainedBox(
+                                        constraints: BoxConstraints(
+                                          maxWidth: 840,
+                                          maxHeight: double.infinity,
+                                        ),
+                                        child: Stack(
+                                          fit: StackFit.expand,
+                                          children: [
+                                            this.buildPeekCard(),
+                                            this.buildFlashCard(card!),
+                                            if (showCompletion)
+                                              this.buildCompletionOverlay(),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                },
                               ),
                             ),
                             this.buildBottomBar(),

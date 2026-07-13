@@ -389,25 +389,18 @@ extension CreateCoursePageStatePart02 on _CreateCoursePageState {
     return Container(
       width: double.infinity,
       constraints: BoxConstraints(minHeight: 230),
-      padding: EdgeInsets.all(14),
+      padding: EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: AppColors.panel,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.border, width: 1.4),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.border,
-            offset: Offset(0, 7),
-            blurRadius: 0,
-          ),
-        ],
+        color: Color(0xff0b0d12),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Color(0xff242a36)),
       ),
       child: previewItems.isEmpty
           ? Center(
               child: Text(
                 "Chưa có dữ liệu xem trước",
                 style: TextStyle(
-                  color: AppColors.muted,
+                  color: Color(0xffa8b6d6),
                   fontSize: 15,
                   fontWeight: FontWeight.w700,
                 ),
@@ -421,9 +414,9 @@ extension CreateCoursePageStatePart02 on _CreateCoursePageState {
                   margin: EdgeInsets.only(bottom: 10),
                   padding: EdgeInsets.all(14),
                   decoration: BoxDecoration(
-                    color: AppColors.panel2,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: AppColors.border),
+                    color: Color(0xff080a0f),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Color(0xff242a36)),
                   ),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -433,21 +426,13 @@ extension CreateCoursePageStatePart02 on _CreateCoursePageState {
                         height: 32,
                         alignment: Alignment.center,
                         decoration: BoxDecoration(
-                          color: AppColors.yellow,
-                          borderRadius: BorderRadius.circular(9),
-                          border: Border.all(color: AppColors.border),
-                          boxShadow: [
-                            BoxShadow(
-                              color: AppColors.border,
-                              offset: Offset(0, 3),
-                              blurRadius: 0,
-                            ),
-                          ],
+                          color: Color(0xff4268ff),
+                          borderRadius: BorderRadius.circular(8),
                         ),
                         child: Text(
                           "${index + 1}",
                           style: TextStyle(
-                            color: AppColors.border,
+                            color: Colors.white,
                             fontWeight: FontWeight.w900,
                           ),
                         ),
@@ -460,7 +445,7 @@ extension CreateCoursePageStatePart02 on _CreateCoursePageState {
                             Text(
                               item.term,
                               style: TextStyle(
-                                color: AppColors.text,
+                                color: Color(0xfff8fbff),
                                 fontSize: 16,
                                 fontWeight: FontWeight.w900,
                               ),
@@ -469,7 +454,7 @@ extension CreateCoursePageStatePart02 on _CreateCoursePageState {
                             Text(
                               item.definition,
                               style: TextStyle(
-                                color: AppColors.muted,
+                                color: Color(0xffa8b6d6),
                                 fontSize: 14,
                                 height: 1.4,
                                 fontWeight: FontWeight.w600,

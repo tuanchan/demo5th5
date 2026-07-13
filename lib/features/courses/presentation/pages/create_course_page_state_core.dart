@@ -22,6 +22,7 @@ class _CreateCoursePageState extends State<CreateCoursePage> {
   @override
   void initState() {
     super.initState();
+    selectedTopicId = widget.initialTopicId;
     this.loadCreateCourseSettings();
   }
 

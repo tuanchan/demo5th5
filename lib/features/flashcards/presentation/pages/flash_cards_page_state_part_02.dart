@@ -86,56 +86,68 @@ extension FlashCardsPageStatePart02 on _FlashCardsPageState {
             Widget editInput({
               required TextEditingController controller,
               required String label,
-              required IconData icon,
               int maxLines = 1,
             }) {
-              return TextField(
-                controller: controller,
-                maxLines: maxLines,
-                minLines: maxLines,
-                style: TextStyle(
-                  color: AppColors.text,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w800,
-                ),
-                decoration: InputDecoration(
-                  labelText: label,
-                  prefixIcon: Icon(icon, color: AppColors.border, size: 21),
-                  filled: true,
-                  fillColor: AppColors.panel,
-                  contentPadding: EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 14,
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(16),
-                    borderSide: BorderSide(
-                      color: AppColors.border.withOpacity(0.45),
-                      width: 1.3,
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label.toUpperCase(),
+                    style: TextStyle(
+                      color: Color(0xffe6e6f0),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.5,
                     ),
                   ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(16),
-                    borderSide: BorderSide(color: AppColors.border, width: 1.8),
+                  SizedBox(height: 6),
+                  TextField(
+                    controller: controller,
+                    maxLines: maxLines,
+                    minLines: maxLines,
+                    style: TextStyle(
+                      color: Color(0xffe6e6f0),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    decoration: InputDecoration(
+                      filled: true,
+                      fillColor: Color(0xff1a1a2e),
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 11,
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Color(0xff3c3c50)),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Color(0xff5a78ff)),
+                      ),
+                    ),
                   ),
-                ),
+                ],
               );
             }
 
             return Dialog(
-              insetPadding: EdgeInsets.symmetric(horizontal: 22),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(26),
-              ),
+              insetPadding: EdgeInsets.symmetric(horizontal: 18, vertical: 24),
+              backgroundColor: Colors.transparent,
               child: Container(
-                padding: EdgeInsets.fromLTRB(18, 18, 18, 16),
+                constraints: BoxConstraints(maxWidth: 560),
+                padding: EdgeInsets.fromLTRB(22, 22, 22, 18),
                 decoration: BoxDecoration(
-                  color: AppColors.activeIsDark ? AppColors.panel : Color(0xfff6f1fb),
-                  borderRadius: BorderRadius.circular(26),
-                  border: Border.all(
-                    color: AppColors.border.withOpacity(0.14),
-                    width: 1,
-                  ),
+                  color: Color(0xff141428),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: Color(0x405a78ff)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Color(0x8c000000),
+                      blurRadius: 44,
+                      offset: Offset(0, 10),
+                    ),
+                  ],
                 ),
                 child: SingleChildScrollView(
                   child: Column(
@@ -146,11 +158,11 @@ extension FlashCardsPageStatePart02 on _FlashCardsPageState {
                         children: [
                           Expanded(
                             child: Text(
-                              "Sửa thẻ",
+                              "Chỉnh sửa thẻ",
                               style: TextStyle(
-                                color: AppColors.text,
-                                fontSize: 22,
-                                fontWeight: FontWeight.w900,
+                                color: Color(0xffe6e6f0),
+                                fontSize: 18,
+                                fontWeight: FontWeight.w800,
                               ),
                             ),
                           ),
@@ -158,7 +170,8 @@ extension FlashCardsPageStatePart02 on _FlashCardsPageState {
                             onPressed: () => Navigator.pop(dialogContext),
                             icon: Icon(
                               Icons.close_rounded,
-                              color: AppColors.border,
+                              color: Color(0xffe6e6f0),
+                              size: 18,
                             ),
                           ),
                         ],
@@ -166,21 +179,18 @@ extension FlashCardsPageStatePart02 on _FlashCardsPageState {
                       SizedBox(height: 12),
                       editInput(
                         controller: termController,
-                        label: "Thuật ngữ",
-                        icon: Icons.text_fields_rounded,
+                        label: "Từ vựng",
                       ),
                       SizedBox(height: 12),
                       editInput(
                         controller: definitionController,
-                        label: "Định nghĩa",
-                        icon: Icons.menu_book_rounded,
-                        maxLines: 3,
+                        label: "Nghĩa",
+                        maxLines: 4,
                       ),
                       SizedBox(height: 12),
                       editInput(
                         controller: pronunciationController,
                         label: "Phiên âm",
-                        icon: Icons.record_voice_over_rounded,
                       ),
                       if (errorText != null) ...[
                         SizedBox(height: 10),
@@ -194,31 +204,33 @@ extension FlashCardsPageStatePart02 on _FlashCardsPageState {
                       ],
                       SizedBox(height: 18),
                       Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
                         children: [
-                          Expanded(
-                            child: OutlinedButton(
-                              onPressed: () => Navigator.pop(dialogContext),
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: AppColors.text,
-                                padding: EdgeInsets.symmetric(vertical: 13),
-                                side: BorderSide(
-                                  color: AppColors.border,
-                                  width: 1.3,
-                                ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(16),
-                                ),
+                          OutlinedButton(
+                            onPressed: () => Navigator.pop(dialogContext),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Color(0xffe6e6f0),
+                              backgroundColor: Color(0x14ffffff),
+                              padding: EdgeInsets.symmetric(
+                                horizontal: 18,
+                                vertical: 10,
                               ),
-                              child: Text(
-                                "Hủy",
-                                style: TextStyle(fontWeight: FontWeight.w900),
+                              side: BorderSide(color: Color(0x1affffff)),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            child: Text(
+                              "Hủy",
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
                               ),
                             ),
                           ),
-                          SizedBox(width: 12),
-                          Expanded(
-                            child: ElevatedButton(
-                              onPressed: () {
+                          SizedBox(width: 10),
+                          ElevatedButton(
+                            onPressed: () {
                                 final term = termController.text.trim();
                                 final definition = definitionController.text
                                     .trim();
@@ -248,23 +260,24 @@ extension FlashCardsPageStatePart02 on _FlashCardsPageState {
                                     pronunciation: pronunciation,
                                   ),
                                 );
-                              },
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: AppColors.yellow,
-                                foregroundColor: AppColors.onAccentButton,
-                                padding: EdgeInsets.symmetric(vertical: 13),
-                                elevation: 0,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(16),
-                                  side: BorderSide(
-                                    color: AppColors.border,
-                                    width: 1.3,
-                                  ),
-                                ),
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Color(0xff3e5cff),
+                              foregroundColor: Colors.white,
+                              padding: EdgeInsets.symmetric(
+                                horizontal: 28,
+                                vertical: 10,
                               ),
-                              child: Text(
-                                "Lưu",
-                                style: TextStyle(fontWeight: FontWeight.w900),
+                              elevation: 0,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            child: Text(
+                              "Lưu",
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
                               ),
                             ),
                           ),

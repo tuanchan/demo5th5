@@ -68,6 +68,7 @@ extension CreateCourseImportPart on _CreateCoursePageState {
 
       final List<_PendingTxtImportSet> pendingSets = [];
       final List<String> skippedNames = [];
+      final pendingCourseNames = <String>{};
 
       final db = await AppDatabase.instance.database;
 
@@ -115,6 +116,14 @@ extension CreateCourseImportPart on _CreateCoursePageState {
         );
 
         if (existed.isNotEmpty) {
+          skippedNames.add(courseName);
+          continue;
+        }
+
+        // Two files from different folders may still have the same filename.
+        // They both pass the database check above before either one is saved,
+        // so de-duplicate the current import batch as well.
+        if (!pendingCourseNames.add(courseName.trim().toLowerCase())) {
           skippedNames.add(courseName);
           continue;
         }
@@ -255,12 +264,22 @@ extension CreateCourseImportPart on _CreateCoursePageState {
     await db.transaction((txn) async {
       // Create or find topic
       var topicId = selectedTopicId;
+      if (topicId != null) {
+        final activeTopic = await txn.query(
+          'topics',
+          columns: ['id'],
+          where: 'id = ? AND deletedAt IS NULL',
+          whereArgs: [topicId],
+          limit: 1,
+        );
+        if (activeTopic.isEmpty) topicId = null;
+      }
       if (topicId == null) {
-        topicId = await txn.insert('topics', {
-          'name': courseName,
-          'createdAt': now,
-          'updatedAt': now,
-        });
+        topicId = await AppDatabase.instance.ensureActiveTopicByName(
+          txn,
+          name: courseName,
+          now: now,
+        );
       }
 
       final courseId = await txn.insert('courses', {
@@ -323,6 +342,7 @@ class _ManualTableDialog extends StatefulWidget {
 class _ManualTableDialogState extends State<_ManualTableDialog> {
   final List<_ManualTableRow> _rows = [];
   final ScrollController _scrollController = ScrollController();
+  final ScrollController _horizontalScrollController = ScrollController();
   bool _isSaving = false;
 
   @override
@@ -340,6 +360,7 @@ class _ManualTableDialogState extends State<_ManualTableDialog> {
       row.dispose();
     }
     _scrollController.dispose();
+    _horizontalScrollController.dispose();
     super.dispose();
   }
 
@@ -395,26 +416,21 @@ class _ManualTableDialogState extends State<_ManualTableDialog> {
   Widget build(BuildContext context) {
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: EdgeInsets.all(16),
+      insetPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 18),
       child: Container(
         constraints: BoxConstraints(
-          maxWidth: 820,
-          maxHeight: MediaQuery.of(context).size.height * 0.85,
+          maxWidth: 1040,
+          maxHeight: MediaQuery.of(context).size.height * 0.9,
         ),
         decoration: BoxDecoration(
-          color: AppColors.panel,
-          borderRadius: BorderRadius.circular(22),
-          border: Border.all(color: AppColors.border, width: 1.4),
+          color: Color(0xff0b0d12),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: Color(0xff2a334a)),
           boxShadow: [
             BoxShadow(
-              color: AppColors.border,
-              offset: Offset(0, 7),
-              blurRadius: 0,
-            ),
-            BoxShadow(
-              color: Color(0x22000000),
-              offset: Offset(0, 20),
-              blurRadius: 26,
+              color: Color(0x73000000),
+              offset: Offset(0, 18),
+              blurRadius: 42,
             ),
           ],
         ),
@@ -433,41 +449,32 @@ class _ManualTableDialogState extends State<_ManualTableDialog> {
 
   Widget _buildHeader() {
     return Padding(
-      padding: EdgeInsets.fromLTRB(20, 16, 12, 12),
+      padding: EdgeInsets.fromLTRB(20, 16, 12, 14),
       child: Row(
         children: [
           Expanded(
             child: Text(
               "Tạo thủ công",
               style: TextStyle(
-                color: AppColors.text,
+                color: Color(0xfff8fbff),
                 fontSize: 22,
                 fontWeight: FontWeight.w900,
-                fontStyle: FontStyle.italic,
               ),
             ),
           ),
           _AddRowButton(onTap: _addRow),
           SizedBox(width: 8),
-          GestureDetector(
-            onTap: () => Navigator.pop(context),
-            child: Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: AppColors.red,
+          IconButton(
+            tooltip: 'Đóng',
+            onPressed: () => Navigator.pop(context),
+            style: IconButton.styleFrom(
+              foregroundColor: Color(0xffa8b6d6),
+              side: BorderSide(color: Color(0xff2a334a)),
+              shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: AppColors.border, width: 1.3),
-                boxShadow: [
-                  BoxShadow(
-                    color: AppColors.border,
-                    offset: Offset(0, 3),
-                    blurRadius: 0,
-                  ),
-                ],
               ),
-              child: Icon(Icons.close, color: AppColors.onIconButton, size: 20),
             ),
+            icon: Icon(Icons.close_rounded, size: 20),
           ),
         ],
       ),
@@ -476,55 +483,67 @@ class _ManualTableDialogState extends State<_ManualTableDialog> {
 
   Widget _buildTable() {
     return Container(
-      margin: EdgeInsets.symmetric(horizontal: 16),
+      margin: EdgeInsets.symmetric(horizontal: 14),
       decoration: BoxDecoration(
-        color: AppColors.activeIsDark ? AppColors.panel2 : Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.border, width: 1.3),
+        color: Color(0xff080a0f),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Color(0xff2a334a)),
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Table header
-          Container(
-            decoration: BoxDecoration(
-              color: AppColors.panel2,
-              borderRadius: BorderRadius.only(
-                topLeft: Radius.circular(13),
-                topRight: Radius.circular(13),
+      clipBehavior: Clip.antiAlias,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final compact = MediaQuery.sizeOf(context).width < 720;
+          final tableWidth = compact
+              ? constraints.maxWidth
+              : math.max(680.0, constraints.maxWidth);
+          return Scrollbar(
+            controller: _horizontalScrollController,
+            thumbVisibility: false,
+            child: SingleChildScrollView(
+              controller: _horizontalScrollController,
+              scrollDirection: Axis.horizontal,
+              physics: compact
+                  ? NeverScrollableScrollPhysics()
+                  : ClampingScrollPhysics(),
+              child: SizedBox(
+                width: tableWidth,
+                height: constraints.maxHeight,
+                child: Column(
+                  children: [
+                    Container(
+                      height: 54,
+                      color: Color(0xff10141c),
+                      child: Row(
+                        children: [
+                          _tableHeaderCell("", width: 52),
+                          _tableHeaderCell("Từ mới", flex: 3),
+                          _tableHeaderCell("Định nghĩa", flex: 5),
+                          _tableHeaderCell("Phiên âm", flex: 3),
+                          SizedBox(width: 44),
+                        ],
+                      ),
+                    ),
+                    Container(height: 1, color: Color(0xff2a334a)),
+                    Expanded(
+                      child: ListView.separated(
+                        controller: _scrollController,
+                        padding: EdgeInsets.zero,
+                        itemCount: _rows.length,
+                        separatorBuilder: (_, __) => Container(
+                          height: 1,
+                          color: Color(0xff202632),
+                        ),
+                        itemBuilder: (context, index) {
+                          return _buildTableRow(index);
+                        },
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-            child: Row(
-              children: [
-                _tableHeaderCell("", width: 48),
-                _tableHeaderCell("Từ mới", flex: 3),
-                _tableHeaderCell("Định nghĩa", flex: 5),
-                _tableHeaderCell("Phiên âm", flex: 3),
-                SizedBox(width: 40),
-              ],
-            ),
-          ),
-          Container(
-            height: 1,
-            color: AppColors.border,
-          ),
-          // Table rows
-          Flexible(
-            child: ListView.separated(
-              controller: _scrollController,
-              shrinkWrap: true,
-              padding: EdgeInsets.zero,
-              itemCount: _rows.length,
-              separatorBuilder: (_, __) => Container(
-                height: 1,
-                color: AppColors.border.withOpacity(0.2),
-              ),
-              itemBuilder: (context, index) {
-                return _buildTableRow(index);
-              },
-            ),
-          ),
-        ],
+          );
+        },
       ),
     );
   }
@@ -535,7 +554,7 @@ class _ManualTableDialogState extends State<_ManualTableDialog> {
       child: Text(
         label,
         style: TextStyle(
-          color: AppColors.text,
+          color: Color(0xfff8fbff),
           fontSize: 13,
           fontWeight: FontWeight.w900,
         ),
@@ -553,8 +572,9 @@ class _ManualTableDialogState extends State<_ManualTableDialog> {
 
     return Container(
       color: index % 2 == 1
-          ? AppColors.panel2.withOpacity(0.3)
-          : Colors.transparent,
+          ? Color(0xff0b0e14)
+          : Color(0xff080a0f),
+      height: 50,
       child: Row(
         children: [
           // Row number
@@ -564,7 +584,7 @@ class _ManualTableDialogState extends State<_ManualTableDialog> {
               child: Text(
                 '${index + 1}',
                 style: TextStyle(
-                  color: AppColors.muted,
+                  color: Color(0xffa8b6d6),
                   fontWeight: FontWeight.w800,
                   fontSize: 13,
                 ),
@@ -594,7 +614,7 @@ class _ManualTableDialogState extends State<_ManualTableDialog> {
                     onPressed: () => _removeRow(index),
                     icon: Icon(
                       Icons.remove_circle_outline,
-                      color: AppColors.red,
+                      color: Color(0xffff6b6b),
                       size: 18,
                     ),
                     padding: EdgeInsets.zero,
@@ -611,13 +631,13 @@ class _ManualTableDialogState extends State<_ManualTableDialog> {
     return Container(
       decoration: BoxDecoration(
         border: Border(
-          left: BorderSide(color: AppColors.border.withOpacity(0.15)),
+          left: BorderSide(color: Color(0xff202632)),
         ),
       ),
       child: TextField(
         controller: controller,
         style: TextStyle(
-          color: AppColors.text,
+          color: Color(0xfff8fbff),
           fontSize: 14,
           fontWeight: FontWeight.w600,
         ),
@@ -625,6 +645,10 @@ class _ManualTableDialogState extends State<_ManualTableDialog> {
           border: InputBorder.none,
           contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 10),
           isDense: true,
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.zero,
+            borderSide: BorderSide(color: Color(0xff4268ff)),
+          ),
         ),
       ),
     );
@@ -634,6 +658,7 @@ class _ManualTableDialogState extends State<_ManualTableDialog> {
     return Padding(
       padding: EdgeInsets.fromLTRB(16, 12, 16, 16),
       child: Row(
+        mainAxisAlignment: MainAxisAlignment.end,
         children: [
           _SaveButton(
             isSaving: _isSaving,
@@ -681,22 +706,15 @@ class _AddRowButtonState extends State<_AddRowButton> {
       onTap: widget.onTap,
       child: AnimatedContainer(
         duration: Duration(milliseconds: 90),
-        transform: Matrix4.translationValues(0, _isPressed ? 3 : 0, 0),
+        transform: Matrix4.translationValues(0, _isPressed ? 1 : 0, 0),
         width: 36,
         height: 36,
         decoration: BoxDecoration(
-          color: AppColors.blue,
+          color: _isPressed ? Color(0xff26324d) : Color(0xff121828),
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: AppColors.border, width: 1.3),
-          boxShadow: [
-            BoxShadow(
-              color: AppColors.border,
-              offset: Offset(0, _isPressed ? 1 : 3),
-              blurRadius: 0,
-            ),
-          ],
+          border: Border.all(color: Color(0xff4268ff)),
         ),
-        child: Icon(Icons.add, color: AppColors.onIconButton, size: 22),
+        child: Icon(Icons.add_rounded, color: Color(0xfff8fbff), size: 22),
       ),
     );
   }
@@ -727,19 +745,11 @@ class _SaveButtonState extends State<_SaveButton> {
       onTap: widget.isSaving ? null : widget.onTap,
       child: AnimatedContainer(
         duration: Duration(milliseconds: 90),
-        transform: Matrix4.translationValues(0, _isPressed ? 4 : 0, 0),
+        transform: Matrix4.translationValues(0, _isPressed ? 1 : 0, 0),
         padding: EdgeInsets.symmetric(horizontal: 22, vertical: 12),
         decoration: BoxDecoration(
-          color: AppColors.blue,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppColors.border, width: 1.4),
-          boxShadow: [
-            BoxShadow(
-              color: AppColors.border,
-              offset: Offset(0, _isPressed ? 1 : 5),
-              blurRadius: 0,
-            ),
-          ],
+          color: _isPressed ? Color(0xff3658df) : Color(0xff4268ff),
+          borderRadius: BorderRadius.circular(10),
         ),
         child: widget.isSaving
             ? SizedBox(
@@ -747,13 +757,13 @@ class _SaveButtonState extends State<_SaveButton> {
                 height: 20,
                 child: CircularProgressIndicator(
                   strokeWidth: 2.5,
-                  color: AppColors.onSolidButton,
+                  color: Colors.white,
                 ),
               )
             : Text(
                 "Lưu",
                 style: TextStyle(
-                  color: AppColors.onSolidButton,
+                  color: Colors.white,
                   fontSize: 15,
                   fontWeight: FontWeight.w900,
                 ),
@@ -1173,4 +1183,3 @@ class _TxtImportPreviewDialogState extends State<_TxtImportPreviewDialog> {
     );
   }
 }
-

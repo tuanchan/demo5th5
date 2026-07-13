@@ -33,7 +33,9 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: "3.44.0"
           channel: stable
+          cache: true
 
       - name: Show Flutter version
         run: flutter --version
@@ -42,7 +44,7 @@ jobs:
         run: flutter clean
 
       - name: Get Flutter packages
-        run: flutter pub get
+        run: flutter pub get --enforce-lockfile
 
       - name: Generate launcher icons
         run: dart run flutter_launcher_icons

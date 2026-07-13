@@ -3,7 +3,7 @@ part of flutterflashcard_main;
 extension SettingsPageStatePart01 on _SettingsPageState {
   Widget _buildSettingsPagePage(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.bg,
+      backgroundColor: Color(0xff000000),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: EdgeInsets.fromLTRB(16, 14, 16, 28),
@@ -21,40 +21,17 @@ extension SettingsPageStatePart01 on _SettingsPageState {
                     child: Text(
                       'Cài Đặt',
                       style: TextStyle(
-                        color: AppColors.text,
-                        fontSize: 26,
+                        color: Color(0xfff8fbff),
+                        fontSize: 24,
                         fontWeight: FontWeight.w900,
                       ),
                     ),
                   ),
-                  this._roundIconButton(
-                    icon: Icons.restart_alt_rounded,
-                    onTap: () async {
-                      await AppColors.resetColors(context: context);
-                      if (mounted) setState(() {});
-                    },
-                  ),
                 ],
               ),
-              SizedBox(height: 16),
+              SizedBox(height: 18),
               this._sectionCard(
-                title: 'Giao diện',
-                icon: Icons.dark_mode_rounded,
-                child: Column(
-                  children: [
-                    this._modeTile(
-                      'system',
-                      'Theo điện thoại',
-                      Icons.phone_iphone_rounded,
-                    ),
-                    this._modeTile('light', 'Sáng', Icons.light_mode_rounded),
-                    this._modeTile('dark', 'Tối', Icons.nightlight_round),
-                  ],
-                ),
-              ),
-              SizedBox(height: 14),
-              this._sectionCard(
-                title: 'Gemini API',
+                title: 'Gemini API Key',
                 icon: Icons.key_rounded,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -63,13 +40,14 @@ extension SettingsPageStatePart01 on _SettingsPageState {
                       controller: geminiApiKeyController,
                       obscureText: !showGeminiApiKey,
                       style: TextStyle(
-                        color: AppColors.text,
+                        color: Color(0xfff8fbff),
                         fontWeight: FontWeight.w800,
                       ),
                       decoration: InputDecoration(
                         hintText: 'Nhập API key Gemini',
+                        hintStyle: TextStyle(color: Color(0xff91a0bd)),
                         filled: true,
-                        fillColor: AppColors.panel2,
+                        fillColor: Color(0xff07090d),
                         prefixIcon: Padding(
                           padding: EdgeInsets.all(12),
                           child: geminiColorIcon(size: 20),
@@ -82,20 +60,20 @@ extension SettingsPageStatePart01 on _SettingsPageState {
                             showGeminiApiKey
                                 ? Icons.visibility_off_rounded
                                 : Icons.visibility_rounded,
-                            color: AppColors.border,
+                            color: Color(0xff91a0bd),
                           ),
                         ),
                         enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(16),
+                          borderRadius: BorderRadius.circular(8),
                           borderSide: BorderSide(
-                            color: AppColors.border.withOpacity(0.45),
+                            color: Color(0xff202634),
                           ),
                         ),
                         focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(16),
+                          borderRadius: BorderRadius.circular(8),
                           borderSide: BorderSide(
-                            color: AppColors.border,
-                            width: 1.5,
+                            color: Color(0xff9ab9ff),
+                            width: 1.2,
                           ),
                         ),
                       ),
@@ -104,7 +82,7 @@ extension SettingsPageStatePart01 on _SettingsPageState {
                     Text(
                       geminiKeyMessage,
                       style: TextStyle(
-                        color: AppColors.muted,
+                        color: Color(0xff91a0bd),
                         fontWeight: FontWeight.w800,
                       ),
                     ),
@@ -115,7 +93,7 @@ extension SettingsPageStatePart01 on _SettingsPageState {
                           child: this._actionButton(
                             text: 'Lưu key',
                             icon: Icons.save_rounded,
-                            color: AppColors.green,
+                            color: Color(0xff8ee88b),
                             onTap: this.saveGeminiApiKey,
                           ),
                         ),
@@ -124,7 +102,7 @@ extension SettingsPageStatePart01 on _SettingsPageState {
                           child: this._actionButton(
                             text: 'Lấy key',
                             icon: Icons.open_in_new_rounded,
-                            color: AppColors.yellow,
+                            color: Color(0xfff5c400),
                             onTap: this.openGeminiApiKeyPage,
                           ),
                         ),
@@ -134,13 +112,59 @@ extension SettingsPageStatePart01 on _SettingsPageState {
                 ),
               ),
               SizedBox(height: 14),
+              this._buildAccountSection(),
+              SizedBox(height: 14),
               this._sectionCard(
-                title: 'Chỉnh màu toàn bộ giao diện',
-                icon: Icons.palette_rounded,
+                title: 'Đối chiếu & Xuất bản Database',
+                icon: Icons.storage_rounded,
                 child: Column(
-                  children: colorNames.entries
-                      .map((entry) => this._colorRow(entry.key, entry.value))
-                      .toList(),
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Các tùy chọn dành cho Nhà phát triển để đồng bộ SQLite và Supabase, hoặc đóng gói dữ liệu vào assets.',
+                      style: TextStyle(
+                        color: Color(0xff91a0bd),
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    SizedBox(height: 14),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: this._actionButton(
+                            text: 'Xuất sang Assets',
+                            icon: Icons.input_rounded,
+                            color: Color(0xff8ee88b),
+                            onTap: () async {
+                              try {
+                                final res = await BackupManager.exportToProjectAssets();
+                                if (mounted) showAppToast(context, res);
+                              } catch (e) {
+                                if (mounted) showAppToast(context, 'Thất bại: $e');
+                              }
+                            },
+                          ),
+                        ),
+                        SizedBox(width: 10),
+                        Expanded(
+                          child: this._actionButton(
+                            text: 'Mở thư mục DB',
+                            icon: Icons.folder_open_rounded,
+                            color: Color(0xffa1a7fb),
+                            onTap: () async {
+                              try {
+                                await BackupManager.openDbFolder();
+                                if (mounted) showAppToast(context, 'Đang mở thư mục database...');
+                              } catch (e) {
+                                if (mounted) showAppToast(context, 'Thất bại: $e');
+                              }
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -220,23 +244,16 @@ extension SettingsPageStatePart01 on _SettingsPageState {
   }) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.circular(8),
       child: Container(
-        width: 46,
-        height: 46,
+        width: 42,
+        height: 42,
         decoration: BoxDecoration(
-          color: AppColors.panel,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppColors.border, width: 1.3),
-          boxShadow: [
-            BoxShadow(
-              color: AppColors.border.withOpacity(0.14),
-              blurRadius: 10,
-              offset: Offset(0, 5),
-            ),
-          ],
+          color: Color(0xff07090d),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Color(0xff202634), width: 1.0),
         ),
-        child: Icon(icon, color: AppColors.border),
+        child: Icon(icon, color: Color(0xfff8fbff), size: 20),
       ),
     );
   }
@@ -251,72 +268,30 @@ extension SettingsPageStatePart01 on _SettingsPageState {
       width: double.infinity,
       padding: EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppColors.panel,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: AppColors.border, width: 1.4),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.border.withOpacity(0.20),
-            blurRadius: 0,
-            offset: Offset(0, 5),
-          ),
-        ],
+        color: Color(0xff07090d),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Color(0xff202634), width: 1.0),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            title,
-            style: TextStyle(
-              color: AppColors.text,
-              fontSize: 18,
-              fontWeight: FontWeight.w900,
-            ),
+          Row(
+            children: [
+              Icon(icon, color: Color(0xff9ab9ff), size: 18),
+              SizedBox(width: 8),
+              Text(
+                title,
+                style: TextStyle(
+                  color: Color(0xfff8fbff),
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
           ),
           SizedBox(height: 14),
           child,
         ],
-      ),
-    );
-  }
-
-
-  Widget _modeTile(String value, String text, IconData icon) {
-    final active = themeMode == value;
-    return InkWell(
-      onTap: () => this.changeThemeMode(value),
-      borderRadius: BorderRadius.circular(16),
-      child: AnimatedContainer(
-        duration: Duration(milliseconds: 180),
-        margin: EdgeInsets.only(bottom: 8),
-        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-        decoration: BoxDecoration(
-          color: active ? AppColors.green : AppColors.panel2,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppColors.border, width: active ? 1.6 : 1),
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                text,
-                style: TextStyle(
-                  color: AppColors.text,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-            ),
-            if (active)
-              Text(
-                "Đang chọn",
-                style: TextStyle(
-                  color: AppColors.text,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-          ],
-        ),
       ),
     );
   }
@@ -330,35 +305,27 @@ extension SettingsPageStatePart01 on _SettingsPageState {
   }) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.circular(8),
       child: Container(
-        height: 56,
+        height: 48,
         decoration: BoxDecoration(
-          color: color,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppColors.border, width: 1.3),
-          boxShadow: [
-            BoxShadow(
-              color: AppColors.border.withOpacity(0.35),
-              blurRadius: 0,
-              offset: Offset(0, 5),
-            ),
-          ],
+          color: Colors.white.withOpacity(0.03),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Color(0xff202634), width: 1.0),
         ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Flexible(
-              child: Text(
-                text,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: AppColors.text,
-                  fontWeight: FontWeight.w900,
-                ),
+        child: Center(
+          child: Padding(
+            padding: EdgeInsets.symmetric(horizontal: 10),
+            child: Text(
+              text,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Color(0xfff8fbff),
+                fontWeight: FontWeight.w800,
+                fontSize: 13.5,
               ),
             ),
-          ],
+          ),
         ),
       ),
     );

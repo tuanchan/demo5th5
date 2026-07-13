@@ -1,5 +1,6 @@
 library flutterflashcard_main;
 
+import 'dart:async';
 import 'dart:ui';
 import 'dart:math' as math;
 import 'dart:io';
@@ -18,7 +19,11 @@ import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:sqflite/sqflite.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:path/path.dart' as p;
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'core/database/app_database.dart';
+import 'core/network/supabase_config.dart';
+import 'core/network/supabase_sync_service.dart';
 
 part 'core/theme/app_theme_and_settings_part.dart';
 part 'core/utils/app_helpers_part_01.dart';
@@ -47,6 +52,8 @@ part 'features/pronunciation/presentation/widgets/pronunciation_overlay_state_co
 part 'features/pronunciation/presentation/widgets/pronunciation_overlay_state_part_01.dart';
 part 'features/pronunciation/presentation/widgets/pronunciation_overlay_state_part_02.dart';
 part 'features/review/domain/entities/review_match_pair_models.dart';
+part 'features/review/presentation/pages/deep_learn_page_state_core.dart';
+part 'features/review/presentation/pages/deep_learn_page_state_ui.dart';
 part 'features/review/presentation/pages/review_practice_page_state_core.dart';
 part 'features/review/presentation/pages/review_practice_page_state_part_01.dart';
 part 'features/review/presentation/pages/review_practice_page_state_part_01_split_02.dart';
@@ -61,6 +68,7 @@ part 'features/review/presentation/widgets/review_matching_pairs.dart';
 part 'features/settings/presentation/pages/settings_page_state_core.dart';
 part 'features/settings/presentation/pages/settings_page_state_part_01.dart';
 part 'features/settings/presentation/pages/settings_page_state_part_02.dart';
+part 'features/settings/presentation/pages/settings_page_state_part_03_auth.dart';
 part 'features/shared/presentation/widgets/shared_widgets_part.dart';
 part 'features/statistics/domain/entities/statistics_entities_part.dart';
 part 'features/statistics/presentation/pages/statistics_page_state_core.dart';
@@ -85,6 +93,9 @@ Future<void> main() async {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
   }
+
+  // Initialize Supabase
+  await SupabaseConfig.initialize();
 
   runApp(MyApp());
 }

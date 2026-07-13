@@ -1,37 +1,53 @@
 part of flutterflashcard_main;
 
 extension FlashCardsPageStatePart05 on _FlashCardsPageState {
-  Future<void> _saveCurrentCardExamples(String generatedText) async {
+  Future<bool> _saveCurrentCardExamples(
+    String generatedText, {
+    bool showMessage = true,
+  }) async {
     final card = currentCard;
-    if (card == null) return;
+    if (card == null) return false;
 
     final examples = this._parseGeminiExamples(generatedText);
     if (examples.isEmpty) {
-      this.showFlashMessage('Gemini chưa tạo ví dụ để lưu');
-      return;
+      if (showMessage) {
+        this.showFlashMessage('Gemini chưa tạo ví dụ để lưu');
+      }
+      return false;
     }
 
     try {
       final db = await AppDatabase.instance.database;
-      await db.delete('card_examples', where: 'cardId = ?', whereArgs: [card.id]);
       final now = DateTime.now().toIso8601String();
+      await db.transaction((txn) async {
+        await txn.delete(
+          'card_examples',
+          where: 'cardId = ?',
+          whereArgs: [card.id],
+        );
+        for (final example in examples) {
+          await txn.insert('card_examples', {
+            'cardId': card.id,
+            'exampleText': example['exampleText'] ?? '',
+            'pronunciation': example['note'] ?? '',
+            'meaning': example['meaning'] ?? '',
+            'createdAt': now,
+            'updatedAt': now,
+          });
+        }
+      });
 
-      for (final example in examples) {
-        await db.insert('card_examples', {
-          'cardId': card.id,
-          'exampleText': example['exampleText'] ?? '',
-          'pronunciation': '',
-          'meaning': example['meaning'] ?? '',
-          'createdAt': now,
-          'updatedAt': now,
-        });
+      if (!mounted) return true;
+      if (showMessage) {
+        this.showFlashMessage('Đã lưu ${examples.length} ví dụ Gemini');
       }
-
-      if (!mounted) return;
-      this.showFlashMessage('Đã lưu ${examples.length} ví dụ Gemini');
+      return true;
     } catch (e) {
-      this.showFlashMessage('Không lưu được ví dụ Gemini');
+      if (showMessage) {
+        this.showFlashMessage('Không lưu được ví dụ Gemini');
+      }
       debugPrint('SAVE GEMINI EXAMPLES ERROR: $e');
+      return false;
     }
   }
 
@@ -70,15 +86,28 @@ extension FlashCardsPageStatePart05 on _FlashCardsPageState {
       final db = await AppDatabase.instance.database;
       final now = DateTime.now().toIso8601String();
 
-      await db.update(
-        'cards',
-        {'deletedAt': now, 'updatedAt': now},
-        where: 'id = ?',
-        whereArgs: [card.id],
-      );
+      if (SupabaseConfig.isLoggedIn) {
+        await db.update(
+          'cards',
+          {'deletedAt': now, 'updatedAt': now},
+          where: 'id = ?',
+          whereArgs: [card.id],
+        );
+      } else {
+        await db.delete('cards', where: 'id = ?', whereArgs: [card.id]);
+      }
 
       await this.loadCardsForCourse(selectedCourseId);
       this.showFlashMessage("Đã xóa thẻ");
+      if (SupabaseConfig.isLoggedIn) {
+        unawaited(
+          SupabaseSyncService.instance.syncPendingChanges().then((syncResult) {
+            if (syncResult.hasError) {
+              debugPrint('DELETE CARD SYNC ERROR: ${syncResult.error}');
+            }
+          }),
+        );
+      }
     } catch (e) {
       this.showFlashMessage("Xóa thẻ thất bại");
       debugPrint("DELETE CARD ERROR: $e");
@@ -87,87 +116,56 @@ extension FlashCardsPageStatePart05 on _FlashCardsPageState {
 
 
   Widget buildTopBar() {
-    String currentTitle = widget.courseTitle;
-    if (selectedCourseId != null) {
-      final currentCourse = courseList.where((c) => c.id == selectedCourseId);
-      if (currentCourse.isNotEmpty) {
-        currentTitle = currentCourse.first.title;
-      }
-    }
-
-    return Padding(
-      padding: EdgeInsets.fromLTRB(14, 12, 14, 8),
+    return Container(
+      height: 44,
+      padding: EdgeInsets.symmetric(horizontal: 20),
+      decoration: BoxDecoration(
+        color: Color(0xff0b0c0f),
+        border: Border(
+          bottom: BorderSide(color: Color(0xff1f2026), width: 1),
+        ),
+      ),
       child: Row(
         children: [
-          SmallIcon3DButton(
-            icon: Icons.arrow_back,
-            color: AppColors.panel,
-            onTap: () => Navigator.pop(context, true),
-          ),
-          SizedBox(width: 12),
-          Expanded(
-            child: GestureDetector(
-              onTap: () {
-                setState(() {
-                  courseDropdownOpen = !courseDropdownOpen;
-                });
-              },
-              child: Container(
-                height: 50,
-                padding: EdgeInsets.symmetric(horizontal: 14),
-                decoration: BoxDecoration(
-                  color: AppColors.panel,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: AppColors.border, width: 1.4),
-                  boxShadow: [
-                    BoxShadow(
-                      color: AppColors.border,
-                      offset: Offset(0, 4),
-                      blurRadius: 0,
-                    ),
-                  ],
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        currentTitle,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: AppColors.text,
-                          fontWeight: FontWeight.w900,
-                          fontSize: 15,
-                        ),
-                      ),
-                    ),
-                    SizedBox(width: 6),
-                    AnimatedRotation(
-                      turns: courseDropdownOpen ? -0.5 : 0,
-                      duration: Duration(milliseconds: 200),
-                      curve: Curves.easeInOut,
-                      child: SvgPicture.asset(
-                        'assets/icon/chevron-down-solid-full.svg',
-                        width: 12,
-                        height: 12,
-                        colorFilter: ColorFilter.mode(
-                          AppColors.text,
-                          BlendMode.srcIn,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(
+              foregroundColor: Color(0xfff8fafc),
+              padding: EdgeInsets.symmetric(horizontal: 6),
+              minimumSize: Size(0, 32),
+              textStyle: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
             ),
+            child: Text('← Trang chủ'),
           ),
-          SizedBox(width: 12),
-          SmallIcon3DButton(
-            icon: Icons.settings,
-            color: AppColors.panel,
-            onTap: this.openSettingsSheet,
+          Spacer(),
+          TextButton(
+            onPressed: () {
+              setState(() => flashcardTableVisible = false);
+            },
+            style: TextButton.styleFrom(
+              foregroundColor: flashcardTableVisible
+                  ? Color(0xff8f96aa)
+                  : Color(0xffffffff),
+              padding: EdgeInsets.symmetric(horizontal: 8),
+              textStyle: TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
+            ),
+            child: Text('Học thẻ'),
+          ),
+          TextButton(
+            onPressed: () {
+              setState(() {
+                flashcardTableVisible = true;
+                selectedVocabRow = currentPos;
+              });
+            },
+            style: TextButton.styleFrom(
+              foregroundColor: flashcardTableVisible
+                  ? Color(0xffffffff)
+                  : Color(0xff8f96aa),
+              padding: EdgeInsets.symmetric(horizontal: 8),
+              textStyle: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+            ),
+            child: Text('Bảng'),
           ),
         ],
       ),
@@ -428,33 +426,29 @@ extension FlashCardsPageStatePart05 on _FlashCardsPageState {
                   if (showProgressDragState)
                     IgnorePointer(
                       child: Center(
-                        child: Container(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: 18,
-                            vertical: 11,
-                          ),
-                          decoration: BoxDecoration(
-                            color: progressDragColor.withOpacity(0.88),
-                            borderRadius: BorderRadius.circular(999),
-                            border: Border.all(
-                              color: Colors.white.withOpacity(0.78),
-                              width: 1.2,
-                            ),
-                            boxShadow: [
-                              BoxShadow(
+                        child: Text(
+                          progressDragText,
+                          style: TextStyle(
+                            color: progressDragKnown
+                                ? Color(0xff86efac)
+                                : Color(0xffff7a95),
+                            fontSize: 25,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 0.4,
+                            shadows: [
+                              Shadow(
+                                color: progressDragColor.withOpacity(0.95),
+                                blurRadius: 7,
+                              ),
+                              Shadow(
+                                color: progressDragColor.withOpacity(0.68),
+                                blurRadius: 18,
+                              ),
+                              Shadow(
                                 color: progressDragColor.withOpacity(0.42),
-                                blurRadius: 22,
-                                spreadRadius: 2,
+                                blurRadius: 34,
                               ),
                             ],
-                          ),
-                          child: Text(
-                            progressDragText,
-                            style: TextStyle(
-                              color: AppColors.readableOn(progressDragColor),
-                              fontSize: 17,
-                              fontWeight: FontWeight.w900,
-                            ),
                           ),
                         ),
                       ),

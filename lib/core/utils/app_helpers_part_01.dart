@@ -456,6 +456,7 @@ class ReviewScheduler {
 }
 
 OverlayEntry? _activeAppToastEntry;
+VoidCallback? _removeActiveAppToast;
 
 
 void showAppToast(
@@ -467,25 +468,33 @@ void showAppToast(
   final overlay = Overlay.maybeOf(context, rootOverlay: true);
   if (overlay == null) return;
 
-  _activeAppToastEntry?.remove();
+  _removeActiveAppToast?.call();
   _activeAppToastEntry = null;
+  _removeActiveAppToast = null;
 
   late OverlayEntry entry;
+  var removed = false;
+  void removeEntry() {
+    if (removed) return;
+    removed = true;
+    if (_activeAppToastEntry == entry) {
+      _activeAppToastEntry = null;
+      _removeActiveAppToast = null;
+    }
+    entry.remove();
+  }
+
   entry = OverlayEntry(
     builder: (_) => _SlideToast(
       text: text,
       icon: icon,
       duration: duration,
-      onDismissed: () {
-        if (_activeAppToastEntry == entry) {
-          _activeAppToastEntry = null;
-        }
-        entry.remove();
-      },
+      onDismissed: removeEntry,
     ),
   );
 
   _activeAppToastEntry = entry;
+  _removeActiveAppToast = removeEntry;
   overlay.insert(entry);
 }
 

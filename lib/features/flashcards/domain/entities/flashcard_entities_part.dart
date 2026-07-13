@@ -102,6 +102,22 @@ class ReviewPracticePage extends StatefulWidget {
   State<ReviewPracticePage> createState() => _ReviewPracticePageState();
 }
 
+class DeepLearnPage extends StatefulWidget {
+  final int courseId;
+  final String courseTitle;
+  final String courseLanguageCode;
+
+  const DeepLearnPage({
+    super.key,
+    required this.courseId,
+    required this.courseTitle,
+    required this.courseLanguageCode,
+  });
+
+  @override
+  State<DeepLearnPage> createState() => _DeepLearnPageState();
+}
+
 
 class _GeneratedSentenceQuestion {
   final int cardId;

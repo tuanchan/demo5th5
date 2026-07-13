@@ -1,3 +1,5 @@
+import 'dart:io';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 
@@ -17,10 +19,30 @@ class AppDatabase {
 
   Future<Database> _initDatabase() async {
     final dbPath = await getDatabasesPath();
-
     final path = join(dbPath, 'list_card.db');
 
     print("DATABASE PATH: $path");
+
+    // Check if database file already exists locally
+    final exists = await databaseExists(path);
+    if (!exists) {
+      try {
+        print("Copying pre-populated database from assets/list_card.db...");
+        final data = await rootBundle.load('assets/list_card.db');
+        final bytes = data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
+
+        // Ensure the directory exists
+        final parentDir = Directory(dirname(path));
+        if (!await parentDir.exists()) {
+          await parentDir.create(recursive: true);
+        }
+
+        await File(path).writeAsBytes(bytes, flush: true);
+        print("Database loaded from assets successfully.");
+      } catch (e) {
+        print("No pre-seeded database found in assets, or failed to copy: $e");
+      }
+    }
 
     return await openDatabase(
       path,
@@ -50,7 +72,7 @@ class AppDatabase {
     await db.execute('''
       CREATE TABLE topics (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
         createdAt TEXT NOT NULL,
         updatedAt TEXT,
         deletedAt TEXT
@@ -253,6 +275,7 @@ class AppDatabase {
     await _createTopicsTable(db);
     await _addTopicIdToCourses(db);
     await _backfillCourseTopics(db);
+    await _repairLegacyTopicAssignments(db);
     await _normalizeBuiltInCourseTopics(db);
     await _createTopicIndexes(db);
   }
@@ -261,7 +284,7 @@ class AppDatabase {
     await db.execute('''
       CREATE TABLE IF NOT EXISTS topics (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
         createdAt TEXT NOT NULL,
         updatedAt TEXT,
         deletedAt TEXT
@@ -278,17 +301,50 @@ class AppDatabase {
   }
 
   Future<int> _ensureTopic(Database db, String name, String now) async {
+    return ensureActiveTopicByName(
+      db,
+      name: name,
+      now: now,
+    );
+  }
+
+  /// Returns the active topic with [name], restoring its tombstone when the
+  /// same topic was deleted earlier. Older databases have a column-level
+  /// UNIQUE constraint on topics.name, so inserting a replacement row would
+  /// otherwise fail with SQLITE_CONSTRAINT_UNIQUE (2067).
+  Future<int> ensureActiveTopicByName(
+    DatabaseExecutor executor, {
+    required String name,
+    required String now,
+  }) async {
     final normalized = name.trim().isEmpty ? 'Chủ đề mới' : name.trim();
-    final rows = await db.query(
+    final rows = await executor.query(
       'topics',
-      columns: ['id'],
-      where: 'lower(trim(name)) = ? AND deletedAt IS NULL',
+      columns: ['id', 'deletedAt'],
+      where: 'lower(trim(name)) = ?',
       whereArgs: [normalized.toLowerCase()],
+      orderBy: 'CASE WHEN deletedAt IS NULL THEN 0 ELSE 1 END, id ASC',
       limit: 1,
     );
-    if (rows.isNotEmpty) return rows.first['id'] as int;
+    if (rows.isNotEmpty) {
+      final row = rows.first;
+      final topicId = row['id'] as int;
+      if (row['deletedAt'] != null) {
+        await executor.update(
+          'topics',
+          {
+            'name': normalized,
+            'updatedAt': now,
+            'deletedAt': null,
+          },
+          where: 'id = ?',
+          whereArgs: [topicId],
+        );
+      }
+      return topicId;
+    }
 
-    return await db.insert('topics', {
+    return executor.insert('topics', {
       'name': normalized,
       'createdAt': now,
       'updatedAt': now,
@@ -334,18 +390,99 @@ class AppDatabase {
       db: db,
       topicName: 'TOEIC',
       now: now,
-      where:
-          "deletedAt IS NULL AND (description LIKE ? OR (languageCode = ? AND lower(title) LIKE ?))",
-      whereArgs: ['%assets/TOEIC/%', 'en-US', 'day%'],
+      where: "deletedAt IS NULL AND description LIKE ?",
+      whereArgs: ['%assets/TOEIC/%'],
     );
     await _normalizeBuiltInTopic(
       db: db,
       topicName: 'Tiếng Trung B1',
       now: now,
-      where:
-          "deletedAt IS NULL AND (description LIKE ? OR title LIKE ? OR title LIKE ?)",
-      whereArgs: ['%assets/TOCFL/%', '%_TOCFL%', '% TOCFL%'],
+      where: "deletedAt IS NULL AND description LIKE ?",
+      whereArgs: ['%assets/TOCFL/%'],
     );
+  }
+
+  /// Older builds treated every English course whose title started with
+  /// "day" as bundled TOEIC data. Restore a recently deleted user topic when
+  /// its timestamps clearly match a course moved by that legacy rule.
+  Future<void> _repairLegacyTopicAssignments(Database db) async {
+    final courses = await db.rawQuery('''
+      SELECT c.id, c.title, c.languageCode, c.createdAt,
+             t.id AS currentTopicId, lower(trim(t.name)) AS currentTopicName
+      FROM courses c
+      INNER JOIN topics t ON t.id = c.topicId
+      WHERE c.deletedAt IS NULL
+        AND COALESCE(c.description, '') NOT LIKE '%assets/TOEIC/%'
+        AND COALESCE(c.description, '') NOT LIKE '%assets/TOCFL/%'
+        AND (
+          (lower(trim(t.name)) = 'toeic'
+            AND c.languageCode = 'en-US'
+            AND lower(c.title) LIKE 'day%')
+          OR
+          (lower(trim(t.name)) = 'tiếng trung b1'
+            AND (c.title LIKE '%_TOCFL%' OR c.title LIKE '% TOCFL%'))
+        )
+    ''');
+
+    for (final course in courses) {
+      final courseCreated = _parseDatabaseWallClock(course['createdAt']);
+      if (courseCreated == null) continue;
+
+      final deletedTopics = await db.query(
+        'topics',
+        columns: ['id', 'name', 'createdAt', 'deletedAt'],
+        where: '''
+          deletedAt IS NOT NULL
+          AND id != ?
+          AND lower(trim(name)) NOT IN (?, ?, ?)
+        ''',
+        whereArgs: [
+          course['currentTopicId'],
+          'chủ đề khác',
+          'toeic',
+          'tiếng trung b1',
+        ],
+      );
+
+      Map<String, Object?>? bestMatch;
+      Duration? bestDistance;
+      for (final topic in deletedTopics) {
+        final topicCreated = _parseDatabaseWallClock(topic['createdAt']);
+        final topicDeleted = _parseDatabaseWallClock(topic['deletedAt']);
+        if (topicCreated == null || topicDeleted == null) continue;
+        if (topicDeleted.isBefore(courseCreated)) continue;
+
+        final distance = topicCreated.difference(courseCreated).abs();
+        if (distance > const Duration(minutes: 2)) continue;
+        if (bestDistance == null || distance < bestDistance) {
+          bestMatch = topic;
+          bestDistance = distance;
+        }
+      }
+      if (bestMatch == null) continue;
+
+      final now = DateTime.now().toIso8601String();
+      final restoredTopicId = await ensureActiveTopicByName(
+        db,
+        name: bestMatch['name']?.toString() ?? '',
+        now: now,
+      );
+      await db.update(
+        'courses',
+        {'topicId': restoredTopicId, 'updatedAt': now},
+        where: 'id = ? AND deletedAt IS NULL',
+        whereArgs: [course['id']],
+      );
+    }
+  }
+
+  DateTime? _parseDatabaseWallClock(Object? value) {
+    final text = value?.toString().trim() ?? '';
+    if (text.isEmpty) return null;
+    // Old local rows have no timezone while pulled Supabase rows use UTC.
+    // Their wall-clock portion came from the same original local timestamp.
+    final wallClock = text.length >= 19 ? text.substring(0, 19) : text;
+    return DateTime.tryParse(wallClock);
   }
 
   Future<void> _normalizeBuiltInTopic({
@@ -377,9 +514,59 @@ class AppDatabase {
     await db.execute(
       'CREATE INDEX IF NOT EXISTS idx_courses_topicId ON courses(topicId)',
     );
+    await _deduplicateActiveTopics(db);
     await db.execute(
       'CREATE UNIQUE INDEX IF NOT EXISTS idx_topics_name_unique ON topics(lower(trim(name))) WHERE deletedAt IS NULL',
     );
+  }
+
+  /// Repairs legacy/cloud data containing active topic names that differ only
+  /// by case or surrounding whitespace. Courses are moved to the oldest topic
+  /// and the duplicate rows become syncable tombstones.
+  Future<void> _deduplicateActiveTopics(Database db) async {
+    final duplicateGroups = await db.rawQuery('''
+      SELECT lower(trim(name)) AS normalizedName
+      FROM topics
+      WHERE deletedAt IS NULL
+      GROUP BY lower(trim(name))
+      HAVING COUNT(*) > 1
+    ''');
+    if (duplicateGroups.isEmpty) return;
+
+    final now = DateTime.now().toIso8601String();
+    for (final group in duplicateGroups) {
+      final normalizedName = group['normalizedName']?.toString();
+      if (normalizedName == null) continue;
+
+      final rows = await db.query(
+        'topics',
+        columns: ['id'],
+        where: 'lower(trim(name)) = ? AND deletedAt IS NULL',
+        whereArgs: [normalizedName],
+        orderBy: 'id ASC',
+      );
+      final ids = rows
+          .map((row) => row['id'] as int?)
+          .whereType<int>()
+          .toList(growable: false);
+      if (ids.length < 2) continue;
+
+      final survivorId = ids.first;
+      final duplicateIds = ids.skip(1).toList(growable: false);
+      final placeholders = List.filled(duplicateIds.length, '?').join(',');
+      await db.update(
+        'courses',
+        {'topicId': survivorId, 'updatedAt': now},
+        where: 'topicId IN ($placeholders)',
+        whereArgs: duplicateIds,
+      );
+      await db.update(
+        'topics',
+        {'deletedAt': now, 'updatedAt': now},
+        where: 'id IN ($placeholders)',
+        whereArgs: duplicateIds,
+      );
+    }
   }
 
   Future<void> _createReviewSentenceQuestionsTable(Database db) async {

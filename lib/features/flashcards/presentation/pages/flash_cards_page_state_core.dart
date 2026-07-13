@@ -17,6 +17,9 @@ class _FlashCardsPageState extends State<FlashCardsPage> {
   bool autoPlayAudio = false;
   bool isFlipped = false;
   bool showCompletion = false;
+  bool flashcardTableVisible = false;
+  bool tableDefinitionVisible = true;
+  int selectedVocabRow = -1;
 
   double cardDragDx = 0;
   double cardDragDy = 0;
@@ -66,21 +69,45 @@ class _FlashCardsPageState extends State<FlashCardsPage> {
 
       final example = exampleMatch.group(1)?.trim() ?? '';
       var meaning = '';
-      if (i + 1 < lines.length) {
+      var note = '';
+      for (var detailIndex = i + 1;
+          detailIndex < lines.length;
+          detailIndex++) {
+        final detail = lines[detailIndex];
+        if (RegExp(r'^Ví dụ\s*\d*\s*:', caseSensitive: false)
+            .hasMatch(detail)) {
+          break;
+        }
         final meaningMatch = RegExp(
           r'^Dịch\s*\d*\s*:\s*(.+)$',
           caseSensitive: false,
-        ).firstMatch(lines[i + 1]);
-        meaning = meaningMatch?.group(1)?.trim() ?? '';
+        ).firstMatch(detail);
+        final noteMatch = RegExp(
+          r'^(?:Ghi chú|Lưu ý)\s*\d*\s*:\s*(.+)$',
+          caseSensitive: false,
+        ).firstMatch(detail);
+        if (meaningMatch != null) {
+          meaning = meaningMatch.group(1)?.trim() ?? '';
+        } else if (noteMatch != null) {
+          note = noteMatch.group(1)?.trim() ?? '';
+        }
       }
 
       if (example.isNotEmpty) {
-        examples.add({'exampleText': example, 'meaning': meaning});
+        examples.add({
+          'exampleText': example,
+          'meaning': meaning,
+          'note': note,
+        });
       }
     }
 
     if (examples.isEmpty && text.trim().isNotEmpty) {
-      examples.add({'exampleText': text.trim(), 'meaning': ''});
+      examples.add({
+        'exampleText': text.trim(),
+        'meaning': '',
+        'note': '',
+      });
     }
 
     return examples;

@@ -92,9 +92,13 @@ extension HomePageStatePart02 on _HomePageState {
 
 
   Future<void> openCreateCourse() async {
+    final initialTopicId =
+        _activeHomeTopic?.id ?? selectedHomeCourse?.topicId;
     final result = await Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => CreateCoursePage()),
+      MaterialPageRoute(
+        builder: (_) => CreateCoursePage(initialTopicId: initialTopicId),
+      ),
     );
 
     if (result == true) {
@@ -152,24 +156,21 @@ extension HomePageStatePart02 on _HomePageState {
     final savedEssay = await AppSettingsStore.getBool('review.essay') ?? false;
     final savedListening = await AppSettingsStore.getBool('review.listening') ?? false;
     final savedMatchingPairs = await AppSettingsStore.getBool('review.matchingPairs') ?? false;
-    final savedSentenceMode = await AppSettingsStore.getBool('review.sentenceMode') ?? false;
     final savedAnswerByDefinition = await AppSettingsStore.getBool('review.answerByDefinition') ?? true;
     final savedQuestionLimit = await AppSettingsStore.getInt('review.questionLimit') ?? 20;
 
     if (!mounted) return;
 
-    await showModalBottomSheet(
+    await showDialog<void>(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      barrierColor: Colors.black.withOpacity(0.35),
+      barrierColor: Colors.black.withOpacity(0.55),
       builder: (sheetContext) {
         int localLimit = savedQuestionLimit.clamp(1, targetCourse.cardCount).toInt();
         bool localMc = savedMultipleChoice;
         bool localEssay = savedEssay;
         bool localListening = savedListening;
         bool localMatchingPairs = savedMatchingPairs;
-        bool localSentenceMode = savedSentenceMode;
+        bool localSentenceMode = false;
         bool localAnswerByDefinition = savedAnswerByDefinition;
 
         return StatefulBuilder(
@@ -235,77 +236,94 @@ extension HomePageStatePart02 on _HomePageState {
               });
             }
 
-            return Padding(
-              padding: EdgeInsets.only(
-                left: 16,
-                right: 16,
-                bottom: MediaQuery.of(context).viewInsets.bottom + 16,
-              ),
-              child: Center(
-                child: Container(
-                  constraints: BoxConstraints(maxWidth: 560),
-                  padding: EdgeInsets.fromLTRB(18, 18, 18, 16),
-                  decoration: BoxDecoration(
-                    color: AppColors.popupFill,
-                    borderRadius: BorderRadius.circular(26),
-                    border: Border.all(color: AppColors.border, width: 1.4),
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppColors.border,
-                        offset: Offset(0, 7),
-                        blurRadius: 0,
-                      ),
-                      BoxShadow(
-                        color: Color(0x26000000),
-                        offset: Offset(0, 18),
-                        blurRadius: 28,
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
+            final compactDialog = MediaQuery.sizeOf(context).width < 600;
+            return Material(
+              type: MaterialType.transparency,
+              child: Padding(
+                padding: EdgeInsets.only(
+                  left: compactDialog ? 12 : 18,
+                  right: compactDialog ? 12 : 18,
+                  top: compactDialog ? 12 : 18,
+                  bottom:
+                      MediaQuery.of(context).viewInsets.bottom +
+                      (compactDialog ? 12 : 18),
+                ),
+                child: Center(
+                  child: Container(
+                    constraints: BoxConstraints(
+                      maxWidth: 760,
+                      maxHeight: MediaQuery.sizeOf(context).height * 0.9,
+                    ),
+                    padding: EdgeInsets.all(compactDialog ? 16 : 22),
+                    decoration: BoxDecoration(
+                      color: Color(0xff121828),
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(color: Color(0xff2a334a)),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Color(0x59000000),
+                          offset: Offset(0, 18),
+                          blurRadius: 46,
+                        ),
+                      ],
+                    ),
+                    child: SingleChildScrollView(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  targetCourse.title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    color: AppColors.muted,
-                                    fontWeight: FontWeight.w900,
-                                    fontSize: 13,
-                                  ),
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      targetCourse.title,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        color: Color(0xffa8b6d6),
+                                        fontWeight: FontWeight.w900,
+                                        fontSize: compactDialog ? 12 : 13,
+                                      ),
+                                    ),
+                                    SizedBox(height: 3),
+                                    Text(
+                                      'Thiết lập bài kiểm tra',
+                                      maxLines: compactDialog ? 2 : 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        color: Color(0xffeaf1ff),
+                                        fontSize: compactDialog ? 21 : 28,
+                                        height: 1.15,
+                                        fontWeight: FontWeight.w900,
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                                SizedBox(height: 3),
-                                Text(
-                                  'Thiết lập ôn tập',
-                                  style: TextStyle(
-                                    color: AppColors.text,
-                                    fontSize: 24,
-                                    fontWeight: FontWeight.w900,
-                                  ),
+                              ),
+                              SizedBox(width: 8),
+                              IconButton(
+                                tooltip: 'Đóng',
+                                onPressed: () => Navigator.pop(sheetContext),
+                                padding: EdgeInsets.zero,
+                                constraints: BoxConstraints.tightFor(
+                                  width: 40,
+                                  height: 40,
                                 ),
-                              ],
-                            ),
+                                icon: Icon(
+                                  Icons.close_rounded,
+                                  color: Color(0xffa8b6d6),
+                                  size: 24,
+                                ),
+                              ),
+                            ],
                           ),
-                          IconButton(
-                            onPressed: () => Navigator.pop(sheetContext),
-                            icon: Icon(
-                              Icons.close_rounded,
-                              color: AppColors.onIconButton,
-                            ),
-                          ),
-                        ],
-                      ),
-                      SizedBox(height: 16),
+                      SizedBox(height: 14),
                       this._setupRow(
-                        label: 'Câu hỏi tối đa ${targetCourse.cardCount}',
+                        label: 'Câu hỏi (tối đa ${targetCourse.cardCount})',
                         child: this._numberStepper(
                           value: localLimit,
                           min: 1,
@@ -318,26 +336,26 @@ extension HomePageStatePart02 on _HomePageState {
                       this._setupRow(
                         label: 'Trả lời bằng',
                         child: Container(
-                          height: 48,
-                          padding: EdgeInsets.symmetric(horizontal: 14),
+                          height: 46,
+                          padding: EdgeInsets.symmetric(horizontal: 12),
                           decoration: BoxDecoration(
-                            color: AppColors.inputFill,
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(
-                              color: AppColors.border,
-                              width: 1.3,
-                            ),
+                            color: Color(0x0fffffff),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: Color(0xff2a334a)),
                           ),
                           child: DropdownButtonHideUnderline(
                             child: DropdownButton<bool>(
                               value: localAnswerByDefinition,
                               isExpanded: true,
-                              dropdownColor: AppColors.dropdownFill,
+                              dropdownColor: Color(0xff121828),
                               style: TextStyle(
-                                color: AppColors.text,
+                                color: Color(0xffeaf1ff),
                                 fontWeight: FontWeight.w800,
                               ),
-                              icon: Icon(Icons.keyboard_arrow_down_rounded, color: AppColors.onIconButton),
+                              icon: Icon(
+                                Icons.keyboard_arrow_down_rounded,
+                                color: Color(0xffa8b6d6),
+                              ),
                               items: [
                                 DropdownMenuItem(
                                   value: true,
@@ -359,9 +377,58 @@ extension HomePageStatePart02 on _HomePageState {
                         ),
                       ),
                       SizedBox(height: 14),
-                      Divider(color: AppColors.border.withOpacity(0.18)),
+                      Divider(color: Color(0xff2a334a)),
+                      SizedBox(height: 8),
+                      GestureDetector(
+                        onTap: () {
+                          Navigator.pop(sheetContext);
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => DeepLearnPage(
+                                courseId: targetCourse.id,
+                                courseTitle: targetCourse.title,
+                                courseLanguageCode: targetCourse.languageCode,
+                              ),
+                            ),
+                          );
+                        },
+                        child: AnimatedContainer(
+                          duration: Duration(milliseconds: 160),
+                          width: double.infinity,
+                          height: 52,
+                          decoration: BoxDecoration(
+                            color: Color(0xff303a59),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              SvgPicture.asset(
+                                'assets/icon/brain-solid-full.svg',
+                                width: 24,
+                                height: 24,
+                                colorFilter: ColorFilter.mode(
+                                  Colors.white,
+                                  BlendMode.srcIn,
+                                ),
+                              ),
+                              SizedBox(width: 10),
+                              Text(
+                                'Học Chuyên Sâu',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      SizedBox(height: 8),
                       this._switchTile(
-                        text: 'Trắc nghiệm 4 đáp án',
+                        text: 'Trắc nghiệm (4 đáp án)',
                         value: localMc,
                         onChanged: (v) => setMode(mc: v),
                       ),
@@ -376,22 +443,17 @@ extension HomePageStatePart02 on _HomePageState {
                         onChanged: (v) => setMode(listening: v),
                       ),
                       this._switchTile(
-                        text: 'Kiểm tra cặp thẻ',
+                        text: 'Ghép thẻ',
                         value: localMatchingPairs,
                         onChanged: (v) => setMode(matching: v),
                       ),
-                      this._switchTile(
-                        text: 'Kiểm tra tổng hợp',
-                        value: localSentenceMode,
-                        onChanged: (v) => setMode(sentence: v),
-                      ),
-                      SizedBox(height: 14),
+                      SizedBox(height: 18),
                       Align(
                         alignment: Alignment.centerRight,
                         child: this._solidButton(
-                          text: 'Bắt đầu ôn tập',
+                          text: 'Bắt đầu làm kiểm tra',
                           icon: Icons.play_arrow_rounded,
-                          color: AppColors.green,
+                          color: Color(0xff3e5cff),
                           onTap: () async {
                             await Future.wait([
                               AppSettingsStore.setBool('review.multipleChoice', localMc),
@@ -418,18 +480,26 @@ extension HomePageStatePart02 on _HomePageState {
                             Navigator.push(
                               context,
                               MaterialPageRoute(
-                                builder: (_) => ReviewPracticePage(
-                                  courseId: targetCourse.id,
-                                  courseTitle: targetCourse.title,
-                                  courseLanguageCode: targetCourse.languageCode,
-                                  presetMode: presetMode,
-                                ),
+                                builder: (_) => localSentenceMode
+                                    ? DeepLearnPage(
+                                        courseId: targetCourse.id,
+                                        courseTitle: targetCourse.title,
+                                        courseLanguageCode: targetCourse.languageCode,
+                                      )
+                                    : ReviewPracticePage(
+                                        courseId: targetCourse.id,
+                                        courseTitle: targetCourse.title,
+                                        courseLanguageCode: targetCourse.languageCode,
+                                        presetMode: presetMode,
+                                      ),
                               ),
                             );
                           },
                         ),
                       ),
-                    ],
+                        ],
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -450,9 +520,9 @@ extension HomePageStatePart02 on _HomePageState {
         final labelWidget = Text(
           label,
           style: TextStyle(
-            color: AppColors.text,
+            color: Color(0xffa8b6d6),
             fontWeight: FontWeight.w900,
-            fontSize: 15,
+            fontSize: 14,
           ),
         );
 
