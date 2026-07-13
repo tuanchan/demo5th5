@@ -137,7 +137,7 @@ extension HomePageStatePart01 on _HomePageState {
       children: [
         ClipRect(
           child: Image.asset(
-            'codebaseUIUX/Webviews/icon/icon.png',
+            'assets/icon/app_icon.png',
             width: 76,
             height: 76,
             fit: BoxFit.cover,
@@ -982,7 +982,7 @@ extension HomePageStatePart01 on _HomePageState {
             color: selected ? Color(0xff2563eb) : _homeBorder,
           ),
           image: DecorationImage(
-            image: AssetImage('codebaseUIUX/Webviews/icon/icon.png'),
+            image: AssetImage('assets/icon/app_icon.png'),
             fit: BoxFit.cover,
             colorFilter: ColorFilter.mode(
               Colors.black.withOpacity(0.52),

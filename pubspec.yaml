@@ -79,7 +79,7 @@ flutter:
     - assets/icon/brain-solid-full.svg
     - assets/icon/google-icon-logo-svgrepo-com.svg
     - assets/icon/facebook-svgrepo-com.svg
-    - codebaseUIUX/Webviews/icon/icon.png
+    - assets/icon/app_icon.png
     - assets/TOEIC/
     - assets/TOCFL/
     - assets/audios/
