@@ -16,7 +16,7 @@ extension ReviewPracticePageStatePart06 on _ReviewPracticePageState {
           SizedBox(
             width: sideWidth,
             child: TextButton.icon(
-              onPressed: () => Navigator.maybePop(context),
+              onPressed: () => Navigator.pop(context, {'courseId': widget.courseId}),
               icon: Icon(Icons.arrow_back, size: 17),
               label: compact ? SizedBox.shrink() : Text('Trang chủ'),
               style: TextButton.styleFrom(

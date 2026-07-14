@@ -22,7 +22,7 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
               bool? mc,
               bool? essay,
               bool? listening,
-              bool? matching,
+              bool? matchingPairs,
               bool? sentence,
             }) {
               setSheetState(() {
@@ -53,7 +53,7 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
                   return;
                 }
 
-                if (matching == true) {
+                if (matchingPairs == true) {
                   localMatchingPairs = true;
                   localMc = false;
                   localEssay = false;
@@ -128,7 +128,7 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
                                 ),
                                 SizedBox(height: 3),
                                 Text(
-                                  'Thiết lập ôn tập',
+                                  'Thiết lập kiểm tra',
                                   style: TextStyle(
                                     color: Colors.white,
                                     fontSize: 24,
@@ -196,6 +196,16 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
                       ),
                       SizedBox(height: 14),
                       Divider(color: AppColors.border.withOpacity(0.18)),
+                      SizedBox(height: 6),
+                      Text(
+                        'Phương thức có cập nhật lịch SRS',
+                        style: TextStyle(
+                          color: Color(0xffa8b6d6),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w400,
+                        ),
+                      ),
+                      SizedBox(height: 6),
                       this._switchTile(
                         text: 'Trắc nghiệm 4 đáp án',
                         value: localMc,
@@ -214,7 +224,7 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
                       this._switchTile(
                         text: 'Kiểm tra cặp thẻ',
                         value: localMatchingPairs,
-                        onChanged: (v) => setMode(matching: v),
+                        onChanged: (v) => setMode(matchingPairs: v),
                       ),
                       this._switchTile(
                         text: 'Kiểm tra tổng hợp',
@@ -225,32 +235,17 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
                       Align(
                         alignment: Alignment.centerRight,
                         child: this._solidButton(
-                          text: 'Bắt đầu ôn tập',
+                          text: 'Bắt đầu kiểm tra',
                           icon: Icons.play_arrow_rounded,
                           color: Color(0xff4257ff),
                           onTap: () {
                             setState(() {
                               _questionLimit = localLimit;
                               _multipleChoice = localMc;
-                              _essay = !localMc && localEssay;
-                              _listening =
-                                  !localMc &&
-                                  !localEssay &&
-                                  !localMatchingPairs &&
-                                  !localSentenceMode &&
-                                  localListening;
-                              _matchingPairs =
-                                  !localMc &&
-                                  !localEssay &&
-                                  !localListening &&
-                                  !localSentenceMode &&
-                                  localMatchingPairs;
-                              _sentenceMode =
-                                  !localMc &&
-                                  !localEssay &&
-                                  !localListening &&
-                                  !localMatchingPairs &&
-                                  localSentenceMode;
+                              _essay = localEssay;
+                              _listening = localListening;
+                              _matchingPairs = localMatchingPairs;
+                              _sentenceMode = localSentenceMode;
                               if (!_multipleChoice &&
                                   !_essay &&
                                   !_listening &&

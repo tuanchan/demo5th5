@@ -212,8 +212,11 @@ extension HomePageStatePart02Split02 on _HomePageState {
       ),
     );
 
-    if (result == true) {
+    if (result != null) {
       await this.loadCourses();
+      if (result is Map && result['courseId'] != null) {
+        this._navigateHomeToCourse(result['courseId'] as int);
+      }
     }
   }
 

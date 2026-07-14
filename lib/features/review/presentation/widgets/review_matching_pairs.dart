@@ -203,6 +203,7 @@ class _MatchPairTileWidgetState extends State<_MatchPairTileWidget>
   Widget build(BuildContext context) {
     final tile = widget.tile;
     final active = widget.selected || widget.wrong;
+    final canWrapAtSpaces = RegExp(r'\s').hasMatch(tile.text.trim());
     final fontSize = tile.isTerm
         ? (tile.text.length > 14
               ? 17.0
@@ -279,18 +280,67 @@ class _MatchPairTileWidgetState extends State<_MatchPairTileWidget>
                         ),
                         SizedBox(height: 3),
                       ],
-                      Text(
-                        tile.text,
-                        maxLines: 5,
-                        overflow: TextOverflow.ellipsis,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w400,
-                          fontSize: fontSize,
-                          height: 1.2,
+                      if (canWrapAtSpaces)
+                        Text(
+                          tile.text,
+                          maxLines: 5,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w400,
+                            fontSize: fontSize,
+                            height: 1.2,
+                          ),
+                        )
+                      else
+                        LayoutBuilder(
+                          builder: (context, constraints) {
+                            final singleLineText = tile.text
+                                .replaceAll(
+                                  RegExp(r'[\u200B\u200C\u200D\u2060\uFEFF]'),
+                                  '',
+                                )
+                                .trim();
+                            final baseStyle = TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w400,
+                              fontSize: fontSize,
+                              height: 1.2,
+                            );
+                            final painter = TextPainter(
+                              text: TextSpan(
+                                text: singleLineText,
+                                style: baseStyle,
+                              ),
+                              maxLines: 1,
+                              textDirection: Directionality.of(context),
+                              textScaler: MediaQuery.textScalerOf(context),
+                            )..layout();
+                            final availableWidth = constraints.maxWidth.isFinite
+                                ? constraints.maxWidth
+                                : 100.0;
+                            final fittedFontSize = painter.width > availableWidth
+                                ? (fontSize * availableWidth / painter.width)
+                                    .clamp(9.0, fontSize)
+                                    .toDouble()
+                                : fontSize;
+
+                            return SizedBox(
+                              width: availableWidth,
+                              child: Text(
+                                singleLineText,
+                                maxLines: 1,
+                                softWrap: false,
+                                overflow: TextOverflow.clip,
+                                textAlign: TextAlign.center,
+                                style: baseStyle.copyWith(
+                                  fontSize: fittedFontSize,
+                                ),
+                              ),
+                            );
+                          },
                         ),
-                      ),
                     ],
                   ),
                 ),

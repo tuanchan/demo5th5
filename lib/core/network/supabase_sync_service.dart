@@ -151,6 +151,7 @@ class SupabaseSyncService {
         remoteTable: 'review_states',
         idColumn: 'id',
         remoteConflictColumns: 'owner_id,card_id',
+        localConflictColumns: const ['cardId'],
         localToRemote: _reviewStateLocalToRemote,
         remoteToLocal: _reviewStateRemoteToLocal,
       );
@@ -198,6 +199,12 @@ class SupabaseSyncService {
         idColumn: 'id',
         remoteConflictColumns:
             'owner_id,course_id,card_id,language_code,direction',
+        localConflictColumns: const [
+          'courseId',
+          'cardId',
+          'languageCode',
+          'direction',
+        ],
         localToRemote: _questionLocalToRemote,
         remoteToLocal: _questionRemoteToLocal,
       );
@@ -255,6 +262,7 @@ class SupabaseSyncService {
     required String remoteTable,
     required String idColumn,
     String? remoteConflictColumns,
+    List<String>? localConflictColumns,
     required Map<String, dynamic> Function(
       Map<String, Object?> localRow,
       String ownerId,
@@ -277,6 +285,16 @@ class SupabaseSyncService {
         for (final row in remoteRows)
           if (row[idColumn] != null) row[idColumn].toString(): row,
       };
+      final remoteConflictColumnList = remoteConflictColumns
+          ?.split(',')
+          .map((column) => column.trim())
+          .where((column) => column.isNotEmpty)
+          .toList(growable: false);
+      final remoteByConflict = <String, Map<String, dynamic>>{
+        if (remoteConflictColumnList != null)
+          for (final row in remoteRows)
+            _syncConflictKey(row, remoteConflictColumnList): row,
+      };
 
       // --- PUSH local → Supabase ---
       final queriedLocalRows = await db.query(localTable);
@@ -289,7 +307,17 @@ class SupabaseSyncService {
         try {
           final remoteData = localToRemote(row, ownerId);
           final remoteId = remoteData[idColumn]?.toString();
-          final existingRemote = remoteId == null ? null : remoteById[remoteId];
+          final existingRemote = (remoteId == null
+                  ? null
+                  : remoteById[remoteId]) ??
+              (remoteConflictColumnList == null
+                  ? null
+                  : remoteByConflict[
+                      _syncConflictKey(
+                        remoteData,
+                        remoteConflictColumnList,
+                      )
+                    ]);
           if (existingRemote != null &&
               !_localRowIsNewer(remoteData, existingRemote)) {
             continue;
@@ -322,12 +350,26 @@ class SupabaseSyncService {
           final localData = remoteToLocal(remote);
           final localId = localData[idColumn];
 
-          final existing = await db.query(
+          var existing = await db.query(
             localTable,
             where: '$idColumn = ?',
             whereArgs: [localId],
             limit: 1,
           );
+          if (existing.isEmpty &&
+              localConflictColumns != null &&
+              localConflictColumns.isNotEmpty) {
+            existing = await db.query(
+              localTable,
+              where: localConflictColumns
+                  .map((column) => '$column = ?')
+                  .join(' AND '),
+              whereArgs: localConflictColumns
+                  .map((column) => localData[column])
+                  .toList(growable: false),
+              limit: 1,
+            );
+          }
 
           if (existing.isEmpty) {
             // A tombstone only matters when this device still has the row it
@@ -348,11 +390,16 @@ class SupabaseSyncService {
             final localUpdated = existing.first['updatedAt']?.toString() ?? '';
             final remoteUpdated = remote['updated_at']?.toString() ?? '';
             if (_isRemoteNewer(remoteUpdated, localUpdated)) {
+              // When the natural key matches but IDs differ between devices,
+              // preserve the existing SQLite ID. Replacing it would create a
+              // new remote UUID on the next push and repeat the conflict.
+              final mergedData = Map<String, Object?>.from(localData)
+                ..[idColumn] = existing.first[idColumn];
               await db.update(
                 localTable,
-                localData,
+                mergedData,
                 where: '$idColumn = ?',
-                whereArgs: [localId],
+                whereArgs: [existing.first[idColumn]],
               );
               pulled++;
             }
@@ -807,6 +854,16 @@ class SupabaseSyncService {
         key == 'sync.localBoundOwnerId' ||
         key.startsWith('sync.migration.') ||
         key.startsWith('sync.offlineDeleteRecovery');
+  }
+
+  String _syncConflictKey(
+    Map<String, Object?> row,
+    List<String> columns,
+  ) {
+    return columns.map((column) {
+      final value = row[column]?.toString() ?? '';
+      return '${value.length}:$value';
+    }).join('|');
   }
 
   Future<void> _prepareLocalOwner(Database db, String ownerId) async {

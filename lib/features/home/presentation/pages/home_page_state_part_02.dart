@@ -132,7 +132,7 @@ extension HomePageStatePart02 on _HomePageState {
     }
 
     if (targetCourse.cardCount == 0) {
-      await Navigator.push(
+      final result = await Navigator.push(
         context,
         MaterialPageRoute(
           builder: (_) => ReviewPracticePage(
@@ -142,6 +142,10 @@ extension HomePageStatePart02 on _HomePageState {
           ),
         ),
       );
+      if (result is Map && result['courseId'] != null) {
+        await this.loadCourses();
+        this._navigateHomeToCourse(result['courseId'] as int);
+      }
       return;
     }
 
@@ -178,7 +182,7 @@ extension HomePageStatePart02 on _HomePageState {
               bool? mc,
               bool? essay,
               bool? listening,
-              bool? matching,
+              bool? matchingPairs,
               bool? sentence,
             }) {
               setSheetState(() {
@@ -209,7 +213,7 @@ extension HomePageStatePart02 on _HomePageState {
                   return;
                 }
 
-                if (matching == true) {
+                if (matchingPairs == true) {
                   localMatchingPairs = true;
                   localMc = false;
                   localEssay = false;
@@ -363,10 +367,19 @@ extension HomePageStatePart02 on _HomePageState {
                       SizedBox(height: 14),
                       Divider(color: Color(0xff2a334a)),
                       SizedBox(height: 8),
+                      Text(
+                        'Phương thức có cập nhật lịch SRS',
+                        style: TextStyle(
+                          color: Color(0xffa8b6d6),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w400,
+                        ),
+                      ),
+                      SizedBox(height: 8),
                       GestureDetector(
-                        onTap: () {
+                        onTap: () async {
                           Navigator.pop(sheetContext);
-                          Navigator.push(
+                          final navResult = await Navigator.push(
                             context,
                             MaterialPageRoute(
                               builder: (_) => DeepLearnPage(
@@ -376,36 +389,48 @@ extension HomePageStatePart02 on _HomePageState {
                               ),
                             ),
                           );
+                          if (navResult is Map && navResult['courseId'] != null) {
+                            await this.loadCourses();
+                            this._navigateHomeToCourse(navResult['courseId'] as int);
+                          }
                         },
                         child: AnimatedContainer(
                           duration: Duration(milliseconds: 160),
                           width: double.infinity,
                           height: 52,
                           decoration: BoxDecoration(
-                            color: Color(0xff303a59),
+                            color: Color(0x0fffffff),
                             borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Color(0xff2a334a)),
                           ),
                           child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
                             children: [
+                              SizedBox(width: 14),
                               SvgPicture.asset(
                                 'assets/icon/brain-solid-full.svg',
-                                width: 24,
-                                height: 24,
+                                width: 20,
+                                height: 20,
                                 colorFilter: ColorFilter.mode(
-                                  Colors.white,
+                                  Color(0xffa8b6d6),
                                   BlendMode.srcIn,
                                 ),
                               ),
                               SizedBox(width: 10),
-                              Text(
-                                'Học Chuyên Sâu',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w400,
+                              Expanded(
+                                child: Text(
+                                  'Học Chuyên Sâu',
+                                  style: TextStyle(
+                                    color: Color(0xffeaf1ff),
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w400,
+                                  ),
                                 ),
                               ),
+                              Icon(
+                                Icons.chevron_right_rounded,
+                                color: Color(0xffa8b6d6),
+                              ),
+                              SizedBox(width: 10),
                             ],
                           ),
                         ),
@@ -427,9 +452,9 @@ extension HomePageStatePart02 on _HomePageState {
                         onChanged: (v) => setMode(listening: v),
                       ),
                       this._switchTile(
-                        text: 'Ghép thẻ',
+                        text: 'Kiểm tra cặp thẻ',
                         value: localMatchingPairs,
-                        onChanged: (v) => setMode(matching: v),
+                        onChanged: (v) => setMode(matchingPairs: v),
                       ),
                       SizedBox(height: 18),
                       Align(
@@ -443,7 +468,10 @@ extension HomePageStatePart02 on _HomePageState {
                               AppSettingsStore.setBool('review.multipleChoice', localMc),
                               AppSettingsStore.setBool('review.essay', localEssay),
                               AppSettingsStore.setBool('review.listening', localListening),
-                              AppSettingsStore.setBool('review.matchingPairs', localMatchingPairs),
+                              AppSettingsStore.setBool(
+                                'review.matchingPairs',
+                                localMatchingPairs,
+                              ),
                               AppSettingsStore.setBool('review.sentenceMode', localSentenceMode),
                               AppSettingsStore.setBool(
                                 'review.answerByDefinition',
@@ -455,13 +483,15 @@ extension HomePageStatePart02 on _HomePageState {
                             String presetMode = 'multipleChoice';
                             if (localEssay) presetMode = 'essay';
                             if (localListening) presetMode = 'listening';
-                            if (localMatchingPairs) presetMode = 'matchingPairs';
+                            if (localMatchingPairs) {
+                              presetMode = 'matchingPairs';
+                            }
                             if (localSentenceMode) presetMode = 'sentence';
 
                             if (!sheetContext.mounted) return;
                             Navigator.pop(sheetContext);
 
-                            Navigator.push(
+                            final navResult = await Navigator.push(
                               context,
                               MaterialPageRoute(
                                 builder: (_) => localSentenceMode
@@ -478,6 +508,10 @@ extension HomePageStatePart02 on _HomePageState {
                                       ),
                               ),
                             );
+                            if (navResult is Map && navResult['courseId'] != null) {
+                              await this.loadCourses();
+                              this._navigateHomeToCourse(navResult['courseId'] as int);
+                            }
                           },
                         ),
                       ),

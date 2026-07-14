@@ -128,7 +128,7 @@ extension FlashCardsPageStatePart05 on _FlashCardsPageState {
       child: Row(
         children: [
           TextButton(
-            onPressed: () => Navigator.pop(context, true),
+            onPressed: () => Navigator.pop(context, {'courseId': selectedCourseId}),
             style: TextButton.styleFrom(
               foregroundColor: Color(0xfff8fafc),
               padding: EdgeInsets.symmetric(horizontal: 6),

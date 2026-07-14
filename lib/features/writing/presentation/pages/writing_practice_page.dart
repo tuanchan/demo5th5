@@ -160,6 +160,7 @@ class _WritingPracticePageState extends State<WritingPracticePage> {
   String _error = '';
   _WritingScript? _script;
   _WritingGrade? _grade;
+  String _gradedSubmission = '';
   Map<String, List<String>>? _hints;
   final List<_WritingClozeItem> _clozeItems = [];
 
@@ -372,6 +373,7 @@ Schema:
       setState(() {
         _script = generated;
         _answerController.clear();
+        _showSettings = false;
         _buildClozeItems();
       });
     } catch (error) {
@@ -470,6 +472,8 @@ Schema: {"keyIdeas":["ý chính"],"wordHints":["từ/cụm từ"],"structureHint
     setState(() {
       _busyPhase = 'grade';
       _error = '';
+      _grade = null;
+      _gradedSubmission = '';
     });
     try {
       final payload = {
@@ -486,7 +490,9 @@ Chỉ trả về một JSON hợp lệ. Chấm ý nghĩa, ngữ pháp, từ vự
 Bài nộp JSON: ${jsonEncode(payload)}
 Không bắt buộc giống expectedText từng chữ nếu bài tự nhiên và giữ đủ ý.
 overallFeedback và explanation viết bằng tiếng Việt. score là số nguyên 0-100.
-wrongText ưu tiên là chuỗi con chính xác trong userText. type chỉ là grammar, meaning, wording, missing hoặc style.
+Mỗi wrongText phải là chuỗi con chính xác, nguyên văn trong userText để app có thể tô đỏ đúng vị trí sai.
+Không đưa các đoạn đúng vào issues, không lặp lại cùng một lỗi. Nếu chỉ thiếu nội dung, wrongText là chuỗi gần vị trí cần bổ sung.
+type chỉ là grammar, meaning, wording, missing hoặc style.
 Schema: {"score":82,"overallFeedback":"nhận xét","suggestedRewrite":"bản viết hoàn chỉnh","issues":[{"wrongText":"đoạn sai","correction":"sửa thành","explanation":"giải thích","type":"grammar"}]}
 ''';
       final raw = await GeminiFlashLiteClient.generateText(
@@ -496,7 +502,18 @@ Schema: {"score":82,"overallFeedback":"nhận xét","suggestedRewrite":"bản vi
       );
       final result = _WritingGrade.fromJson(_decodeJsonObject(raw));
       if (!mounted) return;
-      setState(() => _grade = result);
+      setState(() {
+        _grade = result;
+        _gradedSubmission = userText;
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_scrollController.hasClients) return;
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: Duration(milliseconds: 350),
+          curve: Curves.easeOutCubic,
+        );
+      });
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     } finally {
@@ -681,6 +698,7 @@ Schema: {"title":"tiêu đề","topic":"chủ đề","difficulty":"${info.label}
       _answerController.clear();
       _grade = null;
       _hints = null;
+      _showSettings = false;
       _buildClozeItems();
     });
   }
@@ -718,12 +736,13 @@ Schema: {"title":"tiêu đề","topic":"chủ đề","difficulty":"${info.label}
     VoidCallback? onTap, {
     bool primary = true,
     bool expand = false,
+    Widget? iconWidget,
   }) {
     final button = SizedBox(
       height: 46,
       child: ElevatedButton.icon(
         onPressed: onTap,
-        icon: Icon(icon, size: 18),
+        icon: iconWidget ?? Icon(icon, size: 18),
         label: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis),
         style: ElevatedButton.styleFrom(
           elevation: 0,
@@ -963,6 +982,7 @@ Schema: {"title":"tiêu đề","topic":"chủ đề","difficulty":"${info.label}
               _busyPhase == 'generate' ? 'Đang tạo...' : 'Tạo đoạn viết',
               Icons.auto_awesome_rounded,
               _busy ? null : _generate,
+              iconWidget: geminiColorIcon(size: 19),
             ),
           ),
           SizedBox(height: 10),
@@ -1011,17 +1031,43 @@ Schema: {"title":"tiêu đề","topic":"chủ đề","difficulty":"${info.label}
       children.add(
         SizedBox(
           width: math
-              .max(74, math.min(170, item.answer.length * 14.0))
+              .max(80, math.min(180, item.answer.length * 14.0))
               .toDouble(),
           child: TextField(
             controller: item.controller,
+            cursorColor: Color(0xff9ab9ff),
+            textAlign: TextAlign.center,
             textInputAction: i == _clozeItems.length - 1
                 ? TextInputAction.done
                 : TextInputAction.next,
-            style: TextStyle(color: Colors.white),
-            decoration: _inputDecoration('${i + 1}').copyWith(
+            onEditingComplete: () {
+              if (i == _clozeItems.length - 1) {
+                FocusScope.of(context).unfocus();
+                return;
+              }
+              FocusScope.of(context).nextFocus();
+            },
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+            ),
+            decoration: InputDecoration(
               isDense: true,
-              contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+              filled: false,
+              contentPadding: EdgeInsets.fromLTRB(4, 2, 4, 5),
+              enabledBorder: UnderlineInputBorder(
+                borderSide: BorderSide(
+                  color: Color(0xffb7ccff),
+                  width: 2,
+                ),
+              ),
+              focusedBorder: UnderlineInputBorder(
+                borderSide: BorderSide(
+                  color: Color(0xff4257ff),
+                  width: 2.4,
+                ),
+              ),
             ),
           ),
         ),
@@ -1084,6 +1130,14 @@ Schema: {"title":"tiêu đề","topic":"chủ đề","difficulty":"${info.label}
   Widget _buildGrade() {
     final grade = _grade;
     if (grade == null) return SizedBox.shrink();
+    final submission = _gradedSubmission.isNotEmpty
+        ? _gradedSubmission
+        : (_submissionText() ?? '');
+    final scoreColor = grade.score >= 70
+        ? Color(0xff18b875)
+        : grade.score >= 50
+            ? Color(0xffd99a27)
+            : Color(0xffef5b64);
     return Container(
       width: double.infinity,
       margin: EdgeInsets.only(top: 14),
@@ -1097,58 +1151,102 @@ Schema: {"title":"tiêu đề","topic":"chủ đề","difficulty":"${info.label}
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Text('${grade.score}', style: _titleStyle(34)),
-              Padding(
-                padding: EdgeInsets.only(bottom: 5),
-                child: Text('/100', style: TextStyle(color: _muted)),
+              Container(
+                padding: EdgeInsets.symmetric(horizontal: 13, vertical: 11),
+                decoration: BoxDecoration(
+                  color: scoreColor.withOpacity(0.18),
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: Text(
+                  '${grade.score}/100',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
               ),
+              if (grade.overallFeedback.isNotEmpty) ...[
+                SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    grade.overallFeedback,
+                    style: TextStyle(color: Color(0xffb8c8ff), height: 1.4),
+                  ),
+                ),
+              ],
             ],
           ),
-          if (grade.overallFeedback.isNotEmpty) ...[
-            SizedBox(height: 5),
-            Text(
-              grade.overallFeedback,
-              style: TextStyle(color: Colors.white, height: 1.4),
+          if (submission.isNotEmpty) ...[
+            SizedBox(height: 16),
+            Text('Bài bạn đã viết', style: _titleStyle(15)),
+            SizedBox(height: 7),
+            Container(
+              width: double.infinity,
+              padding: EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Color(0xff0d1018),
+                borderRadius: BorderRadius.circular(9),
+                border: Border.all(color: Color(0xff344266)),
+              ),
+              child: Text.rich(
+                _highlightWritingIssues(submission, grade.issues),
+                style: TextStyle(
+                  color: Colors.white,
+                  height: 1.55,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
             ),
           ],
           if (grade.issues.isNotEmpty) ...[
-            SizedBox(height: 16),
-            Text('Điểm cần sửa', style: _titleStyle(16)),
-            SizedBox(height: 8),
+            SizedBox(height: 12),
             ...grade.issues.map(
               (issue) => Container(
                 width: double.infinity,
                 margin: EdgeInsets.only(bottom: 8),
                 padding: EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: _surface,
+                  color: Color(0xff241114),
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: _border),
+                  border: Border.all(color: Color(0xff8f2931)),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (issue.wrongText.isNotEmpty)
-                      Text(
-                        issue.wrongText,
-                        style: TextStyle(color: _muted),
-                      ),
-                    if (issue.correction.isNotEmpty)
-                      Padding(
-                        padding: EdgeInsets.only(top: 4),
-                        child: Text(
-                          '→ ${issue.correction}',
-                          style: TextStyle(color: Colors.white),
-                        ),
-                      ),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
+                      children: [
+                        if (issue.wrongText.isNotEmpty)
+                          Text(
+                            issue.wrongText,
+                            style: TextStyle(
+                              color: Color(0xffff7f87),
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        if (issue.correction.isNotEmpty)
+                          Text(
+                            issue.correction,
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                      ],
+                    ),
                     if (issue.explanation.isNotEmpty)
                       Padding(
                         padding: EdgeInsets.only(top: 5),
                         child: Text(
                           issue.explanation,
-                          style: TextStyle(color: _muted, height: 1.35),
+                          style: TextStyle(
+                            color: Color(0xffb8c8ff),
+                            height: 1.35,
+                          ),
                         ),
                       ),
                   ],
@@ -1160,14 +1258,119 @@ Schema: {"title":"tiêu đề","topic":"chủ đề","difficulty":"${info.label}
             SizedBox(height: 8),
             Text('Gợi ý nên viết', style: _titleStyle(16)),
             SizedBox(height: 7),
-            SelectableText(
-              grade.suggestedRewrite,
-              style: TextStyle(color: Colors.white, height: 1.5),
+            Container(
+              width: double.infinity,
+              padding: EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Color(0xff0d1018),
+                borderRadius: BorderRadius.circular(9),
+                border: Border.all(color: Color(0xff344266)),
+              ),
+              child: SelectableText(
+                grade.suggestedRewrite,
+                style: TextStyle(
+                  color: Colors.white,
+                  height: 1.5,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
             ),
           ],
         ],
       ),
     );
+  }
+
+  TextSpan _highlightWritingIssues(
+    String submission,
+    List<_WritingIssue> issues,
+  ) {
+    final lowerSubmission = submission.toLowerCase();
+    final ranges = <({int start, int end})>[];
+    final sortedIssues = [...issues]
+      ..sort((a, b) => b.wrongText.length.compareTo(a.wrongText.length));
+
+    for (final issue in sortedIssues) {
+      final wrongText = issue.wrongText.trim();
+      if (wrongText.isEmpty) continue;
+      final needle = wrongText.toLowerCase();
+      var searchFrom = 0;
+      var matched = false;
+      while (searchFrom < lowerSubmission.length) {
+        final start = lowerSubmission.indexOf(needle, searchFrom);
+        if (start < 0) break;
+        final end = start + wrongText.length;
+        final overlaps = ranges.any(
+          (range) => start < range.end && end > range.start,
+        );
+        if (!overlaps) {
+          ranges.add((start: start, end: end));
+          matched = true;
+          break;
+        }
+        searchFrom = start + 1;
+      }
+
+      if (matched) continue;
+
+      // Gemini đôi khi giữ nguyên chữ nhưng đổi khoảng trắng/xuống dòng.
+      // Cho phép khoảng trắng linh hoạt để vẫn tô đúng đoạn trong bài nộp.
+      final words = wrongText.split(RegExp(r'\s+'));
+      if (words.length < 2) continue;
+      final flexiblePattern = words.map(RegExp.escape).join(r'\s+');
+      for (final match in RegExp(
+        flexiblePattern,
+        caseSensitive: false,
+        unicode: true,
+      ).allMatches(submission)) {
+        final overlaps = ranges.any(
+          (range) => match.start < range.end && match.end > range.start,
+        );
+        if (overlaps) continue;
+        ranges.add((start: match.start, end: match.end));
+        break;
+      }
+    }
+
+    ranges.sort((a, b) => a.start.compareTo(b.start));
+    if (ranges.isEmpty) return TextSpan(text: submission);
+
+    final spans = <InlineSpan>[];
+    var cursor = 0;
+    for (final range in ranges) {
+      if (range.start > cursor) {
+        spans.add(TextSpan(text: submission.substring(cursor, range.start)));
+      }
+      spans.add(
+        WidgetSpan(
+          alignment: PlaceholderAlignment.middle,
+          child: Container(
+            padding: EdgeInsets.symmetric(horizontal: 2, vertical: 1),
+            decoration: BoxDecoration(
+              color: Color(0xff8f272f),
+              borderRadius: BorderRadius.circular(3),
+              border: Border.all(color: Color(0xffc84a54), width: 0.8),
+            ),
+            child: Text(
+              submission.substring(range.start, range.end),
+              style: TextStyle(
+                color: Color(0xfffff1f2),
+                fontSize: 14,
+                height: 1.15,
+                fontWeight: FontWeight.w800,
+                decoration: TextDecoration.underline,
+                decorationColor: Color(0xffffa0a6),
+              ),
+            ),
+          ),
+        ),
+      );
+      cursor = range.end;
+    }
+    if (cursor < submission.length) {
+      spans.add(TextSpan(text: submission.substring(cursor)));
+    }
+    return TextSpan(children: spans);
   }
 
   Widget _buildWorkspace() {
@@ -1319,6 +1522,7 @@ Schema: {"title":"tiêu đề","topic":"chủ đề","difficulty":"${info.label}
                   _busyPhase == 'grade' ? 'Đang chấm...' : 'Gửi chấm',
                   Icons.fact_check_outlined,
                   _busy ? null : _gradeWriting,
+                  iconWidget: geminiColorIcon(size: 19),
                 ),
                 _actionButton(
                   'Xóa bài',

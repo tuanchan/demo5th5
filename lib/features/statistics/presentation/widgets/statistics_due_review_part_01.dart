@@ -1,5 +1,12 @@
 part of flutterflashcard_main;
 
+const Color _dueDialogBackground = Color(0xff07090d);
+const Color _dueDialogSurface = Color(0xff0b0d12);
+const Color _dueDialogBorder = Color(0xff202634);
+const Color _dueDialogText = Color(0xfff8fbff);
+const Color _dueDialogMuted = Color(0xff91a0bd);
+const Color _dueDialogBlue = Color(0xff9ab9ff);
+
 class _DueReviewLaunchInfo {
   final int count;
   final int courseId;
@@ -119,9 +126,6 @@ Future<void> _openDueReviewFlow(
     return;
   }
 
-  final presetMode = await _showDueReviewModeDialog(context);
-  if (!context.mounted || presetMode == null) return;
-
   await Navigator.push(
     context,
     MaterialPageRoute(
@@ -130,7 +134,6 @@ Future<void> _openDueReviewFlow(
         courseTitle: 'Ôn thẻ đến hạn hôm nay',
         courseLanguageCode: info.languageCode,
         dueOnly: true,
-        presetMode: presetMode,
       ),
     ),
   );
@@ -147,6 +150,7 @@ Future<bool?> _showDueTodayReminderDialog(
   return showDialog<bool>(
     context: context,
     barrierDismissible: false,
+    barrierColor: Color(0xb3000000),
     builder: (dialogContext) {
       return Dialog(
         backgroundColor: Colors.transparent,
@@ -160,7 +164,7 @@ Future<bool?> _showDueTodayReminderDialog(
             children: [
               Icon(
                 Icons.notifications_active_rounded,
-                color: AppColors.border,
+                color: _dueDialogBlue,
                 size: 54,
               ),
               SizedBox(height: 10),
@@ -168,7 +172,7 @@ Future<bool?> _showDueTodayReminderDialog(
                 'Hôm nay có ${info.count} thẻ đến hạn',
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  color: AppColors.text,
+                  color: _dueDialogText,
                   fontSize: 22,
                   fontWeight: FontWeight.w900,
                 ),
@@ -178,7 +182,7 @@ Future<bool?> _showDueTodayReminderDialog(
                 'Bạn có thể học flash card hoặc chọn kiểu kiểm tra để ôn ngay.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  color: AppColors.muted,
+                  color: _dueDialogMuted,
                   fontWeight: FontWeight.w700,
                   height: 1.35,
                 ),
@@ -222,6 +226,7 @@ Future<_DueStudyAction?> _showDueStudyTypeDialog(
 ) async {
   return showDialog<_DueStudyAction>(
     context: context,
+    barrierColor: Color(0xb3000000),
     builder: (dialogContext) {
       return Dialog(
         backgroundColor: Colors.transparent,
@@ -243,7 +248,7 @@ Future<_DueStudyAction?> _showDueStudyTypeDialog(
                         Text(
                           '${info.count} thẻ đến hạn hôm nay',
                           style: TextStyle(
-                            color: AppColors.muted,
+                            color: _dueDialogMuted,
                             fontWeight: FontWeight.w900,
                             fontSize: 13,
                           ),
@@ -252,7 +257,7 @@ Future<_DueStudyAction?> _showDueStudyTypeDialog(
                         Text(
                           'Chọn cách ôn tập',
                           style: TextStyle(
-                            color: AppColors.text,
+                            color: _dueDialogText,
                             fontSize: 24,
                             fontWeight: FontWeight.w900,
                           ),
@@ -262,7 +267,7 @@ Future<_DueStudyAction?> _showDueStudyTypeDialog(
                   ),
                   IconButton(
                     onPressed: () => Navigator.pop(dialogContext),
-                    icon: Icon(Icons.close_rounded, color: AppColors.border),
+                    icon: Icon(Icons.close_rounded, color: _dueDialogMuted),
                   ),
                 ],
               ),
@@ -271,15 +276,13 @@ Future<_DueStudyAction?> _showDueStudyTypeDialog(
                 title: 'Học thẻ',
                 subtitle: 'Mở màn hình flash card chỉ gồm thẻ đến hạn.',
                 icon: Icons.style_rounded,
-                color: AppColors.yellow,
                 onTap: () => Navigator.pop(dialogContext, _DueStudyAction.flash),
               ),
-              SizedBox(height: 12),
+              Divider(color: _dueDialogBorder, height: 1),
               _dueActionTile(
                 title: 'Ôn tập',
-                subtitle: 'Chọn phương thức kiểm tra cho thẻ đến hạn.',
+                subtitle: 'Mở thiết lập kiểm tra SRS cho thẻ đến hạn.',
                 icon: Icons.school_rounded,
-                color: AppColors.green,
                 onTap: () => Navigator.pop(dialogContext, _DueStudyAction.review),
               ),
             ],
@@ -294,99 +297,16 @@ Future<_DueStudyAction?> _showDueStudyTypeDialog(
 
 
 
-Future<String?> _showDueReviewModeDialog(BuildContext context) async {
-  return showDialog<String>(
-    context: context,
-    builder: (dialogContext) {
-      return Dialog(
-        backgroundColor: Colors.transparent,
-        insetPadding: EdgeInsets.symmetric(horizontal: 18, vertical: 24),
-        child: Container(
-          constraints: BoxConstraints(maxWidth: 500),
-          padding: EdgeInsets.fromLTRB(18, 18, 18, 16),
-          decoration: _dueDialogDecoration(),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      'Chọn phương thức kiểm tra',
-                      style: TextStyle(
-                        color: AppColors.text,
-                        fontSize: 22,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                  ),
-                  IconButton(
-                    onPressed: () => Navigator.pop(dialogContext),
-                    icon: Icon(Icons.close_rounded, color: AppColors.border),
-                  ),
-                ],
-              ),
-              SizedBox(height: 12),
-              _dueActionTile(
-                title: 'Trắc nghiệm 4 đáp án',
-                subtitle: 'Chọn đáp án đúng cho từng thẻ.',
-                icon: Icons.checklist_rounded,
-                color: AppColors.blue,
-                onTap: () => Navigator.pop(dialogContext, 'multipleChoice'),
-              ),
-              SizedBox(height: 10),
-              _dueActionTile(
-                title: 'Tự luận',
-                subtitle: 'Gõ câu trả lời rồi kiểm tra kết quả.',
-                icon: Icons.edit_note_rounded,
-                color: AppColors.green,
-                onTap: () => Navigator.pop(dialogContext, 'essay'),
-              ),
-              SizedBox(height: 10),
-              _dueActionTile(
-                title: 'Nghe',
-                subtitle: 'Nghe âm thanh và chọn đáp án.',
-                icon: Icons.hearing_rounded,
-                color: AppColors.yellow,
-                onTap: () => Navigator.pop(dialogContext, 'listening'),
-              ),
-              SizedBox(height: 10),
-              _dueActionTile(
-                title: 'Kiểm tra cặp thẻ',
-                subtitle: 'Ghép cặp từ vựng với nghĩa phù hợp.',
-                icon: Icons.grid_view_rounded,
-                color: AppColors.blue,
-                onTap: () => Navigator.pop(dialogContext, 'matchingPairs'),
-              ),
-              SizedBox(height: 10),
-              _dueActionTile(
-                title: 'Kiểm tra tổng hợp',
-                subtitle: 'Học tập với các dạng bài trắc nghiệm, tự luận và nghe.',
-                icon: Icons.dashboard_customize_rounded,
-                color: AppColors.red,
-                onTap: () => Navigator.pop(dialogContext, 'sentence'),
-              ),
-            ],
-          ),
-        ),
-      );
-    },
-  );
-}
-
-
 BoxDecoration _dueDialogDecoration() {
   return BoxDecoration(
-    color: AppColors.activeIsDark ? AppColors.panel : Color(0xfff6f1fb),
+    color: _dueDialogBackground,
     borderRadius: BorderRadius.circular(26),
-    border: Border.all(color: AppColors.border, width: 1.4),
+    border: Border.all(color: _dueDialogBorder, width: 1.2),
     boxShadow: [
-      BoxShadow(color: AppColors.border, offset: Offset(0, 7), blurRadius: 0),
       BoxShadow(
-        color: Color(0x26000000),
-        offset: Offset(0, 18),
-        blurRadius: 28,
+        color: Color(0x99000000),
+        offset: Offset(0, 14),
+        blurRadius: 30,
       ),
     ],
   );
@@ -400,34 +320,17 @@ Widget _dueActionTile({
   required String title,
   required String subtitle,
   required IconData icon,
-  required Color color,
   required VoidCallback onTap,
 }) {
   return GestureDetector(
     onTap: onTap,
+    behavior: HitTestBehavior.opaque,
     child: Container(
       width: double.infinity,
-      padding: EdgeInsets.all(13),
-      decoration: BoxDecoration(
-        color: AppColors.activeIsDark ? AppColors.panel2 : Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppColors.border, width: 1.3),
-        boxShadow: [
-          BoxShadow(color: AppColors.border, offset: Offset(0, 4), blurRadius: 0),
-        ],
-      ),
+      padding: EdgeInsets.symmetric(horizontal: 4, vertical: 15),
       child: Row(
         children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: color,
-              borderRadius: BorderRadius.circular(15),
-              border: Border.all(color: AppColors.border, width: 1.2),
-            ),
-            child: Icon(icon, color: AppColors.border, size: 23),
-          ),
+          Icon(icon, color: _dueDialogBlue, size: 25),
           SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -436,7 +339,7 @@ Widget _dueActionTile({
                 Text(
                   title,
                   style: TextStyle(
-                    color: AppColors.text,
+                    color: _dueDialogText,
                     fontWeight: FontWeight.w900,
                     fontSize: 15,
                   ),
@@ -447,7 +350,7 @@ Widget _dueActionTile({
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    color: AppColors.muted,
+                    color: _dueDialogMuted,
                     fontWeight: FontWeight.w700,
                     fontSize: 12,
                     height: 1.25,
@@ -457,7 +360,7 @@ Widget _dueActionTile({
             ),
           ),
           SizedBox(width: 8),
-          Icon(Icons.chevron_right_rounded, color: AppColors.border),
+          Icon(Icons.chevron_right_rounded, color: _dueDialogBlue),
         ],
       ),
     ),

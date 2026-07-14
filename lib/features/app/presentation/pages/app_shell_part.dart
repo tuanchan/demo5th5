@@ -210,6 +210,10 @@ class _AppThemeLoaderState extends State<AppThemeLoader> {
         SupabaseSyncService.instance.syncAll().then((result) {
           debugPrint('AUTO-SYNC after login: $result');
         });
+      } else if (event == AuthChangeEvent.passwordRecovery) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) showPasswordResetDialog(context);
+        });
       }
     });
   }

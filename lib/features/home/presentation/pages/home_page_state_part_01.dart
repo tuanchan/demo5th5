@@ -45,6 +45,10 @@ extension HomePageStatePart01 on _HomePageState {
       this._homeNavButton('Viết', this.openWritingPractice),
       this._homeNavButton('Luyện nói', () {}),
       this._homeNavButton('Tạo học phần', this.openCreateCourse),
+      StreamBuilder<AuthState>(
+        stream: SupabaseConfig.onAuthStateChange,
+        builder: (context, _) => this._buildHomeAccountButton(),
+      ),
       IconButton(
         tooltip: 'Cài đặt API',
         onPressed: this.openSettingsPage,
@@ -138,6 +142,130 @@ extension HomePageStatePart01 on _HomePageState {
         ),
       ),
     );
+  }
+
+  Widget _buildHomeAccountButton() {
+    final user = SupabaseConfig.currentUser;
+    final metadata = user?.userMetadata;
+    final avatarUrl = metadata?['avatar_url']?.toString() ??
+        metadata?['picture']?.toString();
+    final hasAvatar = avatarUrl != null && avatarUrl.trim().isNotEmpty;
+
+    return Tooltip(
+      message: user == null ? 'Đăng nhập hoặc đăng ký' : 'Tài khoản',
+      child: Semantics(
+        button: true,
+        label: user == null ? 'Đăng nhập hoặc đăng ký' : 'Mở tài khoản',
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () async {
+            if (user == null) {
+              await this._showHomeAuthPage();
+            } else {
+              await this.openSettingsPage();
+            }
+          },
+          child: SizedBox.square(
+            dimension: 40,
+            child: Center(
+              child: hasAvatar
+                  ? ClipOval(
+                      child: Image.network(
+                        avatarUrl!,
+                        width: 30,
+                        height: 30,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Icon(
+                          Icons.account_circle_outlined,
+                          color: _homeMuted,
+                          size: 24,
+                        ),
+                      ),
+                    )
+                  : Icon(
+                      Icons.account_circle_outlined,
+                      color: _homeMuted,
+                      size: 24,
+                    ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showHomeAuthPage() async {
+    final loggedIn = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => _FlashcardsLoginPage(
+          initialAuthMode: AuthMode.login,
+          onGoogleLogin: this._signInWithGoogleFromHome,
+          translateAuthError: this._translateHomeAuthError,
+        ),
+      ),
+    );
+    if (!mounted || loggedIn != true) return;
+    setState(() {});
+    if (SupabaseConfig.isLoggedIn) {
+      showAppToast(context, 'Đăng nhập thành công!');
+    }
+  }
+
+  Future<String?> _signInWithGoogleFromHome() async {
+    try {
+      String? redirectTo;
+      if (kIsWeb) {
+        redirectTo = null;
+      } else if (Platform.isAndroid || Platform.isIOS) {
+        redirectTo = 'com.example.flutterflashcard://login-callback/';
+      } else {
+        redirectTo = 'http://localhost:3000/';
+        _globalDesktopOAuthServer ??= _DesktopOAuthServer();
+        await _globalDesktopOAuthServer!.start((code) async {
+          try {
+            await SupabaseConfig.client.auth.exchangeCodeForSession(code);
+            if (mounted) {
+              setState(() {});
+              showAppToast(context, 'Đăng nhập thành công!');
+            }
+          } catch (error) {
+            if (mounted) {
+              showAppToast(context, 'Xác thực tài khoản thất bại: $error');
+            }
+          } finally {
+            await _globalDesktopOAuthServer!.stop();
+          }
+        });
+      }
+
+      await SupabaseConfig.client.auth.signInWithOAuth(
+        OAuthProvider.google,
+        redirectTo: redirectTo,
+      );
+      return null;
+    } catch (error) {
+      return 'Đăng nhập Google thất bại: $error';
+    }
+  }
+
+  String _translateHomeAuthError(String message) {
+    final lower = message.toLowerCase();
+    if (lower.contains('invalid login')) {
+      return 'Email hoặc mật khẩu không đúng';
+    }
+    if (lower.contains('email not confirmed')) {
+      return 'Vui lòng xác nhận email trước khi đăng nhập';
+    }
+    if (lower.contains('already registered') ||
+        lower.contains('already been registered')) {
+      return 'Email này đã được đăng ký';
+    }
+    if (lower.contains('error sending confirmation email') ||
+        lower.contains('smtp')) {
+      return 'Không gửi được email xác thực. Hãy kiểm tra cấu hình SMTP.';
+    }
+    return message;
   }
 
   Widget _buildHomeBrand() {
@@ -512,7 +640,16 @@ extension HomePageStatePart01 on _HomePageState {
           _homeCourseAtBottom = false;
         });
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted && _homeCourseScrollController.hasClients) {
+          if (!mounted) return;
+          final firstCourseContext = _homeFirstCourseCardKey.currentContext;
+          if (firstCourseContext != null) {
+            Scrollable.ensureVisible(
+              firstCourseContext,
+              alignment: 0,
+              duration: Duration(milliseconds: 320),
+              curve: Curves.easeOutCubic,
+            );
+          } else if (_homeCourseScrollController.hasClients) {
             _homeCourseScrollController.jumpTo(0);
           }
         });
@@ -743,6 +880,54 @@ extension HomePageStatePart01 on _HomePageState {
       duration: Duration(milliseconds: 220),
       curve: Curves.easeOutCubic,
     );
+  }
+
+  void _navigateHomeToCourse(int courseId) {
+    if (!mounted) return;
+
+    // Find the course
+    final matchCourse = courses.where((c) => c.id == courseId);
+    if (matchCourse.isEmpty) return;
+    final course = matchCourse.first;
+
+    // Find the topic
+    final topicId = course.topicId;
+    CourseTopicItem? matchTopic;
+    if (topicId != null) {
+      final topicMatches = topics.where((t) => t.id == topicId);
+      if (topicMatches.isNotEmpty) matchTopic = topicMatches.first;
+    }
+
+    if (matchTopic == null) return;
+
+    // Calculate the page number for this course
+    final topicCourses = this._homeCoursesForTopicWithoutSorting(matchTopic.id);
+    final courseIndex = topicCourses.indexWhere((c) => c.id == courseId);
+    final page = courseIndex >= 0 ? (courseIndex ~/ 10) + 1 : 1;
+
+    courseSearchController.clear();
+    setState(() {
+      _activeHomeTopic = matchTopic;
+      selectedHomeCourse = course;
+      _homeCoursePage = page;
+      _showFloatingTopicBack = false;
+      _homeCourseAtBottom = false;
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final firstCourseContext = _homeFirstCourseCardKey.currentContext;
+      if (firstCourseContext != null) {
+        Scrollable.ensureVisible(
+          firstCourseContext,
+          alignment: 0,
+          duration: Duration(milliseconds: 320),
+          curve: Curves.easeOutCubic,
+        );
+      } else if (_homeCourseScrollController.hasClients) {
+        _homeCourseScrollController.jumpTo(0);
+      }
+    });
   }
 
   Widget _buildScrollableHomeDashboardHeader(bool compact) {

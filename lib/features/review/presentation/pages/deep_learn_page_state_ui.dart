@@ -29,7 +29,7 @@ extension _DeepLearnPageStateUi on _DeepLearnPageState {
           shape: const Border(bottom: BorderSide(color: _border)),
           leadingWidth: compact ? 56 : 150,
           leading: TextButton.icon(
-            onPressed: () => Navigator.maybePop(context),
+            onPressed: () => Navigator.pop(context, {'courseId': widget.courseId}),
             icon: const Icon(Icons.arrow_back, size: 17),
             label: compact ? const SizedBox.shrink() : const Text('Trang chủ'),
             style: TextButton.styleFrom(
@@ -99,14 +99,19 @@ extension _DeepLearnPageStateUi on _DeepLearnPageState {
       );
     }
     return SingleChildScrollView(
-      padding: EdgeInsets.fromLTRB(compact ? 14 : 40, compact ? 24 : 44, compact ? 14 : 40, 48),
+      padding: EdgeInsets.fromLTRB(
+        compact ? 14 : 40,
+        compact ? 14 : 44,
+        compact ? 14 : 40,
+        compact ? 24 : 48,
+      ),
       child: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 960),
           child: Column(
             children: [
               _buildProgress(),
-              const SizedBox(height: 26),
+              SizedBox(height: compact ? 16 : 26),
               if (_completed) _buildCompletion(compact) else _buildQuestionCard(compact),
               if (!_completed && _feedback?.correct == false) _buildContinueBar(compact),
             ],
@@ -161,8 +166,8 @@ extension _DeepLearnPageStateUi on _DeepLearnPageState {
     if (question == null) return const SizedBox.shrink();
     return Container(
       width: double.infinity,
-      constraints: BoxConstraints(minHeight: compact ? 500 : 468),
-      padding: EdgeInsets.all(compact ? 22 : 30),
+      constraints: BoxConstraints(minHeight: compact ? 390 : 468),
+      padding: EdgeInsets.all(compact ? 18 : 30),
       decoration: BoxDecoration(
         color: _surface,
         borderRadius: BorderRadius.circular(14),
@@ -172,9 +177,13 @@ extension _DeepLearnPageStateUi on _DeepLearnPageState {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(question.promptLabel, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900)),
-          SizedBox(height: question.type == _DeepLearnQuestionType.flashcard ? 14 : 26),
-          _buildPrompt(question),
-          const SizedBox(height: 24),
+          SizedBox(
+            height: question.type == _DeepLearnQuestionType.flashcard
+                ? 12
+                : (compact ? 14 : 26),
+          ),
+          _buildPrompt(question, compact),
+          SizedBox(height: compact ? 14 : 24),
           if (_feedback != null && question.type != _DeepLearnQuestionType.multipleChoice)
             _buildFeedback(_feedback!)
           else if (question.type == _DeepLearnQuestionType.multipleChoice)
@@ -188,7 +197,7 @@ extension _DeepLearnPageStateUi on _DeepLearnPageState {
     );
   }
 
-  Widget _buildPrompt(_DeepLearnQuestion question) {
+  Widget _buildPrompt(_DeepLearnQuestion question, bool compact) {
     final isFlash = question.type == _DeepLearnQuestionType.flashcard;
     return InkWell(
       onTap: isFlash
@@ -199,7 +208,9 @@ extension _DeepLearnPageStateUi on _DeepLearnPageState {
       borderRadius: BorderRadius.circular(10),
       child: Container(
         alignment: isFlash ? Alignment.center : Alignment.centerLeft,
-        constraints: BoxConstraints(minHeight: isFlash ? 220 : 118),
+        constraints: BoxConstraints(
+          minHeight: isFlash ? (compact ? 170 : 220) : (compact ? 72 : 118),
+        ),
         child: SelectableText(
           question.flipped ? question.answer : question.prompt,
           textAlign: isFlash ? TextAlign.center : TextAlign.left,
@@ -331,7 +342,7 @@ extension _DeepLearnPageStateUi on _DeepLearnPageState {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const Text('Đáp án của bạn', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900)),
-        const SizedBox(height: 14),
+        const SizedBox(height: 10),
         TextField(
           controller: _answerController,
           autofocus: true,
@@ -346,7 +357,7 @@ extension _DeepLearnPageStateUi on _DeepLearnPageState {
             focusedBorder: OutlineInputBorder(borderSide: const BorderSide(color: _primary, width: 2), borderRadius: BorderRadius.circular(8)),
           ),
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 14),
         Row(
           mainAxisAlignment: MainAxisAlignment.end,
           children: [
@@ -426,7 +437,12 @@ extension _DeepLearnPageStateUi on _DeepLearnPageState {
 
   Widget _buildContinueBar(bool compact) {
     return Padding(
-      padding: EdgeInsets.fromLTRB(compact ? 8 : 60, 28, compact ? 8 : 60, 0),
+      padding: EdgeInsets.fromLTRB(
+        compact ? 4 : 60,
+        compact ? 12 : 28,
+        compact ? 4 : 60,
+        0,
+      ),
       child: Row(
         children: [
           const Expanded(child: Text('Nhấn vào câu trả lời đúng hoặc nút tiếp tục.', style: TextStyle(color: Color(0xffdce3ff), fontWeight: FontWeight.w900))),
@@ -583,7 +599,7 @@ extension _DeepLearnPageStateUi on _DeepLearnPageState {
             runSpacing: 12,
             children: [
               OutlinedButton(onPressed: wrongCards.isEmpty ? null : () => _reset(onlyCards: wrongCards), child: const Text('Học lại từ sai')),
-              OutlinedButton(onPressed: () => Navigator.maybePop(context), child: const Text('Trang chủ')),
+              OutlinedButton(onPressed: () => Navigator.pop(context, {'courseId': widget.courseId}), child: const Text('Trang chủ')),
               _primaryButton('Làm lại từ đầu', _reset),
             ],
           ),

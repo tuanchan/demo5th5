@@ -42,7 +42,7 @@ extension FlashCardsPageStatePart03 on _FlashCardsPageState {
 
   void exitFlashCards() {
     this._finishStudySession();
-    Navigator.pop(context, true);
+    Navigator.pop(context, {'courseId': selectedCourseId});
   }
 
 

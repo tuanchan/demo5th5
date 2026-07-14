@@ -14,22 +14,19 @@ Widget _dueSolidButton({
       decoration: BoxDecoration(
         color: color,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.border, width: 1.4),
-        boxShadow: [
-          BoxShadow(color: AppColors.border, offset: Offset(0, 4), blurRadius: 0),
-        ],
+        border: Border.all(color: _dueDialogBorder, width: 1.2),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, color: AppColors.onSolidButton, size: 20),
+          Icon(icon, color: AppColors.readableOn(color), size: 20),
           SizedBox(width: 7),
           Flexible(
             child: Text(
               text,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                color: AppColors.onSolidButton,
+                color: AppColors.readableOn(color),
                 fontWeight: FontWeight.w900,
               ),
             ),
@@ -55,24 +52,21 @@ Widget _dueOutlineButton({
       height: 50,
       padding: EdgeInsets.symmetric(horizontal: 14),
       decoration: BoxDecoration(
-        color: AppColors.inputFill,
+        color: _dueDialogSurface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.border, width: 1.4),
-        boxShadow: [
-          BoxShadow(color: AppColors.border, offset: Offset(0, 4), blurRadius: 0),
-        ],
+        border: Border.all(color: _dueDialogBorder, width: 1.2),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, color: AppColors.onIconButton, size: 20),
+          Icon(icon, color: _dueDialogText, size: 20),
           SizedBox(width: 7),
           Flexible(
             child: Text(
               text,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                color: AppColors.onIconButton,
+                color: _dueDialogText,
                 fontWeight: FontWeight.w900,
               ),
             ),
