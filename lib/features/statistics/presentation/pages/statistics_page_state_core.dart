@@ -4,7 +4,12 @@ const int _hardCardWrongThreshold = 5;
 
 class _StatisticsPageState extends State<StatisticsPage> {
   late Future<StatisticsData> _future;
+  late Future<List<_SrsEditorItem>> _srsManagerFuture;
   final Set<int> _expandedCourseIds = {};
+  final TextEditingController _srsSearchController = TextEditingController();
+  final Map<int, int> _courseSrsLevelDraft = {};
+  final Map<int, DateTime> _courseSrsDateDraft = {};
+  bool _srsOnlyDueToday = true;
 
   List<Map<String, Object?>> _extractSrsImportItems(Object? decoded) {
     final source = decoded is Map ? decoded['items'] : decoded;
@@ -15,7 +20,6 @@ class _StatisticsPageState extends State<StatisticsPage> {
         .map((item) => Map<String, Object?>.from(item))
         .toList();
   }
-
 
   Future<int?> _findSrsImportCardId(
     DatabaseExecutor executor,
@@ -93,14 +97,12 @@ class _StatisticsPageState extends State<StatisticsPage> {
     return null;
   }
 
-
   String _formatSrsDate(String value) {
     final date = DateTime.tryParse(value);
     if (date == null) return 'chưa có ngày';
     String two(int n) => n.toString().padLeft(2, '0');
     return '${two(date.day)}/${two(date.month)}/${date.year}';
   }
-
 
   String _srsStamp() {
     final n = DateTime.now();
@@ -112,6 +114,13 @@ class _StatisticsPageState extends State<StatisticsPage> {
   void initState() {
     super.initState();
     _future = this.loadStatistics();
+    _srsManagerFuture = this._loadSrsEditorItems();
+  }
+
+  @override
+  void dispose() {
+    _srsSearchController.dispose();
+    super.dispose();
   }
 
   @override

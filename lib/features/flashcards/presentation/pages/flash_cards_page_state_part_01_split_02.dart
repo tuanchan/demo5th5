@@ -26,11 +26,39 @@ extension FlashCardsPageStatePart01Split02 on _FlashCardsPageState {
       String langCode;
       int? dueSessionCourseId;
 
-      if (widget.dueOnly) {
+      if (widget.cardIds != null && widget.cardIds!.isNotEmpty) {
+        final placeholders = List.filled(widget.cardIds!.length, '?').join(',');
+        rows = await db.rawQuery(
+          '''
+          SELECT * FROM cards
+          WHERE courseId = ?
+            AND deletedAt IS NULL
+            AND isHidden = 0
+            AND id IN ($placeholders)
+          ORDER BY position ASC, id ASC
+          ''',
+          [courseId, ...widget.cardIds!],
+        );
+        final courseRows = await db.query(
+          'courses',
+          columns: ['languageCode'],
+          where: 'id = ?',
+          whereArgs: [courseId],
+          limit: 1,
+        );
+        langCode = courseRows.isNotEmpty
+            ? (courseRows.first['languageCode']?.toString() ?? 'zh-TW')
+            : 'zh-TW';
+      } else if (widget.dueOnly) {
         // Load due cards across all courses
         final now = DateTime.now();
-        final tomorrowStart = DateTime(now.year, now.month, now.day).add(Duration(days: 1));
-        rows = await db.rawQuery('''
+        final tomorrowStart = DateTime(
+          now.year,
+          now.month,
+          now.day,
+        ).add(Duration(days: 1));
+        rows = await db.rawQuery(
+          '''
           SELECT ca.* FROM cards ca
           INNER JOIN courses c ON c.id = ca.courseId
           INNER JOIN review_states rs ON rs.cardId = ca.id
@@ -41,7 +69,9 @@ extension FlashCardsPageStatePart01Split02 on _FlashCardsPageState {
             AND rs.nextReviewAt IS NOT NULL
             AND rs.nextReviewAt < ?
           ORDER BY rs.nextReviewAt ASC, ca.position ASC, ca.id ASC
-        ''', [tomorrowStart.toIso8601String()]);
+        ''',
+          [tomorrowStart.toIso8601String()],
+        );
 
         // Get language from first due card's course
         if (rows.isNotEmpty) {
@@ -85,7 +115,9 @@ extension FlashCardsPageStatePart01Split02 on _FlashCardsPageState {
 
       setState(() {
         allCards = rows.map((e) => StudyCardItem.fromMap(e)).toList();
-        selectedCourseId = widget.dueOnly ? (dueSessionCourseId ?? courseId) : courseId;
+        selectedCourseId = widget.dueOnly
+            ? (dueSessionCourseId ?? courseId)
+            : courseId;
         _languageCode = langCode;
         currentPos = 0;
         isFlipped = false;
@@ -108,10 +140,6 @@ extension FlashCardsPageStatePart01Split02 on _FlashCardsPageState {
       debugPrint("LOAD FLASHCARDS ERROR: $e");
     }
   }
-
-
-
-
 
   void rebuildVisibleOrder({bool resetPosition = false}) {
     final oldCardId = currentCard?.id;
@@ -137,17 +165,9 @@ extension FlashCardsPageStatePart01Split02 on _FlashCardsPageState {
     currentPos = indices.isEmpty ? 0 : nextPos.clamp(0, indices.length - 1);
   }
 
-
-
-
-
   void resetFlip() {
     isFlipped = false;
   }
-
-
-
-
 
   void toggleFlip() {
     if (currentCard == null) return;
@@ -156,10 +176,6 @@ extension FlashCardsPageStatePart01Split02 on _FlashCardsPageState {
       isFlipped = !isFlipped;
     });
   }
-
-
-
-
 
   Future<void> moveCard(
     int delta, {
@@ -216,10 +232,6 @@ extension FlashCardsPageStatePart01Split02 on _FlashCardsPageState {
 
     this._playAutoAudioIfNeeded();
   }
-
-
-
-
 
   Future<void> answerProgress({
     required bool known,
@@ -281,15 +293,7 @@ extension FlashCardsPageStatePart01Split02 on _FlashCardsPageState {
     }
   }
 
-
-
-
-
   void playGhost(bool reverse) {}
-
-
-
-
 
   Future<void> toggleStar() async {
     final card = currentCard;
@@ -325,5 +329,4 @@ extension FlashCardsPageStatePart01Split02 on _FlashCardsPageState {
       debugPrint("TOGGLE STAR ERROR: $e");
     }
   }
-
 }

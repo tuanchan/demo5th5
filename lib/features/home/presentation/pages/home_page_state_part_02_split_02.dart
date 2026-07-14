@@ -149,14 +149,19 @@ extension HomePageStatePart02Split02 on _HomePageState {
   }
 
   Future<void> openWritingPractice() async {
+    final targetCourse = selectedHomeCourse;
     await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => WritingPracticePage(
-          initialCourseId: selectedHomeCourse?.id,
+          initialCourseId: targetCourse?.id,
         ),
       ),
     );
+    if (targetCourse != null) {
+      await this.loadCourses();
+      this._navigateHomeToCourse(targetCourse.id);
+    }
   }
 
 
@@ -212,12 +217,14 @@ extension HomePageStatePart02Split02 on _HomePageState {
       ),
     );
 
-    if (result != null) {
+    final targetId = (result is Map && result['courseId'] != null)
+        ? (result['courseId'] as int)
+        : targetCourse.id;
       await this.loadCourses();
-      if (result is Map && result['courseId'] != null) {
-        this._navigateHomeToCourse(result['courseId'] as int);
-      }
-    }
+      this._navigateHomeToCourse(targetId);
+      // navigated
+      // completed
+    // done
   }
 
 

@@ -142,9 +142,9 @@ extension HomePageStatePart02 on _HomePageState {
           ),
         ),
       );
-      if (result is Map && result['courseId'] != null) {
+      final targetId = (result is Map && result['courseId'] != null) ? (result['courseId'] as int) : targetCourse.id; if (true) {
         await this.loadCourses();
-        this._navigateHomeToCourse(result['courseId'] as int);
+        this._navigateHomeToCourse(targetId);
       }
       return;
     }
@@ -389,9 +389,9 @@ extension HomePageStatePart02 on _HomePageState {
                               ),
                             ),
                           );
-                          if (navResult is Map && navResult['courseId'] != null) {
+                          final targetId = (navResult is Map && navResult['courseId'] != null) ? (navResult['courseId'] as int) : targetCourse.id; if (true) {
                             await this.loadCourses();
-                            this._navigateHomeToCourse(navResult['courseId'] as int);
+                            this._navigateHomeToCourse(targetId);
                           }
                         },
                         child: AnimatedContainer(
@@ -508,9 +508,9 @@ extension HomePageStatePart02 on _HomePageState {
                                       ),
                               ),
                             );
-                            if (navResult is Map && navResult['courseId'] != null) {
+                            final targetId = (navResult is Map && navResult['courseId'] != null) ? (navResult['courseId'] as int) : targetCourse.id; if (true) {
                               await this.loadCourses();
-                              this._navigateHomeToCourse(navResult['courseId'] as int);
+                              this._navigateHomeToCourse(targetId);
                             }
                           },
                         ),

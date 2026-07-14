@@ -96,6 +96,7 @@ class _SrsEditorItem {
   final int wrongCount;
   final String lastReviewedAt;
   final String nextReviewAt;
+  final String? pronunciation;
 
   _SrsEditorItem({
     required this.cardId,
@@ -112,6 +113,7 @@ class _SrsEditorItem {
     required this.wrongCount,
     required this.lastReviewedAt,
     required this.nextReviewAt,
+    this.pronunciation,
   });
 
   factory _SrsEditorItem.fromMap(Map<String, Object?> map) {
@@ -130,6 +132,7 @@ class _SrsEditorItem {
       wrongCount: _dbInt(map['wrongCount']),
       lastReviewedAt: map['lastReviewedAt']?.toString() ?? '',
       nextReviewAt: map['nextReviewAt']?.toString() ?? '',
+      pronunciation: map['pronunciation']?.toString(),
     );
   }
 
@@ -149,6 +152,7 @@ class _SrsEditorItem {
       'wrongCount': wrongCount,
       'lastReviewedAt': lastReviewedAt,
       'nextReviewAt': nextReviewAt,
+      'pronunciation': pronunciation,
     };
   }
 }

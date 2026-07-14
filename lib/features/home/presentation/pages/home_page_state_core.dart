@@ -65,6 +65,7 @@ class _HomePageState extends State<HomePage>
   final GlobalKey _homeCourseViewportKey = GlobalKey();
   final GlobalKey _homeBackCardKey = GlobalKey();
   final GlobalKey _homeFirstCourseCardKey = GlobalKey();
+  final GlobalKey _homeSelectedCourseCardKey = GlobalKey();
   final GlobalKey _homeTopicViewportKey = GlobalKey();
   final GlobalKey _homeCreateTopicCardKey = GlobalKey();
   int _homeCoursePage = 1;

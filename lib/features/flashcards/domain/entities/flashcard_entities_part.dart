@@ -45,7 +45,6 @@ class StudyCardItem {
   }
 }
 
-
 class ProgressUndoItem {
   final int cardId;
   final int previousPos;
@@ -64,23 +63,23 @@ class ProgressUndoItem {
   });
 }
 
-
 class FlashCardsPage extends StatefulWidget {
   final int courseId;
   final String courseTitle;
   final bool dueOnly;
+  final List<int>? cardIds;
 
   FlashCardsPage({
     super.key,
     required this.courseId,
     required this.courseTitle,
     this.dueOnly = false,
+    this.cardIds,
   });
 
   @override
   State<FlashCardsPage> createState() => _FlashCardsPageState();
 }
-
 
 class ReviewPracticePage extends StatefulWidget {
   final int courseId;
@@ -88,6 +87,7 @@ class ReviewPracticePage extends StatefulWidget {
   final String courseLanguageCode;
   final bool dueOnly;
   final String? presetMode;
+  final List<int>? cardIds;
 
   ReviewPracticePage({
     super.key,
@@ -96,6 +96,7 @@ class ReviewPracticePage extends StatefulWidget {
     required this.courseLanguageCode,
     this.dueOnly = false,
     this.presetMode,
+    this.cardIds,
   });
 
   @override
@@ -106,18 +107,21 @@ class DeepLearnPage extends StatefulWidget {
   final int courseId;
   final String courseTitle;
   final String courseLanguageCode;
+  final List<int>? cardIds;
+  final bool dueOnly;
 
   const DeepLearnPage({
     super.key,
     required this.courseId,
     required this.courseTitle,
     required this.courseLanguageCode,
+    this.cardIds,
+    this.dueOnly = false,
   });
 
   @override
   State<DeepLearnPage> createState() => _DeepLearnPageState();
 }
-
 
 class _GeneratedSentenceQuestion {
   final int cardId;
@@ -131,7 +135,6 @@ class _GeneratedSentenceQuestion {
   });
 }
 
-
 class _GeminiTextGradeItem {
   final int cardId;
   final bool isCorrect;
@@ -143,7 +146,6 @@ class _GeminiTextGradeItem {
     required this.feedback,
   });
 }
-
 
 class _SilverShimmerBlock extends StatefulWidget {
   final double? width;
@@ -159,7 +161,6 @@ class _SilverShimmerBlock extends StatefulWidget {
   @override
   State<_SilverShimmerBlock> createState() => _SilverShimmerBlockState();
 }
-
 
 class _SilverShimmerBlockState extends State<_SilverShimmerBlock>
     with SingleTickerProviderStateMixin {
@@ -238,7 +239,6 @@ class _SilverShimmerBlockState extends State<_SilverShimmerBlock>
   }
 }
 
-
 String normalizeText(String s) {
   return s
       .toLowerCase()
@@ -246,7 +246,6 @@ String normalizeText(String s) {
       .replaceAll(RegExp(r'\s+'), ' ')
       .trim();
 }
-
 
 double calcSimilarity(String a, String b) {
   if (a.isEmpty && b.isEmpty) return 1.0;
@@ -288,9 +287,7 @@ double calcSimilarity(String a, String b) {
   return maxLen == 0 ? 1.0 : math.max(0.0, 1.0 - dist / maxLen);
 }
 
-
 bool _isCJKLang(String lang) => lang.startsWith('zh') || lang.startsWith('ja');
-
 
 List<_WordResult> buildWordResults(String spoken, String target, String lang) {
   final spokenNorm = normalizeText(spoken);
@@ -312,7 +309,6 @@ List<_WordResult> buildWordResults(String spoken, String target, String lang) {
   }
 }
 
-
 class _WordResult {
   final String text;
   final bool ok;
@@ -320,7 +316,6 @@ class _WordResult {
 }
 
 // ─── Pronunciation Overlay ────────────────────────────────────────────────────
-
 
 class PronunciationOverlay extends StatefulWidget {
   final String targetText;
@@ -338,7 +333,6 @@ class PronunciationOverlay extends StatefulWidget {
   State<PronunciationOverlay> createState() => _PronunciationOverlayState();
 }
 
-
 class _MicButton extends StatefulWidget {
   final String label;
   final Color color;
@@ -349,7 +343,6 @@ class _MicButton extends StatefulWidget {
   @override
   State<_MicButton> createState() => _MicButtonState();
 }
-
 
 class _MicButtonState extends State<_MicButton> {
   bool isPressed = false;
@@ -397,7 +390,6 @@ class _MicButtonState extends State<_MicButton> {
   }
 }
 
-
 class SectionTitle extends StatelessWidget {
   final String text;
 
@@ -416,7 +408,6 @@ class SectionTitle extends StatelessWidget {
     );
   }
 }
-
 
 class LightInput extends StatelessWidget {
   final TextEditingController controller;
@@ -464,4 +455,3 @@ class LightInput extends StatelessWidget {
     );
   }
 }
-

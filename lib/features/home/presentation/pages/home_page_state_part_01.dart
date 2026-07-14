@@ -762,12 +762,17 @@ extension HomePageStatePart01 on _HomePageState {
                         onTap: this.openCreateCourse,
                       ),
                       ...pageCourses.asMap().entries.map(
-                        (entry) => this._buildWebCourseTile(
-                          entry.value,
-                          key: entry.key == 0
-                              ? _homeFirstCourseCardKey
-                              : null,
-                        ),
+                        (entry) {
+                          final course = entry.value;
+                          final isFirst = entry.key == 0;
+                          final isSelected = selectedHomeCourse?.id == course.id;
+                          return this._buildWebCourseTile(
+                            course,
+                            key: isSelected
+                                ? _homeSelectedCourseCardKey
+                                : (isFirst ? _homeFirstCourseCardKey : null),
+                          );
+                        },
                       ),
                     ];
 
@@ -924,16 +929,26 @@ extension HomePageStatePart01 on _HomePageState {
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final firstCourseContext = _homeFirstCourseCardKey.currentContext;
-      if (firstCourseContext != null) {
+      final selectedCourseContext = _homeSelectedCourseCardKey.currentContext;
+      if (selectedCourseContext != null) {
         Scrollable.ensureVisible(
-          firstCourseContext,
-          alignment: 0,
+          selectedCourseContext,
+          alignment: 0.5,
           duration: Duration(milliseconds: 320),
           curve: Curves.easeOutCubic,
         );
-      } else if (_homeCourseScrollController.hasClients) {
-        _homeCourseScrollController.jumpTo(0);
+      } else {
+        final firstCourseContext = _homeFirstCourseCardKey.currentContext;
+        if (firstCourseContext != null) {
+          Scrollable.ensureVisible(
+            firstCourseContext,
+            alignment: 0,
+            duration: Duration(milliseconds: 320),
+            curve: Curves.easeOutCubic,
+          );
+        } else if (_homeCourseScrollController.hasClients) {
+          _homeCourseScrollController.jumpTo(0);
+        }
       }
     });
   }

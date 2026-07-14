@@ -41,10 +41,6 @@ extension StatisticsPageStatePart06 on _StatisticsPageState {
     );
   }
 
-
-
-
-
   Widget _buildDueItem(ReviewDueItem item) {
     final intervalText = item.intervalDays > 0
         ? ' • ngày ${item.intervalDays}'
@@ -114,10 +110,6 @@ extension StatisticsPageStatePart06 on _StatisticsPageState {
     );
   }
 
-
-
-
-
   Widget _buildEmptyBox(String text) {
     return Container(
       width: double.infinity,
@@ -135,7 +127,6 @@ extension StatisticsPageStatePart06 on _StatisticsPageState {
     );
   }
 
-
   Future<List<_SrsEditorItem>> _loadSrsEditorItems() async {
     final db = await AppDatabase.instance.database;
     final rows = await db.rawQuery('''
@@ -144,6 +135,7 @@ extension StatisticsPageStatePart06 on _StatisticsPageState {
         c.id AS courseId,
         ca.term,
         ca.definition,
+        ca.pronunciation,
         c.title AS courseTitle,
         c.languageCode,
         COALESCE(rs.level, 0) AS level,
@@ -167,11 +159,8 @@ extension StatisticsPageStatePart06 on _StatisticsPageState {
         c.title ASC,
         ca.position ASC,
         ca.id ASC
-      LIMIT 120
     ''');
 
     return rows.map(_SrsEditorItem.fromMap).toList();
   }
-
-
 }

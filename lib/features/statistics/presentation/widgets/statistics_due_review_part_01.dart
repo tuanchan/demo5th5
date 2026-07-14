@@ -21,16 +21,14 @@ class _DueReviewLaunchInfo {
   });
 }
 
-
-
-
-
 enum _DueStudyAction { flash, review }
 
 Future<String?> _showDueReviewSetupDialog(
   BuildContext context,
-  _DueReviewLaunchInfo info,
-) async {
+  _DueReviewLaunchInfo info, {
+  String title = 'Thiết lập bài kiểm tra SRS',
+  String? subtitle,
+}) async {
   final savedMultipleChoice =
       await AppSettingsStore.getBool('review.multipleChoice') ?? true;
   final savedEssay = await AppSettingsStore.getBool('review.essay') ?? false;
@@ -38,6 +36,8 @@ Future<String?> _showDueReviewSetupDialog(
       await AppSettingsStore.getBool('review.listening') ?? false;
   final savedMatchingPairs =
       await AppSettingsStore.getBool('review.matchingPairs') ?? false;
+  final savedDeepLearn =
+      await AppSettingsStore.getBool('review.deepLearn') ?? false;
   final savedAnswerByDefinition =
       await AppSettingsStore.getBool('review.answerByDefinition') ?? true;
   final savedLimit =
@@ -49,8 +49,10 @@ Future<String?> _showDueReviewSetupDialog(
       ? 'essay'
       : (savedListening
             ? 'listening'
-            : (savedMatchingPairs ? 'matchingPairs' : 'multipleChoice'));
-  if (savedMultipleChoice) mode = 'multipleChoice';
+            : (savedMatchingPairs
+                ? 'matchingPairs'
+                : (savedDeepLearn ? 'deepLearn' : 'multipleChoice')));
+  if (savedMultipleChoice && !savedDeepLearn) mode = 'multipleChoice';
   var answerByDefinition = savedAnswerByDefinition;
   var questionLimit = savedLimit.clamp(1, info.count).toInt();
 
@@ -77,14 +79,19 @@ Future<String?> _showDueReviewSetupDialog(
               ),
               child: Row(
                 children: [
-                  Icon(icon, color: selected ? _dueDialogBlue : _dueDialogMuted),
+                  Icon(
+                    icon,
+                    color: selected ? _dueDialogBlue : _dueDialogMuted,
+                  ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
                       title,
                       style: TextStyle(
                         color: _dueDialogText,
-                        fontWeight: selected ? FontWeight.w900 : FontWeight.w700,
+                        fontWeight: selected
+                            ? FontWeight.w900
+                            : FontWeight.w700,
                       ),
                     ),
                   ),
@@ -102,7 +109,10 @@ Future<String?> _showDueReviewSetupDialog(
 
         return Dialog(
           backgroundColor: Colors.transparent,
-          insetPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 18),
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 14,
+            vertical: 18,
+          ),
           child: Container(
             constraints: BoxConstraints(
               maxWidth: 560,
@@ -117,10 +127,10 @@ Future<String?> _showDueReviewSetupDialog(
                 children: [
                   Row(
                     children: [
-                      const Expanded(
+                      Expanded(
                         child: Text(
-                          'Thiết lập bài kiểm tra SRS',
-                          style: TextStyle(
+                          title,
+                          style: const TextStyle(
                             color: _dueDialogText,
                             fontSize: 23,
                             fontWeight: FontWeight.w900,
@@ -129,12 +139,15 @@ Future<String?> _showDueReviewSetupDialog(
                       ),
                       IconButton(
                         onPressed: () => Navigator.pop(dialogContext),
-                        icon: const Icon(Icons.close_rounded, color: _dueDialogMuted),
+                        icon: const Icon(
+                          Icons.close_rounded,
+                          color: _dueDialogMuted,
+                        ),
                       ),
                     ],
                   ),
                   Text(
-                    '${info.count} thẻ đến hạn hôm nay',
+                    subtitle ?? '${info.count} thẻ đến hạn hôm nay',
                     style: const TextStyle(
                       color: _dueDialogMuted,
                       fontWeight: FontWeight.w700,
@@ -146,7 +159,10 @@ Future<String?> _showDueReviewSetupDialog(
                       const Expanded(
                         child: Text(
                           'Số câu hỏi',
-                          style: TextStyle(color: _dueDialogText, fontWeight: FontWeight.w800),
+                          style: TextStyle(
+                            color: _dueDialogText,
+                            fontWeight: FontWeight.w800,
+                          ),
                         ),
                       ),
                       IconButton(
@@ -158,7 +174,10 @@ Future<String?> _showDueReviewSetupDialog(
                       ),
                       Text(
                         '$questionLimit',
-                        style: const TextStyle(color: _dueDialogText, fontWeight: FontWeight.w900),
+                        style: const TextStyle(
+                          color: _dueDialogText,
+                          fontWeight: FontWeight.w900,
+                        ),
                       ),
                       IconButton(
                         onPressed: questionLimit >= info.count
@@ -173,7 +192,10 @@ Future<String?> _showDueReviewSetupDialog(
                   DropdownButtonFormField<bool>(
                     value: answerByDefinition,
                     dropdownColor: _dueDialogSurface,
-                    style: const TextStyle(color: _dueDialogText, fontWeight: FontWeight.w700),
+                    style: const TextStyle(
+                      color: _dueDialogText,
+                      fontWeight: FontWeight.w700,
+                    ),
                     decoration: InputDecoration(
                       labelText: 'Trả lời bằng',
                       labelStyle: const TextStyle(color: _dueDialogMuted),
@@ -199,10 +221,23 @@ Future<String?> _showDueReviewSetupDialog(
                     },
                   ),
                   const SizedBox(height: 16),
-                  modeTile('multipleChoice', 'Trắc nghiệm (4 đáp án)', Icons.list_alt_rounded),
+                  modeTile(
+                    'multipleChoice',
+                    'Trắc nghiệm (4 đáp án)',
+                    Icons.list_alt_rounded,
+                  ),
                   modeTile('essay', 'Tự luận', Icons.edit_outlined),
                   modeTile('listening', 'Nghe', Icons.headphones_rounded),
-                  modeTile('matchingPairs', 'Kiểm tra cặp thẻ', Icons.grid_view_rounded),
+                  modeTile(
+                    'matchingPairs',
+                    'Kiểm tra cặp thẻ',
+                    Icons.grid_view_rounded,
+                  ),
+                  modeTile(
+                    'deepLearn',
+                    'Học chuyên sâu',
+                    Icons.psychology_rounded,
+                  ),
                   const SizedBox(height: 10),
                   SizedBox(
                     width: double.infinity,
@@ -212,15 +247,41 @@ Future<String?> _showDueReviewSetupDialog(
                       color: const Color(0xff4257ff),
                       onTap: () async {
                         await Future.wait([
-                          AppSettingsStore.setBool('review.multipleChoice', mode == 'multipleChoice'),
-                          AppSettingsStore.setBool('review.essay', mode == 'essay'),
-                          AppSettingsStore.setBool('review.listening', mode == 'listening'),
-                          AppSettingsStore.setBool('review.matchingPairs', mode == 'matchingPairs'),
-                          AppSettingsStore.setBool('review.sentenceMode', false),
-                          AppSettingsStore.setBool('review.answerByDefinition', answerByDefinition),
-                          AppSettingsStore.setInt('review.questionLimit', questionLimit),
+                          AppSettingsStore.setBool(
+                            'review.multipleChoice',
+                            mode == 'multipleChoice',
+                          ),
+                          AppSettingsStore.setBool(
+                            'review.essay',
+                            mode == 'essay',
+                          ),
+                          AppSettingsStore.setBool(
+                            'review.listening',
+                            mode == 'listening',
+                          ),
+                          AppSettingsStore.setBool(
+                            'review.matchingPairs',
+                            mode == 'matchingPairs',
+                          ),
+                          AppSettingsStore.setBool(
+                            'review.deepLearn',
+                            mode == 'deepLearn',
+                          ),
+                          AppSettingsStore.setBool(
+                            'review.sentenceMode',
+                            false,
+                          ),
+                          AppSettingsStore.setBool(
+                            'review.answerByDefinition',
+                            answerByDefinition,
+                          ),
+                          AppSettingsStore.setInt(
+                            'review.questionLimit',
+                            questionLimit,
+                          ),
                         ]);
-                        if (dialogContext.mounted) Navigator.pop(dialogContext, mode);
+                        if (dialogContext.mounted)
+                          Navigator.pop(dialogContext, mode);
                       },
                     ),
                   ),
@@ -234,16 +295,14 @@ Future<String?> _showDueReviewSetupDialog(
   );
 }
 
-
-
-
-
 Future<_DueReviewLaunchInfo?> _loadDueReviewLaunchInfo() async {
   final db = await AppDatabase.instance.database;
   final now = DateTime.now();
-  final tomorrowStart = DateTime(now.year, now.month, now.day).add(
-    getDuration(days: 1),
-  );
+  final tomorrowStart = DateTime(
+    now.year,
+    now.month,
+    now.day,
+  ).add(getDuration(days: 1));
   final dueBefore = tomorrowStart.toIso8601String();
 
   final countRows = await db.rawQuery(
@@ -300,10 +359,6 @@ Future<_DueReviewLaunchInfo?> _loadDueReviewLaunchInfo() async {
   );
 }
 
-
-
-
-
 Future<void> _openDueReviewFlow(
   BuildContext context, {
   _DueReviewLaunchInfo? initialInfo,
@@ -336,6 +391,21 @@ Future<void> _openDueReviewFlow(
   final presetMode = await _showDueReviewSetupDialog(context, info);
   if (!context.mounted || presetMode == null) return;
 
+  if (presetMode == 'deepLearn') {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => DeepLearnPage(
+          courseId: info.courseId,
+          courseTitle: 'Học chuyên sâu thẻ đến hạn hôm nay',
+          courseLanguageCode: info.languageCode,
+          dueOnly: true,
+        ),
+      ),
+    );
+    return;
+  }
+
   await Navigator.push(
     context,
     MaterialPageRoute(
@@ -349,10 +419,6 @@ Future<void> _openDueReviewFlow(
     ),
   );
 }
-
-
-
-
 
 Future<bool?> _showDueTodayReminderDialog(
   BuildContext context,
@@ -427,10 +493,6 @@ Future<bool?> _showDueTodayReminderDialog(
   );
 }
 
-
-
-
-
 Future<_DueStudyAction?> _showDueStudyTypeDialog(
   BuildContext context,
   _DueReviewLaunchInfo info,
@@ -487,14 +549,16 @@ Future<_DueStudyAction?> _showDueStudyTypeDialog(
                 title: 'Học thẻ',
                 subtitle: 'Mở màn hình flash card chỉ gồm thẻ đến hạn.',
                 icon: Icons.style_rounded,
-                onTap: () => Navigator.pop(dialogContext, _DueStudyAction.flash),
+                onTap: () =>
+                    Navigator.pop(dialogContext, _DueStudyAction.flash),
               ),
               Divider(color: _dueDialogBorder, height: 1),
               _dueActionTile(
                 title: 'Ôn tập',
                 subtitle: 'Mở thiết lập kiểm tra SRS cho thẻ đến hạn.',
                 icon: Icons.school_rounded,
-                onTap: () => Navigator.pop(dialogContext, _DueStudyAction.review),
+                onTap: () =>
+                    Navigator.pop(dialogContext, _DueStudyAction.review),
               ),
             ],
           ),
@@ -503,10 +567,6 @@ Future<_DueStudyAction?> _showDueStudyTypeDialog(
     },
   );
 }
-
-
-
-
 
 BoxDecoration _dueDialogDecoration() {
   return BoxDecoration(
@@ -522,10 +582,6 @@ BoxDecoration _dueDialogDecoration() {
     ],
   );
 }
-
-
-
-
 
 Widget _dueActionTile({
   required String title,

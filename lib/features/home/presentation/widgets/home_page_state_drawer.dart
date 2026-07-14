@@ -305,7 +305,9 @@ extension HomePageStateDrawer on _HomePageState {
         onTap: () {
           setState(() {
             selectedHomeCourse = course;
+            isOpen = false;
           });
+          this._navigateHomeToCourse(course.id);
         },
         onDoubleTap: () {
           setState(() {

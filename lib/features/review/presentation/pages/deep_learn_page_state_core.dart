@@ -124,12 +124,53 @@ class _DeepLearnPageState extends State<DeepLearnPage> {
   Future<void> _load() async {
     try {
       final db = await AppDatabase.instance.database;
-      final rows = await db.query(
-        'cards',
-        where: 'courseId = ? AND deletedAt IS NULL AND isHidden = 0',
-        whereArgs: [widget.courseId],
-        orderBy: 'position ASC, id ASC',
-      );
+      List<Map<String, Object?>> rows;
+      
+      if (widget.cardIds != null && widget.cardIds!.isNotEmpty) {
+        final placeholders = List.filled(widget.cardIds!.length, '?').join(',');
+        rows = await db.rawQuery(
+          '''
+          SELECT * FROM cards
+          WHERE courseId = ?
+            AND deletedAt IS NULL
+            AND isHidden = 0
+            AND id IN ($placeholders)
+          ORDER BY position ASC, id ASC
+          ''',
+          [widget.courseId, ...widget.cardIds!],
+        );
+      } else if (widget.dueOnly) {
+        final now = DateTime.now();
+        final tomorrowStart = DateTime(
+          now.year,
+          now.month,
+          now.day,
+        ).add(const Duration(days: 1));
+        rows = await db.rawQuery(
+          '''
+          SELECT ca.* FROM cards ca
+          INNER JOIN courses c ON c.id = ca.courseId
+          INNER JOIN review_states rs ON rs.cardId = ca.id
+          WHERE ca.deletedAt IS NULL
+            AND ca.isHidden = 0
+            AND c.deletedAt IS NULL
+            AND COALESCE(rs.repetitionCount, 0) > 0
+            AND rs.nextReviewAt IS NOT NULL
+            AND rs.nextReviewAt < ?
+            AND ca.courseId = ?
+          ORDER BY rs.nextReviewAt ASC, ca.position ASC, ca.id ASC
+        ''',
+          [tomorrowStart.toIso8601String(), widget.courseId],
+        );
+      } else {
+        rows = await db.query(
+          'cards',
+          where: 'courseId = ? AND deletedAt IS NULL AND isHidden = 0',
+          whereArgs: [widget.courseId],
+          orderBy: 'position ASC, id ASC',
+        );
+      }
+
       final cards = rows.map(StudyCardItem.fromMap).where((card) {
         return card.term.trim().isNotEmpty && card.definition.trim().isNotEmpty;
       }).toList();
@@ -137,7 +178,9 @@ class _DeepLearnPageState extends State<DeepLearnPage> {
       _cards = cards;
       _storageKey = _buildStorageKey(cards);
       await _loadGlobalSettings();
-      final restored = await _restoreState();
+      
+      final isAdhocOrDue = widget.dueOnly || (widget.cardIds != null && widget.cardIds!.isNotEmpty);
+      final restored = isAdhocOrDue ? false : await _restoreState();
       if (!restored) _createState(cards);
       _normalizeQueue();
       setState(() => _isLoading = false);

@@ -404,6 +404,7 @@ extension StatisticsPageStatePart06Split03 on _StatisticsPageState {
         c.id AS courseId,
         ca.term,
         ca.definition,
+        ca.pronunciation,
         c.title AS courseTitle,
         c.languageCode,
         COALESCE(rs.level, 0) AS level,

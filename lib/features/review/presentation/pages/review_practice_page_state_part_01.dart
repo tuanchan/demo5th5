@@ -60,7 +60,9 @@ extension ReviewPracticePageStatePart01 on _ReviewPracticePageState {
                                           ),
                                           padding: EdgeInsets.all(22),
                                           decoration: BoxDecoration(
-                                            color: AppColors.activeIsDark ? AppColors.panel : Colors.white,
+                                            color: AppColors.activeIsDark
+                                                ? AppColors.panel
+                                                : Colors.white,
                                             borderRadius: BorderRadius.circular(
                                               24,
                                             ),
@@ -177,11 +179,7 @@ extension ReviewPracticePageStatePart01 on _ReviewPracticePageState {
     );
   }
 
-// ─── Pronunciation helpers ────────────────────────────────────────────────────
-
-
-
-
+  // ─── Pronunciation helpers ────────────────────────────────────────────────────
 
   Future<void> _loadCards() async {
     try {
@@ -190,11 +188,29 @@ extension ReviewPracticePageStatePart01 on _ReviewPracticePageState {
 
       List<Map<String, Object?>> rows;
 
-      if (widget.dueOnly) {
+      if (widget.cardIds != null && widget.cardIds!.isNotEmpty) {
+        final placeholders = List.filled(widget.cardIds!.length, '?').join(',');
+        rows = await db.rawQuery(
+          '''
+          SELECT * FROM cards
+          WHERE courseId = ?
+            AND deletedAt IS NULL
+            AND isHidden = 0
+            AND id IN ($placeholders)
+          ORDER BY position ASC, id ASC
+          ''',
+          [widget.courseId, ...widget.cardIds!],
+        );
+      } else if (widget.dueOnly) {
         // Load due cards across all courses
         final now = DateTime.now();
-        final tomorrowStart = DateTime(now.year, now.month, now.day).add(Duration(days: 1));
-        rows = await db.rawQuery('''
+        final tomorrowStart = DateTime(
+          now.year,
+          now.month,
+          now.day,
+        ).add(Duration(days: 1));
+        rows = await db.rawQuery(
+          '''
           SELECT ca.* FROM cards ca
           INNER JOIN courses c ON c.id = ca.courseId
           INNER JOIN review_states rs ON rs.cardId = ca.id
@@ -205,7 +221,9 @@ extension ReviewPracticePageStatePart01 on _ReviewPracticePageState {
             AND rs.nextReviewAt IS NOT NULL
             AND rs.nextReviewAt < ?
           ORDER BY rs.nextReviewAt ASC, ca.position ASC, ca.id ASC
-        ''', [tomorrowStart.toIso8601String()]);
+        ''',
+          [tomorrowStart.toIso8601String()],
+        );
       } else {
         rows = await db.query(
           'cards',
@@ -265,10 +283,6 @@ extension ReviewPracticePageStatePart01 on _ReviewPracticePageState {
     }
   }
 
-
-
-
-
   Future<void> _loadReviewSettings() async {
     final savedMultipleChoice = await AppSettingsStore.getBool(
       'review.multipleChoice',
@@ -322,10 +336,6 @@ extension ReviewPracticePageStatePart01 on _ReviewPracticePageState {
     });
   }
 
-
-
-
-
   Future<void> _saveReviewSettings() async {
     await Future.wait([
       AppSettingsStore.setBool('review.multipleChoice', _multipleChoice),
@@ -340,10 +350,6 @@ extension ReviewPracticePageStatePart01 on _ReviewPracticePageState {
       AppSettingsStore.setInt('review.questionLimit', _questionLimit),
     ]);
   }
-
-
-
-
 
   Future<void> _startStudySession({
     required String mode,
@@ -371,6 +377,4 @@ extension ReviewPracticePageStatePart01 on _ReviewPracticePageState {
       ..clear()
       ..addEntries(_quizCards.map((card) => MapEntry(card.id, now)));
   }
-
-
 }

@@ -310,7 +310,9 @@ extension StatisticsPageStatePart02 on _StatisticsPageState {
       languageItems: languageRows.asMap().entries.map((entry) {
         final row = entry.value;
         return LanguageDistributionItem(
-          label: this._languageLabelFromCode(row['languageCode']?.toString() ?? ''),
+          label: this._languageLabelFromCode(
+            row['languageCode']?.toString() ?? '',
+          ),
           count: this._asInt(row['cardCount']),
           color: this._languageColor(entry.key),
         );
@@ -350,13 +352,12 @@ extension StatisticsPageStatePart02 on _StatisticsPageState {
     );
   }
 
-
   void reloadStatistics() {
     setState(() {
       _future = this.loadStatistics();
+      _srsManagerFuture = this._loadSrsEditorItems();
     });
   }
-
 
   Widget _buildDashboard(StatisticsData data) {
     return Column(
@@ -418,10 +419,11 @@ extension StatisticsPageStatePart02 on _StatisticsPageState {
             );
           },
         ),
+        SizedBox(height: 16),
+        this._buildInlineSrsManager(data),
       ],
     );
   }
-
 
   Widget _buildDashboardTopBar() {
     return Row(
@@ -446,11 +448,13 @@ extension StatisticsPageStatePart02 on _StatisticsPageState {
           onTap: this.openSrsEditor,
         ),
         SizedBox(width: 8),
-        this._dashIconButton(icon: Icons.refresh_rounded, onTap: this.reloadStatistics),
+        this._dashIconButton(
+          icon: Icons.refresh_rounded,
+          onTap: this.reloadStatistics,
+        ),
       ],
     );
   }
-
 
   Widget _dashIconButton({
     required IconData icon,
@@ -471,5 +475,4 @@ extension StatisticsPageStatePart02 on _StatisticsPageState {
       ),
     );
   }
-
 }
