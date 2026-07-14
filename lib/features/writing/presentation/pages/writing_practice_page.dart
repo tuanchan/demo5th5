@@ -146,6 +146,7 @@ class _WritingPracticePageState extends State<WritingPracticePage> {
   final _topicController = TextEditingController();
   final _answerController = TextEditingController();
   final _scrollController = ScrollController();
+  final FlutterTts _writingTts = FlutterTts();
 
   List<CourseListItem> _courses = [];
   int? _selectedCourseId;
@@ -153,6 +154,8 @@ class _WritingPracticePageState extends State<WritingPracticePage> {
   String _practiceMode = 'translate';
   String _difficulty = 'basic';
   String _tense = 'Present Simple';
+  String _targetLanguageOverride = '';
+  bool _showSettings = true;
   String? _busyPhase;
   String _error = '';
   _WritingScript? _script;
@@ -168,6 +171,12 @@ class _WritingPracticePageState extends State<WritingPracticePage> {
     return null;
   }
 
+  String get _targetLanguageCode {
+    if (_targetLanguageOverride.isNotEmpty) return _targetLanguageOverride;
+    final courseCode = _selectedCourse?.languageCode.trim() ?? '';
+    return courseCode.isEmpty ? 'en-US' : courseCode;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -180,6 +189,7 @@ class _WritingPracticePageState extends State<WritingPracticePage> {
     _topicController.dispose();
     _answerController.dispose();
     _scrollController.dispose();
+    _writingTts.stop();
     _disposeClozeItems();
     super.dispose();
   }
@@ -193,6 +203,7 @@ class _WritingPracticePageState extends State<WritingPracticePage> {
 
   Future<void> _loadCourses() async {
     try {
+      await AppDatabase.instance.ensureTopicSchema();
       final db = await AppDatabase.instance.database;
       final rows = await db.rawQuery('''
         SELECT c.id, c.topicId, COALESCE(t.name, '') AS topicName,
@@ -307,9 +318,7 @@ class _WritingPracticePageState extends State<WritingPracticePage> {
     try {
       final cards = await _loadVocabulary();
       final info = _difficultyInfo;
-      final languageCode = course?.languageCode.trim().isNotEmpty == true
-          ? course!.languageCode.trim()
-          : 'en-US';
+      final languageCode = _targetLanguageCode;
       final languageName = _languageName(languageCode);
       final topic = _sourceMode == 'topic'
           ? _topicController.text.trim()
@@ -553,6 +562,13 @@ Schema: {"score":82,"overallFeedback":"nhận xét","suggestedRewrite":"bản vi
     final script = _script;
     if (script == null || script.targetText.isEmpty) return;
     try {
+      if (!kIsWeb && Platform.isWindows) {
+        await _writingTts.stop();
+        await _writingTts.setLanguage(script.targetLanguageCode);
+        await _writingTts.setSpeechRate(0.42);
+        await _writingTts.speak(script.targetText);
+        return;
+      }
       await TtsAudioCache.instance.playText(
         text: script.targetText,
         languageCode: script.targetLanguageCode,
@@ -578,7 +594,7 @@ Schema: {"score":82,"overallFeedback":"nhận xét","suggestedRewrite":"bản vi
   String _buildImportPrompt() {
     final course = _selectedCourse;
     final info = _difficultyInfo;
-    final code = course?.languageCode ?? 'en-US';
+    final code = _targetLanguageCode;
     return '''
 Hãy tạo JSON thuần để import vào app luyện viết. Không dùng markdown.
 Ngôn ngữ đích: ${_languageName(code)} ($code)
@@ -787,7 +803,9 @@ Schema: {"title":"tiêu đề","topic":"chủ đề","difficulty":"${info.label}
 
   Widget _buildSettingsPanel() {
     final course = _selectedCourse;
-    final languageCode = course?.languageCode ?? 'en-US';
+    final courseLanguageCode = course?.languageCode.trim().isNotEmpty == true
+        ? course!.languageCode.trim()
+        : 'en-US';
     return _panel(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -880,18 +898,43 @@ Schema: {"title":"tiêu đề","topic":"chủ đề","difficulty":"${info.label}
             SizedBox(height: 14),
           ],
           _label('Ngôn ngữ đích'),
-          Container(
-            width: double.infinity,
-            padding: EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-            decoration: BoxDecoration(
-              color: _surface2,
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: _border),
-            ),
-            child: Text(
-              '${_languageName(languageCode)} ($languageCode)',
-              style: TextStyle(color: Colors.white),
-            ),
+          _dropdown<String>(
+            value: _targetLanguageOverride.isEmpty
+                ? '__course__'
+                : _targetLanguageOverride,
+            items: <DropdownMenuItem<String>>[
+              DropdownMenuItem(
+                value: '__course__',
+                child: Text(
+                  'Theo học phần · ${_languageName(courseLanguageCode)} ($courseLanguageCode)',
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              ...const {
+                'en-US': 'Tiếng Anh (en-US)',
+                'zh-TW': 'Tiếng Trung phồn thể (zh-TW)',
+                'ja-JP': 'Tiếng Nhật (ja-JP)',
+                'ko-KR': 'Tiếng Hàn (ko-KR)',
+                'fr-FR': 'Tiếng Pháp (fr-FR)',
+                'de-DE': 'Tiếng Đức (de-DE)',
+                'es-ES': 'Tiếng Tây Ban Nha (es-ES)',
+              }.entries.map(
+                (entry) => DropdownMenuItem(
+                  value: entry.key,
+                  child: Text(entry.value, overflow: TextOverflow.ellipsis),
+                ),
+              ),
+            ],
+            onChanged: (value) {
+              setState(() {
+                _targetLanguageOverride = value == '__course__'
+                    ? ''
+                    : (value ?? '');
+                _script = null;
+                _grade = null;
+                _hints = null;
+              });
+            },
           ),
           SizedBox(height: 14),
           _label('Độ khó'),
@@ -1301,6 +1344,7 @@ Schema: {"title":"tiêu đề","topic":"chủ đề","difficulty":"${info.label}
         backgroundColor: _surface,
         foregroundColor: Colors.white,
         elevation: 0,
+        toolbarHeight: 66,
         centerTitle: true,
         leading: IconButton(
           onPressed: () => Navigator.maybePop(context),
@@ -1310,6 +1354,14 @@ Schema: {"title":"tiêu đề","topic":"chủ đề","difficulty":"${info.label}
           'Luyện viết',
           style: TextStyle(fontSize: 17, fontWeight: FontWeight.w400),
         ),
+        actions: [
+          IconButton(
+            tooltip: _showSettings ? 'Ẩn thiết lập' : 'Hiện thiết lập',
+            onPressed: () => setState(() => _showSettings = !_showSettings),
+            icon: Icon(Icons.tune_rounded),
+          ),
+          SizedBox(width: 4),
+        ],
         bottom: PreferredSize(
           preferredSize: Size.fromHeight(1),
           child: Container(height: 1, color: _border),
@@ -1343,8 +1395,10 @@ Schema: {"title":"tiêu đề","topic":"chủ đề","difficulty":"${info.label}
                         if (constraints.maxWidth < 860) {
                           return Column(
                             children: [
-                              _buildSettingsPanel(),
-                              SizedBox(height: 14),
+                              if (_showSettings) ...[
+                                _buildSettingsPanel(),
+                                SizedBox(height: 14),
+                              ],
                               _buildWorkspace(),
                             ],
                           );
@@ -1352,8 +1406,13 @@ Schema: {"title":"tiêu đề","topic":"chủ đề","difficulty":"${info.label}
                         return Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            SizedBox(width: 340, child: _buildSettingsPanel()),
-                            SizedBox(width: 14),
+                            if (_showSettings) ...[
+                              SizedBox(
+                                width: 340,
+                                child: _buildSettingsPanel(),
+                              ),
+                              SizedBox(width: 14),
+                            ],
                             Expanded(child: _buildWorkspace()),
                           ],
                         );
