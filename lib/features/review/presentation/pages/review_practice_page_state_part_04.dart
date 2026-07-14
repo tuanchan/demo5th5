@@ -72,19 +72,14 @@ extension ReviewPracticePageStatePart04 on _ReviewPracticePageState {
                   constraints: BoxConstraints(maxWidth: 760),
                   padding: EdgeInsets.fromLTRB(18, 16, 18, 16),
                   decoration: BoxDecoration(
-                    color: AppColors.activeIsDark ? AppColors.panel : Color(0xfff6f1fb),
-                    borderRadius: BorderRadius.circular(26),
-                    border: Border.all(color: AppColors.border, width: 1.4),
+                    color: Color(0xff0b0c10),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Color(0xff242832)),
                     boxShadow: [
                       BoxShadow(
-                        color: AppColors.border,
-                        offset: Offset(0, 7),
-                        blurRadius: 0,
-                      ),
-                      BoxShadow(
-                        color: Color(0x26000000),
-                        offset: Offset(0, 18),
-                        blurRadius: 28,
+                        color: Color(0x66000000),
+                        offset: Offset(0, 12),
+                        blurRadius: 24,
                       ),
                     ],
                   ),
@@ -102,9 +97,9 @@ extension ReviewPracticePageStatePart04 on _ReviewPracticePageState {
                                   Text(
                                     'Câu sai ${reviewIndex + 1}/${wrongCards.length}',
                                     style: TextStyle(
-                                      color: AppColors.muted,
+                                      color: Color(0xff9aa4b8),
                                       fontSize: 13,
-                                      fontWeight: FontWeight.w900,
+                                      fontWeight: FontWeight.w400,
                                     ),
                                   ),
                                   SizedBox(height: 3),
@@ -113,9 +108,9 @@ extension ReviewPracticePageStatePart04 on _ReviewPracticePageState {
                                         ? 'Câu ${realIndex + 1}/$_total'
                                         : 'Xem lại câu sai',
                                     style: TextStyle(
-                                      color: AppColors.text,
+                                      color: Colors.white,
                                       fontSize: 22,
-                                      fontWeight: FontWeight.w900,
+                                      fontWeight: FontWeight.w400,
                                     ),
                                   ),
                                 ],
@@ -123,13 +118,17 @@ extension ReviewPracticePageStatePart04 on _ReviewPracticePageState {
                             ),
                             if (geminiFeedback.isNotEmpty) ...[
                               SizedBox(width: 8),
-                              geminiColorIcon(size: 24),
+                              Icon(
+                                Icons.auto_awesome_rounded,
+                                size: 22,
+                                color: Color(0xff4257ff),
+                              ),
                             ],
                             IconButton(
                               onPressed: () => Navigator.pop(sheetContext),
                               icon: Icon(
                                 Icons.close_rounded,
-                                color: AppColors.border,
+                                color: Colors.white,
                               ),
                             ),
                           ],
@@ -138,20 +137,17 @@ extension ReviewPracticePageStatePart04 on _ReviewPracticePageState {
                         Text(
                           promptTitle,
                           style: TextStyle(
-                            color: AppColors.muted,
-                            fontWeight: FontWeight.w900,
+                            color: Color(0xff9aa4b8),
+                            fontWeight: FontWeight.w400,
                           ),
                         ),
                         SizedBox(height: 8),
                         Container(
                           width: double.infinity,
-                          padding: EdgeInsets.all(14),
+                          padding: EdgeInsets.symmetric(vertical: 14),
                           decoration: BoxDecoration(
-                            color: AppColors.activeIsDark ? AppColors.panel2 : Colors.white,
-                            borderRadius: BorderRadius.circular(18),
-                            border: Border.all(
-                              color: AppColors.border.withOpacity(0.5),
-                              width: 1.2,
+                            border: Border(
+                              bottom: BorderSide(color: Color(0xff242832)),
                             ),
                           ),
                           child: Text(
@@ -160,9 +156,9 @@ extension ReviewPracticePageStatePart04 on _ReviewPracticePageState {
                                 : promptText,
                             textAlign: TextAlign.center,
                             style: TextStyle(
-                              color: AppColors.text,
+                              color: Colors.white,
                               fontSize: promptText.length > 22 ? 24 : 30,
-                              fontWeight: FontWeight.w900,
+                              fontWeight: FontWeight.w400,
                               height: 1.15,
                             ),
                           ),
@@ -171,8 +167,8 @@ extension ReviewPracticePageStatePart04 on _ReviewPracticePageState {
                         Text(
                           'Bạn trả lời',
                           style: TextStyle(
-                            color: AppColors.muted,
-                            fontWeight: FontWeight.w900,
+                            color: Color(0xff9aa4b8),
+                            fontWeight: FontWeight.w400,
                           ),
                         ),
                         SizedBox(height: 8),
@@ -181,14 +177,13 @@ extension ReviewPracticePageStatePart04 on _ReviewPracticePageState {
                           icon: yourAnswer.isEmpty
                               ? Icons.skip_next_rounded
                               : Icons.close_rounded,
-                          color: AppColors.red,
                         ),
                         SizedBox(height: 12),
                         Text(
                           'Đáp án đúng',
                           style: TextStyle(
-                            color: AppColors.muted,
-                            fontWeight: FontWeight.w900,
+                            color: Color(0xff9aa4b8),
+                            fontWeight: FontWeight.w400,
                           ),
                         ),
                         SizedBox(height: 8),
@@ -197,7 +192,6 @@ extension ReviewPracticePageStatePart04 on _ReviewPracticePageState {
                               ? 'Chưa có đáp án'
                               : correctAnswer,
                           icon: Icons.check_rounded,
-                          color: AppColors.green,
                         ),
                         if (geminiFeedback.isNotEmpty) ...[
                           SizedBox(height: 12),
@@ -219,14 +213,14 @@ extension ReviewPracticePageStatePart04 on _ReviewPracticePageState {
                             Spacer(),
                             this._statChip(
                               text: '${reviewIndex + 1}/${wrongCards.length}',
-                              color: AppColors.blue,
                             ),
                             Spacer(),
                             SizedBox(
                               width: 54,
-                              child: this._outlineButton(
+                              child: this._solidButton(
                                 text: '',
                                 icon: Icons.chevron_right_rounded,
+                                color: Color(0xff4257ff),
                                 onTap: reviewIndex >= wrongCards.length - 1
                                     ? () {}
                                     : () => moveReview(1),

@@ -185,14 +185,7 @@ extension SettingsPageStatePart01 on _SettingsPageState {
           GeminiFlashLiteClient.apiKeySettingKey,
         ) ??
         '';
-    if (!mounted) return;
-    geminiApiKeyController.text = geminiApiKey;
-    setState(() {
-      themeMode = mode;
-      geminiKeyMessage = geminiApiKey.trim().isEmpty
-          ? 'Đang dùng API key mặc định'
-          : 'Đang dùng API key riêng';
-    });
+    
   }
 
 

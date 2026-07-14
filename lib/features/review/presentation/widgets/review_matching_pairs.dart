@@ -47,11 +47,11 @@ extension ReviewPracticeMatchingPairs on _ReviewPracticePageState {
       _answeredCards.add(tile.cardId);
       _correctMap[tile.cardId] = true;
       _selectedAnswerMap[tile.cardId] = '${first.text} = ${tile.text}';
-      _correctMatchPairTileIds
-        ..add(first.tileId)
-        ..add(tile.tileId);
       if (_matchedPairCardIds.length >= _quizCards.length) {
         _finished = true;
+        _matchTimer?.cancel();
+        _matchTimer = null;
+        _matchStopwatch.stop();
       }
     });
 
@@ -61,15 +61,13 @@ extension ReviewPracticeMatchingPairs on _ReviewPracticePageState {
       isCorrect: true,
     );
 
-    final nextPageIndex = _matchedPairCardIds.length ~/ 5;
-    final isPageComplete = _matchedPairCardIds.length % 5 == 0;
+    const pairsPerPage = 6;
+    final nextPageIndex = _matchedPairCardIds.length ~/ pairsPerPage;
+    final isPageComplete = _matchedPairCardIds.length % pairsPerPage == 0;
 
     Future.delayed(Duration(milliseconds: 620), () {
       if (!mounted) return;
       setState(() {
-        _correctMatchPairTileIds
-          ..remove(first.tileId)
-          ..remove(tile.tileId);
         if (_finished) {
           // Do nothing, session completes below
         } else if (isPageComplete) {
@@ -84,81 +82,55 @@ extension ReviewPracticeMatchingPairs on _ReviewPracticePageState {
   }
 
   Widget _buildMatchingPairsMode() {
-    final terms = _matchPairTiles.where((tile) => tile.isTerm).toList();
-    final answers = _matchPairTiles.where((tile) => !tile.isTerm).toList();
+    return ColoredBox(
+      color: Colors.black,
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(10, 10, 10, _finished ? 100 : 10),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: 1040),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final columns = constraints.maxWidth < 700 ? 3 : 4;
+                  final gap = constraints.maxWidth < 700 ? 6.0 : 12.0;
+                  final rows = math.max(
+                    1,
+                    (_matchPairTiles.length / columns).ceil(),
+                  );
+                  final tileWidth =
+                      (constraints.maxWidth - gap * (columns - 1)) / columns;
+                  final fittingHeight =
+                      (constraints.maxHeight - gap * (rows - 1)) / rows;
+                  final tileHeight = math.max(94.0, fittingHeight);
 
-    return SafeArea(
-      top: false,
-      child: SingleChildScrollView(
-        padding: EdgeInsets.fromLTRB(16, 18, 16, _finished ? 110 : 28),
-        child: Center(
-          child: ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: 760),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _finished
-                      ? 'Chúc mừng hoàn thành'
-                      : 'Nhấn vào các cặp tương ứng',
-                  style: TextStyle(
-                    color: AppColors.text,
-                    fontSize: 25,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                SizedBox(height: 18),
-                LayoutBuilder(
-                  builder: (context, constraints) {
-                    final gap = 12.0;
-                    final tileWidth = (constraints.maxWidth - gap) / 2;
-                    final rowCount = math.max(terms.length, answers.length);
-
-                    return Column(
-                      children: [
-                        for (var i = 0; i < rowCount; i++) ...[
-                          Row(
-                            children: [
-                              SizedBox(
-                                width: tileWidth,
-                                child: i < terms.length
-                                    ? _MatchPairTileWidget(
-                                        tile: terms[i],
-                                        selected: _selectedMatchPairTileId == terms[i].tileId,
-                                        matched: _matchedPairCardIds.contains(terms[i].cardId),
-                                        wrong: _wrongMatchPairTileIds.contains(terms[i].tileId),
-                                        correctPulse: _correctMatchPairTileIds.contains(terms[i].tileId),
-                                        onTap: _matchedPairCardIds.contains(terms[i].cardId)
-                                            ? null
-                                            : () => this._handleMatchPairTap(terms[i]),
-                                      )
-                                    : SizedBox.shrink(),
-                              ),
-                              SizedBox(width: gap),
-                              SizedBox(
-                                width: tileWidth,
-                                child: i < answers.length
-                                    ? _MatchPairTileWidget(
-                                        tile: answers[i],
-                                        selected: _selectedMatchPairTileId == answers[i].tileId,
-                                        matched: _matchedPairCardIds.contains(answers[i].cardId),
-                                        wrong: _wrongMatchPairTileIds.contains(answers[i].tileId),
-                                        correctPulse: _correctMatchPairTileIds.contains(answers[i].tileId),
-                                        onTap: _matchedPairCardIds.contains(answers[i].cardId)
-                                            ? null
-                                            : () => this._handleMatchPairTap(answers[i]),
-                                      )
-                                    : SizedBox.shrink(),
-                              ),
-                            ],
-                          ),
-                          if (i < rowCount - 1) SizedBox(height: 12),
-                        ],
-                      ],
-                    );
-                  },
-                ),
-              ],
+                  return GridView.builder(
+                    padding: EdgeInsets.zero,
+                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: columns,
+                      crossAxisSpacing: gap,
+                      mainAxisSpacing: gap,
+                      childAspectRatio: tileWidth / tileHeight,
+                    ),
+                    itemCount: _matchPairTiles.length,
+                    itemBuilder: (context, index) {
+                      final tile = _matchPairTiles[index];
+                      final matched = _matchedPairCardIds.contains(tile.cardId);
+                      return _MatchPairTileWidget(
+                        key: ValueKey('${tile.cardId}:${tile.isTerm}'),
+                        tile: tile,
+                        selected: _selectedMatchPairTileId == tile.tileId,
+                        matched: matched,
+                        wrong: _wrongMatchPairTileIds.contains(tile.tileId),
+                        onTap: matched
+                            ? null
+                            : () => this._handleMatchPairTap(tile),
+                      );
+                    },
+                  );
+                },
+              ),
             ),
           ),
         ),
@@ -172,7 +144,6 @@ class _MatchPairTileWidget extends StatefulWidget {
   final bool selected;
   final bool matched;
   final bool wrong;
-  final bool correctPulse;
   final VoidCallback? onTap;
 
   const _MatchPairTileWidget({
@@ -181,7 +152,6 @@ class _MatchPairTileWidget extends StatefulWidget {
     required this.selected,
     required this.matched,
     required this.wrong,
-    required this.correctPulse,
     this.onTap,
   }) : super(key: key);
 
@@ -189,12 +159,11 @@ class _MatchPairTileWidget extends StatefulWidget {
   State<_MatchPairTileWidget> createState() => _MatchPairTileWidgetState();
 }
 
-class _MatchPairTileWidgetState extends State<_MatchPairTileWidget> with TickerProviderStateMixin {
+class _MatchPairTileWidgetState extends State<_MatchPairTileWidget>
+    with TickerProviderStateMixin {
   late AnimationController _shakeController;
   late Animation<double> _shakeAnimation;
-
-  late AnimationController _bounceController;
-  late Animation<double> _bounceAnimation;
+  bool _hovered = false;
 
   @override
   void initState() {
@@ -211,19 +180,9 @@ class _MatchPairTileWidgetState extends State<_MatchPairTileWidget> with TickerP
       TweenSequenceItem(tween: Tween(begin: 6.0, end: -4.0), weight: 2),
       TweenSequenceItem(tween: Tween(begin: -4.0, end: 4.0), weight: 2),
       TweenSequenceItem(tween: Tween(begin: 4.0, end: 0.0), weight: 1),
-    ]).animate(CurvedAnimation(parent: _shakeController, curve: Curves.easeInOut));
-
-    _bounceController = AnimationController(
-      duration: const Duration(milliseconds: 600),
-      vsync: this,
+    ]).animate(
+      CurvedAnimation(parent: _shakeController, curve: Curves.easeInOut),
     );
-    _bounceAnimation = TweenSequence<double>([
-      TweenSequenceItem(tween: Tween(begin: 1.0, end: 1.18), weight: 3),
-      TweenSequenceItem(tween: Tween(begin: 1.18, end: 0.92), weight: 2),
-      TweenSequenceItem(tween: Tween(begin: 0.92, end: 1.06), weight: 2),
-      TweenSequenceItem(tween: Tween(begin: 1.06, end: 0.98), weight: 1),
-      TweenSequenceItem(tween: Tween(begin: 0.98, end: 1.0), weight: 2),
-    ]).animate(CurvedAnimation(parent: _bounceController, curve: Curves.easeInOut));
   }
 
   @override
@@ -232,119 +191,110 @@ class _MatchPairTileWidgetState extends State<_MatchPairTileWidget> with TickerP
     if (widget.wrong && !oldWidget.wrong) {
       _shakeController.forward(from: 0.0);
     }
-    if (widget.correctPulse && !oldWidget.correctPulse) {
-      _bounceController.forward(from: 0.0);
-    }
   }
 
   @override
   void dispose() {
     _shakeController.dispose();
-    _bounceController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final tile = widget.tile;
-    final selected = widget.selected;
-    final matched = widget.matched;
-    final wrong = widget.wrong;
-    final correctPulse = widget.correctPulse;
+    final active = widget.selected || widget.wrong;
+    final fontSize = tile.isTerm
+        ? (tile.text.length > 14
+              ? 17.0
+              : (tile.text.length > 7 ? 22.0 : 28.0))
+        : (tile.text.length > 32
+              ? 12.0
+              : (tile.text.length > 18 ? 15.0 : 20.0));
 
-    final borderColor = wrong
-        ? AppColors.red
-        : (correctPulse
-              ? AppColors.green
-              : (selected
-                    ? AppColors.blue
-                    : (matched
-                          ? AppColors.border.withOpacity(0.35)
-                          : AppColors.border)));
-
-    final bg = correctPulse
-        ? AppColors.green.withOpacity(0.18)
-        : (matched
-              ? AppColors.panel2.withOpacity(0.4)
-              : (selected
-                    ? AppColors.blue.withOpacity(0.18)
-                    : AppColors.panel));
-
-    final textColor = matched && !correctPulse
-        ? AppColors.muted.withOpacity(0.5)
-        : (wrong
-              ? AppColors.red
-              : (correctPulse
-                    ? AppColors.green
-                    : AppColors.text));
-
-    return GestureDetector(
-      onTap: widget.onTap,
-      child: AnimatedBuilder(
-        animation: Listenable.merge([_shakeAnimation, _bounceAnimation]),
-        builder: (context, child) {
-          final double dx = _shakeController.isAnimating || wrong
-              ? _shakeAnimation.value
-              : 0.0;
-          final double scale = _bounceController.isAnimating || correctPulse
-              ? _bounceAnimation.value
-              : 1.0;
-
-          return Transform.translate(
-            offset: Offset(dx, 0),
-            child: Transform.scale(
-              scale: scale,
+    return MouseRegion(
+      cursor: widget.onTap == null
+          ? SystemMouseCursors.basic
+          : SystemMouseCursors.click,
+      onEnter: (_) {
+        if (widget.onTap != null) setState(() => _hovered = true);
+      },
+      onExit: (_) {
+        if (_hovered) setState(() => _hovered = false);
+      },
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedBuilder(
+          animation: _shakeAnimation,
+          builder: (context, child) {
+            final dx = _shakeController.isAnimating
+                ? _shakeAnimation.value
+                : 0.0;
+            return Transform.translate(
+              offset: Offset(dx, _hovered && !widget.matched ? -2 : 0),
               child: child,
-            ),
-          );
-        },
-        child: AnimatedContainer(
-          duration: Duration(milliseconds: wrong ? 70 : 180),
-          curve: wrong ? Curves.easeInOut : Curves.easeOutBack,
-          constraints: BoxConstraints(minHeight: 78),
-          padding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-          decoration: BoxDecoration(
-            color: bg,
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: borderColor, width: 2),
-            boxShadow: [
-              BoxShadow(
-                color: AppColors.border.withOpacity(matched ? 0.05 : 0.3),
-                offset: Offset(0, correctPulse ? 6 : 4),
-                blurRadius: 0,
-              ),
-            ],
-          ),
-          child: Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (tile.subText.trim().isNotEmpty) ...[
-                  Text(
-                    tile.subText,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: textColor.withOpacity(0.55),
-                      fontWeight: FontWeight.w800,
-                      fontSize: 12,
-                    ),
-                  ),
-                  SizedBox(height: 3),
-                ],
-                Text(
-                  tile.text,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: textColor,
-                    fontWeight: FontWeight.w900,
-                    fontSize: tile.text.length > 16 ? 18 : 22,
-                    height: 1.12,
+            );
+          },
+          child: AnimatedOpacity(
+            opacity: widget.matched ? 0 : 1,
+            duration: Duration(milliseconds: 180),
+            curve: Curves.easeOut,
+            child: AnimatedScale(
+              scale: widget.matched ? 0.88 : 1,
+              duration: Duration(milliseconds: 180),
+              curve: Curves.easeOut,
+              child: AnimatedContainer(
+                duration: Duration(milliseconds: 120),
+                curve: Curves.easeOut,
+                padding: EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                decoration: BoxDecoration(
+                  color: active
+                      ? Color(0xff4257ff)
+                      : (_hovered ? Color(0xff3a4154) : Color(0xff2f3545)),
+                  borderRadius: BorderRadius.circular(8),
+                  boxShadow: active
+                      ? [
+                          BoxShadow(
+                            color: Color(0x5984a1ff),
+                            blurRadius: 0,
+                            spreadRadius: 3,
+                          ),
+                        ]
+                      : null,
+                ),
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (tile.subText.trim().isNotEmpty) ...[
+                        Text(
+                          tile.subText,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: Colors.white70,
+                            fontWeight: FontWeight.w400,
+                            fontSize: 10,
+                          ),
+                        ),
+                        SizedBox(height: 3),
+                      ],
+                      Text(
+                        tile.text,
+                        maxLines: 5,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w400,
+                          fontSize: fontSize,
+                          height: 1.2,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ],
+              ),
             ),
           ),
         ),

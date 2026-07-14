@@ -14,7 +14,6 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
   int? _selectedMatchPairTileId;
   final Set<int> _matchedPairCardIds = {};
   final Set<int> _wrongMatchPairTileIds = {};
-  final Set<int> _correctMatchPairTileIds = {};
 
   bool _isLoading = true;
   bool _isGeneratingSentenceQuiz = false;
@@ -37,6 +36,11 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
   DateTime _essayQuestionStartedAt = DateTime.now();
   final Set<int> _recordedResultCardIds = {};
   final Map<int, DateTime> _cardStartedAtMap = {};
+
+  // ── Matching pairs timer ──────────────────────────────
+  final Stopwatch _matchStopwatch = Stopwatch();
+  Timer? _matchTimer;
+  int _matchElapsedMs = 0;
 
   int get _total => _quizCards.length;
   int get _done => _answeredCards.length;
@@ -66,6 +70,12 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
   @override
   void dispose() {
     this._finishStudySession();
+    _matchTimer?.cancel();
+    _matchTimer = null;
+    // Reset orientation when leaving matching pairs
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+    ]);
     _essayController.dispose();
     _mcScrollController.dispose();
     super.dispose();
@@ -76,8 +86,9 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
   }
 
   void _setupMatchingTilesForPage(int pageIndex) {
-    final startIndex = pageIndex * 5;
-    final endIndex = math.min(startIndex + 5, _quizCards.length);
+    const pairsPerPage = 6;
+    final startIndex = pageIndex * pairsPerPage;
+    final endIndex = math.min(startIndex + pairsPerPage, _quizCards.length);
     final pageCards = _quizCards.sublist(startIndex, endIndex);
 
     final termTiles = <_MatchPairTile>[];
@@ -108,13 +119,10 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
     termTiles.shuffle(_random);
     answerTiles.shuffle(_random);
 
-    _matchPairTiles = [];
-    _matchPairTiles.addAll(termTiles);
-    _matchPairTiles.addAll(answerTiles);
+    _matchPairTiles = [...termTiles, ...answerTiles]..shuffle(_random);
 
     _selectedMatchPairTileId = null;
     _wrongMatchPairTileIds.clear();
-    _correctMatchPairTileIds.clear();
   }
 
   @override

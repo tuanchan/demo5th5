@@ -90,7 +90,7 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
                   constraints: BoxConstraints(maxWidth: 560),
                   padding: EdgeInsets.fromLTRB(18, 18, 18, 16),
                   decoration: BoxDecoration(
-                    color: AppColors.activeIsDark ? AppColors.panel : Color(0xfff6f1fb),
+                    color: Colors.black,
                     borderRadius: BorderRadius.circular(26),
                     border: Border.all(color: AppColors.border, width: 1.4),
                     boxShadow: [
@@ -121,8 +121,8 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
-                                    color: AppColors.muted,
-                                    fontWeight: FontWeight.w900,
+                                    color: Color(0xffa8b6d6),
+                                    fontWeight: FontWeight.w400,
                                     fontSize: 13,
                                   ),
                                 ),
@@ -130,19 +130,12 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
                                 Text(
                                   'Thiết lập ôn tập',
                                   style: TextStyle(
-                                    color: AppColors.text,
+                                    color: Colors.white,
                                     fontSize: 24,
-                                    fontWeight: FontWeight.w900,
+                                    fontWeight: FontWeight.w400,
                                   ),
                                 ),
                               ],
-                            ),
-                          ),
-                          IconButton(
-                            onPressed: () => Navigator.pop(sheetContext),
-                            icon: Icon(
-                              Icons.close_rounded,
-                              color: AppColors.onIconButton,
                             ),
                           ),
                         ],
@@ -165,23 +158,22 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
                           height: 48,
                           padding: EdgeInsets.symmetric(horizontal: 14),
                           decoration: BoxDecoration(
-                            color: AppColors.inputFill,
+                            color: Color(0xff171c28),
                             borderRadius: BorderRadius.circular(16),
                             border: Border.all(
-                              color: AppColors.border,
-                              width: 1.3,
+                              color: Color(0xff343b49),
                             ),
                           ),
                           child: DropdownButtonHideUnderline(
                             child: DropdownButton<bool>(
                               value: localAnswerByDefinition,
                               isExpanded: true,
-                              dropdownColor: AppColors.dropdownFill,
+                              dropdownColor: Color(0xff171c28),
                               style: TextStyle(
-                                color: AppColors.text,
-                                fontWeight: FontWeight.w800,
+                                color: Colors.white,
+                                fontWeight: FontWeight.w400,
                               ),
-                              icon: Icon(Icons.keyboard_arrow_down_rounded, color: AppColors.onIconButton),
+                              icon: Icon(Icons.keyboard_arrow_down_rounded, color: Color(0xffa8b6d6)),
                               items: [
                                 DropdownMenuItem(
                                   value: true,
@@ -235,7 +227,7 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
                         child: this._solidButton(
                           text: 'Bắt đầu ôn tập',
                           icon: Icons.play_arrow_rounded,
-                          color: AppColors.green,
+                          color: Color(0xff4257ff),
                           onTap: () {
                             setState(() {
                               _questionLimit = localLimit;
@@ -299,14 +291,14 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
               constraints: BoxConstraints(maxWidth: 460),
               padding: EdgeInsets.all(18),
               decoration: BoxDecoration(
-                color: AppColors.activeIsDark ? AppColors.panel : Color(0xfff6f1fb),
-                borderRadius: BorderRadius.circular(26),
-                border: Border.all(color: AppColors.border, width: 1.4),
+                color: Color(0xff0b0c10),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: Color(0xff242832)),
                 boxShadow: [
                   BoxShadow(
-                    color: AppColors.border,
-                    offset: Offset(0, 7),
-                    blurRadius: 0,
+                    color: Color(0x66000000),
+                    offset: Offset(0, 12),
+                    blurRadius: 24,
                   ),
                 ],
               ),
@@ -315,11 +307,15 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     _geminiTextResultScript.trim().isNotEmpty
-                        ? geminiColorIcon(size: 54)
+                        ? Icon(
+                            Icons.auto_awesome_rounded,
+                            color: Color(0xff4257ff),
+                            size: 42,
+                          )
                         : Icon(
                             Icons.emoji_events_outlined,
-                            color: AppColors.border,
-                            size: 54,
+                            color: Color(0xff4257ff),
+                            size: 42,
                           ),
                     SizedBox(height: 10),
                     Text(
@@ -327,9 +323,9 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
                           ? 'Chúc mừng hoàn thành'
                           : 'Kết quả ôn tập',
                       style: TextStyle(
-                        color: AppColors.text,
+                        color: Colors.white,
                         fontSize: 24,
-                        fontWeight: FontWeight.w900,
+                        fontWeight: FontWeight.w400,
                       ),
                     ),
                     SizedBox(height: 12),
@@ -339,16 +335,23 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
                           child: this._resultBox(
                             'Đúng',
                             '$_correct',
-                            AppColors.green,
                           ),
                         ),
-                        SizedBox(width: 10),
-                        Expanded(
-                          child: this._resultBox('Sai', '$_wrong', AppColors.red),
+                        Container(
+                          width: 1,
+                          height: 42,
+                          color: Color(0xff242832),
                         ),
-                        SizedBox(width: 10),
                         Expanded(
-                          child: this._resultBox('Tổng', '$_total', AppColors.blue),
+                          child: this._resultBox('Sai', '$_wrong'),
+                        ),
+                        Container(
+                          width: 1,
+                          height: 42,
+                          color: Color(0xff242832),
+                        ),
+                        Expanded(
+                          child: this._resultBox('Tổng', '$_total'),
                         ),
                       ],
                     ),
@@ -365,7 +368,7 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
                         child: this._solidButton(
                           text: 'Xem lại câu sai',
                           icon: Icons.fact_check_rounded,
-                          color: AppColors.blue,
+                          color: Color(0xff4257ff),
                           onTap: this._openWrongReviewFromResult,
                         ),
                       ),
@@ -376,7 +379,7 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
                           child: this._solidButton(
                             text: 'Ôn lại câu sai',
                             icon: Icons.replay_rounded,
-                            color: AppColors.green,
+                            color: Color(0xff171c28),
                             onTap: () {
                               Navigator.pop(context);
                               this._startWrongEssayReview();
@@ -403,7 +406,7 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
                           child: this._solidButton(
                             text: 'Ôn lại',
                             icon: Icons.refresh_rounded,
-                            color: AppColors.yellow,
+                            color: Color(0xff4257ff),
                             onTap: () {
                               Navigator.pop(context);
                               this._restart();
@@ -430,8 +433,8 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
         final labelWidget = Text(
           label,
           style: TextStyle(
-            color: AppColors.text,
-            fontWeight: FontWeight.w900,
+            color: Colors.white,
+            fontWeight: FontWeight.w400,
             fontSize: 15,
           ),
         );
@@ -463,9 +466,9 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
     return Container(
       height: 48,
       decoration: BoxDecoration(
-        color: AppColors.inputFill,
+        color: Color(0xff171c28),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.border, width: 1.3),
+        border: Border.all(color: Color(0xff343b49)),
       ),
       child: Row(
         children: [
@@ -481,8 +484,8 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
               child: Text(
                 '$value',
                 style: TextStyle(
-                  color: AppColors.text,
-                  fontWeight: FontWeight.w900,
+                  color: Colors.white,
+                  fontWeight: FontWeight.w400,
                   fontSize: 16,
                 ),
               ),

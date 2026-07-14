@@ -183,7 +183,6 @@ $cardsJson
       _selectedMatchPairTileId = null;
       _matchedPairCardIds.clear();
       _wrongMatchPairTileIds.clear();
-      _correctMatchPairTileIds.clear();
       _geminiTextResultScript = '';
       _isGeminiTextGrading = false;
       _selectedListeningAnswer = null;
@@ -198,6 +197,31 @@ $cardsJson
       _essayQuestionStartedAt = now;
       _essayController.clear();
     });
+
+    // Start matching pairs timer
+    _matchTimer?.cancel();
+    _matchTimer = null;
+    _matchStopwatch.reset();
+    _matchElapsedMs = 0;
+    if (_matchingPairs) {
+      _matchStopwatch.start();
+      _matchTimer = Timer.periodic(Duration(milliseconds: 100), (_) {
+        if (!mounted) return;
+        setState(() {
+          _matchElapsedMs = _matchStopwatch.elapsedMilliseconds;
+        });
+      });
+      // Auto-rotate to landscape for matching pairs
+      SystemChrome.setPreferredOrientations([
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+    } else {
+      // Ensure portrait for other modes
+      SystemChrome.setPreferredOrientations([
+        DeviceOrientation.portraitUp,
+      ]);
+    }
 
     await this._startStudySession(
       mode: _listening
@@ -248,7 +272,6 @@ $cardsJson
       _selectedMatchPairTileId = null;
       _matchedPairCardIds.clear();
       _wrongMatchPairTileIds.clear();
-      _correctMatchPairTileIds.clear();
       _geminiTextResultScript = '';
       _isGeminiTextGrading = false;
       _selectedListeningAnswer = null;
@@ -272,6 +295,16 @@ $cardsJson
 
   Future<void> _restart() async {
     await this._finishStudySession();
+    _matchTimer?.cancel();
+    _matchTimer = null;
+    _matchStopwatch
+      ..stop()
+      ..reset();
+    _matchElapsedMs = 0;
+    // Reset orientation back to portrait
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+    ]);
     setState(() {
       _showSetup = true;
       _isGeneratingSentenceQuiz = false;

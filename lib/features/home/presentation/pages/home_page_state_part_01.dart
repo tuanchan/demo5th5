@@ -18,7 +18,17 @@ extension HomePageStatePart01 on _HomePageState {
             return Column(
               children: [
                 this._buildWebHomeTopBar(compact),
-                Expanded(child: this._buildWebHomeDashboard(compact)),
+                Expanded(
+                  child: Listener(
+                    behavior: HitTestBehavior.translucent,
+                    onPointerDown: (_) {
+                      if (_isHomeNavExpanded) {
+                        setState(() => _isHomeNavExpanded = false);
+                      }
+                    },
+                    child: this._buildWebHomeDashboard(compact),
+                  ),
+                ),
               ],
             );
           },
@@ -32,8 +42,7 @@ extension HomePageStatePart01 on _HomePageState {
       this._homeNavButton('Học thẻ', this.openFlashCards),
       this._homeNavButton('Thống kê', this.openStatistics),
       this._homeNavButton('Kiểm tra', this.openReviewPractice),
-      this._homeNavButton('Viết', () {}),
-      this._homeNavButton('Tạo Đối Thoại', () {}),
+      this._homeNavButton('Viết', this.openWritingPractice),
       this._homeNavButton('Luyện nói', () {}),
       this._homeNavButton('Tạo học phần', this.openCreateCourse),
       IconButton(
@@ -500,8 +509,7 @@ extension HomePageStatePart01 on _HomePageState {
           selectedHomeCourse = null;
           _homeCoursePage = 1;
           _showFloatingTopicBack = false;
-          _showHomePagination = true;
-          _lastHomeCourseOffset = 0;
+          _homeCourseAtBottom = false;
         });
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted && _homeCourseScrollController.hasClients) {
@@ -608,7 +616,14 @@ extension HomePageStatePart01 on _HomePageState {
                         label: 'Tạo học phần',
                         onTap: this.openCreateCourse,
                       ),
-                      ...pageCourses.map(this._buildWebCourseTile),
+                      ...pageCourses.asMap().entries.map(
+                        (entry) => this._buildWebCourseTile(
+                          entry.value,
+                          key: entry.key == 0
+                              ? _homeFirstCourseCardKey
+                              : null,
+                        ),
+                      ),
                     ];
 
                     return SingleChildScrollView(
@@ -625,30 +640,14 @@ extension HomePageStatePart01 on _HomePageState {
                                 )
                                 .toList(),
                           ),
+                          Padding(
+                            padding: EdgeInsets.only(top: 18),
+                            child: this._buildHomePagination(totalPages),
+                          ),
                         ],
                       ),
                     );
                   },
-                ),
-              ),
-            ),
-            AnimatedContainer(
-              duration: Duration(milliseconds: 220),
-              curve: Curves.easeOutCubic,
-              height: _showHomePagination ? 66 : 0,
-              child: ClipRect(
-                child: AnimatedSlide(
-                  offset: _showHomePagination ? Offset.zero : Offset(0, 1),
-                  duration: Duration(milliseconds: 220),
-                  curve: Curves.easeOutCubic,
-                  child: AnimatedOpacity(
-                    opacity: _showHomePagination ? 1 : 0,
-                    duration: Duration(milliseconds: 160),
-                    child: Padding(
-                      padding: EdgeInsets.only(top: 18),
-                      child: this._buildHomePagination(totalPages),
-                    ),
-                  ),
                 ),
               ),
             ),
@@ -658,7 +657,7 @@ extension HomePageStatePart01 on _HomePageState {
           duration: Duration(milliseconds: 220),
           curve: Curves.easeOutCubic,
           right: 8,
-          bottom: _showHomePagination ? 58 : 8,
+          bottom: _homeCourseAtBottom ? 58 : 8,
           child: IgnorePointer(
             ignoring: !_showFloatingTopicBack,
             child: AnimatedScale(
@@ -781,8 +780,7 @@ extension HomePageStatePart01 on _HomePageState {
       selectedHomeCourse = null;
       _homeCoursePage = 1;
       _showFloatingTopicBack = false;
-      _showHomePagination = true;
-      _lastHomeCourseOffset = 0;
+      _homeCourseAtBottom = false;
     });
   }
 
@@ -909,15 +907,21 @@ extension HomePageStatePart01 on _HomePageState {
 
   void _setHomeCoursePage(int page) {
     if (page == _homeCoursePage || page < 1) return;
-    if (_homeCourseScrollController.hasClients) {
-      _homeCourseScrollController.jumpTo(0);
-    }
     setState(() {
       _homeCoursePage = page;
       selectedHomeCourse = null;
       _showFloatingTopicBack = false;
-      _showHomePagination = true;
-      _lastHomeCourseOffset = 0;
+      _homeCourseAtBottom = false;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final firstCourseContext = _homeFirstCourseCardKey.currentContext;
+      if (!mounted || firstCourseContext == null) return;
+      Scrollable.ensureVisible(
+        firstCourseContext,
+        alignment: 0,
+        duration: Duration(milliseconds: 320),
+        curve: Curves.easeOutCubic,
+      );
     });
   }
 
@@ -963,9 +967,10 @@ extension HomePageStatePart01 on _HomePageState {
     );
   }
 
-  Widget _buildWebCourseTile(CourseListItem course) {
+  Widget _buildWebCourseTile(CourseListItem course, {Key? key}) {
     final selected = selectedHomeCourse?.id == course.id;
     return InkWell(
+      key: key,
       onTap: () => setState(() => selectedHomeCourse = course),
       onDoubleTap: () {
         setState(() => selectedHomeCourse = course);

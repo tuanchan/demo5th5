@@ -27,9 +27,13 @@ extension ReviewPracticePageStatePart08 on _ReviewPracticePageState {
             children: [
               Row(
                 children: [
-                  this._statChip(text: '0/$total', color: AppColors.blue),
+                  this._statChip(text: '0/$total'),
                   Spacer(),
-                  geminiColorIcon(size: 24),
+                  Icon(
+                    Icons.auto_awesome_rounded,
+                    size: 21,
+                    color: Color(0xff4257ff),
+                  ),
                 ],
               ),
               SizedBox(height: 24),
@@ -109,9 +113,13 @@ extension ReviewPracticePageStatePart08 on _ReviewPracticePageState {
             children: [
               Row(
                 children: [
-                  this._statChip(text: '$_total/$_total', color: AppColors.blue),
+                  this._statChip(text: '$_total/$_total'),
                   Spacer(),
-                  geminiColorIcon(size: 24),
+                  Icon(
+                    Icons.auto_awesome_rounded,
+                    size: 21,
+                    color: Color(0xff4257ff),
+                  ),
                 ],
               ),
               SizedBox(height: 24),

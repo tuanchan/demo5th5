@@ -83,6 +83,7 @@ part 'features/statistics/presentation/pages/statistics_page_state_part_06_split
 part 'features/statistics/presentation/pages/statistics_page_state_part_06_split_04.dart';
 part 'features/statistics/presentation/widgets/statistics_due_review_part_01.dart';
 part 'features/statistics/presentation/widgets/statistics_due_review_part_02.dart';
+part 'features/writing/presentation/pages/writing_practice_page.dart';
 
 
 Future<void> main() async {

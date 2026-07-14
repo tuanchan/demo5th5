@@ -157,7 +157,6 @@ extension HomePageStatePart02 on _HomePageState {
     final savedListening = await AppSettingsStore.getBool('review.listening') ?? false;
     final savedMatchingPairs = await AppSettingsStore.getBool('review.matchingPairs') ?? false;
     final savedAnswerByDefinition = await AppSettingsStore.getBool('review.answerByDefinition') ?? true;
-    final savedQuestionLimit = await AppSettingsStore.getInt('review.questionLimit') ?? 20;
 
     if (!mounted) return;
 
@@ -165,7 +164,7 @@ extension HomePageStatePart02 on _HomePageState {
       context: context,
       barrierColor: Colors.black.withOpacity(0.55),
       builder: (sheetContext) {
-        int localLimit = savedQuestionLimit.clamp(1, targetCourse.cardCount).toInt();
+        int localLimit = targetCourse.cardCount;
         bool localMc = savedMultipleChoice;
         bool localEssay = savedEssay;
         bool localListening = savedListening;
@@ -256,7 +255,7 @@ extension HomePageStatePart02 on _HomePageState {
                     ),
                     padding: EdgeInsets.all(compactDialog ? 16 : 22),
                     decoration: BoxDecoration(
-                      color: Color(0xff121828),
+                      color: Colors.black,
                       borderRadius: BorderRadius.circular(18),
                       border: Border.all(color: Color(0xff2a334a)),
                       boxShadow: [
@@ -285,7 +284,7 @@ extension HomePageStatePart02 on _HomePageState {
                                       overflow: TextOverflow.ellipsis,
                                       style: TextStyle(
                                         color: Color(0xffa8b6d6),
-                                        fontWeight: FontWeight.w900,
+                                        fontWeight: FontWeight.w400,
                                         fontSize: compactDialog ? 12 : 13,
                                       ),
                                     ),
@@ -298,25 +297,10 @@ extension HomePageStatePart02 on _HomePageState {
                                         color: Color(0xffeaf1ff),
                                         fontSize: compactDialog ? 21 : 28,
                                         height: 1.15,
-                                        fontWeight: FontWeight.w900,
+                                        fontWeight: FontWeight.w400,
                                       ),
                                     ),
                                   ],
-                                ),
-                              ),
-                              SizedBox(width: 8),
-                              IconButton(
-                                tooltip: 'Đóng',
-                                onPressed: () => Navigator.pop(sheetContext),
-                                padding: EdgeInsets.zero,
-                                constraints: BoxConstraints.tightFor(
-                                  width: 40,
-                                  height: 40,
-                                ),
-                                icon: Icon(
-                                  Icons.close_rounded,
-                                  color: Color(0xffa8b6d6),
-                                  size: 24,
                                 ),
                               ),
                             ],
@@ -347,10 +331,10 @@ extension HomePageStatePart02 on _HomePageState {
                             child: DropdownButton<bool>(
                               value: localAnswerByDefinition,
                               isExpanded: true,
-                              dropdownColor: Color(0xff121828),
+                              dropdownColor: Color(0xff0b0c0f),
                               style: TextStyle(
                                 color: Color(0xffeaf1ff),
-                                fontWeight: FontWeight.w800,
+                                fontWeight: FontWeight.w400,
                               ),
                               icon: Icon(
                                 Icons.keyboard_arrow_down_rounded,
@@ -419,7 +403,7 @@ extension HomePageStatePart02 on _HomePageState {
                                 style: TextStyle(
                                   color: Colors.white,
                                   fontSize: 16,
-                                  fontWeight: FontWeight.w900,
+                                  fontWeight: FontWeight.w400,
                                 ),
                               ),
                             ],
@@ -521,7 +505,7 @@ extension HomePageStatePart02 on _HomePageState {
           label,
           style: TextStyle(
             color: Color(0xffa8b6d6),
-            fontWeight: FontWeight.w900,
+            fontWeight: FontWeight.w400,
             fontSize: 14,
           ),
         );

@@ -1,6 +1,65 @@
 part of flutterflashcard_main;
 
 extension ReviewPracticePageStatePart06 on _ReviewPracticePageState {
+  Widget _buildReviewStandardHeader(BuildContext context) {
+    final compact = MediaQuery.sizeOf(context).width <= 680;
+    final sideWidth = compact ? 56.0 : 150.0;
+    return Container(
+      width: double.infinity,
+      height: 66,
+      decoration: BoxDecoration(
+        color: Color(0xff0b0c10),
+        border: Border(bottom: BorderSide(color: Color(0xff242832))),
+      ),
+      child: Row(
+        children: [
+          SizedBox(
+            width: sideWidth,
+            child: TextButton.icon(
+              onPressed: () => Navigator.maybePop(context),
+              icon: Icon(Icons.arrow_back, size: 17),
+              label: compact ? SizedBox.shrink() : Text('Trang chủ'),
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.white,
+                padding: EdgeInsets.symmetric(horizontal: 12),
+                textStyle: TextStyle(fontWeight: FontWeight.w400),
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              'Kiểm tra',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 17,
+                fontWeight: FontWeight.w400,
+              ),
+            ),
+          ),
+          SizedBox(
+            width: sideWidth,
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: Padding(
+                padding: EdgeInsets.only(right: 8),
+                child: IconButton(
+                  tooltip: 'Tùy chọn kiểm tra',
+                  onPressed: this._openSetupSheet,
+                  color: Colors.white,
+                  icon: Icon(Icons.settings, size: 21),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+
   Widget _switchTile({
     required String text,
     required bool value,
@@ -14,16 +73,16 @@ extension ReviewPracticePageStatePart06 on _ReviewPracticePageState {
             child: Text(
               text,
               style: TextStyle(
-                color: AppColors.text,
-                fontWeight: FontWeight.w900,
+                color: Colors.white,
+                fontWeight: FontWeight.w400,
                 fontSize: 15,
               ),
             ),
           ),
           Switch(
             value: value,
-            activeColor: AppColors.border,
-            activeTrackColor: AppColors.green,
+            activeColor: Colors.white,
+            activeTrackColor: Color(0xff4257ff),
             onChanged: onChanged,
           ),
         ],
@@ -45,29 +104,21 @@ extension ReviewPracticePageStatePart06 on _ReviewPracticePageState {
         padding: EdgeInsets.symmetric(horizontal: 14),
         decoration: BoxDecoration(
           color: color,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppColors.border, width: 1.4),
-          boxShadow: [
-            BoxShadow(
-              color: AppColors.border,
-              offset: Offset(0, 4),
-              blurRadius: 0,
-            ),
-          ],
+          borderRadius: BorderRadius.circular(12),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: AppColors.onSolidButton, size: 20),
+            Icon(icon, color: Colors.white, size: 20),
             SizedBox(width: 7),
             Flexible(
               child: Text(
                 text,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  color: AppColors.onSolidButton,
-                  fontWeight: FontWeight.w900,
+                  color: Colors.white,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
             ),
@@ -89,21 +140,14 @@ extension ReviewPracticePageStatePart06 on _ReviewPracticePageState {
         height: 50,
         padding: EdgeInsets.symmetric(horizontal: 14),
         decoration: BoxDecoration(
-          color: AppColors.inputFill,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppColors.border, width: 1.4),
-          boxShadow: [
-            BoxShadow(
-              color: AppColors.border,
-              offset: Offset(0, 4),
-              blurRadius: 0,
-            ),
-          ],
+          color: Color(0xff171c28),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Color(0xff343b49)),
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: AppColors.onIconButton, size: 20),
+            Icon(icon, color: Colors.white, size: 20),
             if (text.trim().isNotEmpty) ...[
               SizedBox(width: 7),
               Flexible(
@@ -111,8 +155,8 @@ extension ReviewPracticePageStatePart06 on _ReviewPracticePageState {
                   text,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    color: AppColors.onIconButton,
-                    fontWeight: FontWeight.w900,
+                    color: Colors.white,
+                    fontWeight: FontWeight.w500,
                   ),
                 ),
               ),
@@ -127,31 +171,27 @@ extension ReviewPracticePageStatePart06 on _ReviewPracticePageState {
   Widget _reviewAnswerBox({
     required String text,
     required IconData icon,
-    required Color color,
   }) {
     return Container(
       width: double.infinity,
       padding: EdgeInsets.symmetric(horizontal: 14, vertical: 13),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.16),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: AppColors.border.withOpacity(0.45),
-          width: 1.2,
-        ),
+        color: Color(0xff111318),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Color(0xff242832)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: AppColors.border, size: 23),
+          Icon(icon, color: Colors.white, size: 22),
           SizedBox(width: 10),
           Expanded(
             child: Text(
               text,
               style: TextStyle(
-                color: AppColors.text,
+                color: Colors.white,
                 fontSize: 18,
-                fontWeight: FontWeight.w900,
+                fontWeight: FontWeight.w400,
                 height: 1.25,
               ),
             ),
@@ -167,25 +207,26 @@ extension ReviewPracticePageStatePart06 on _ReviewPracticePageState {
       width: double.infinity,
       padding: EdgeInsets.symmetric(horizontal: 14, vertical: 13),
       decoration: BoxDecoration(
-        color: AppColors.inputFill,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: AppColors.border.withOpacity(0.45),
-          width: 1.2,
-        ),
+        color: Color(0xff111318),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Color(0xff242832)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          geminiColorIcon(size: 23),
+          Icon(
+            Icons.auto_awesome_rounded,
+            size: 21,
+            color: Color(0xff4257ff),
+          ),
           SizedBox(width: 10),
           Expanded(
             child: Text(
               text,
               style: TextStyle(
-                color: AppColors.text,
+                color: Colors.white,
                 fontSize: 15,
-                fontWeight: FontWeight.w800,
+                fontWeight: FontWeight.w400,
                 height: 1.28,
               ),
             ),
@@ -196,29 +237,24 @@ extension ReviewPracticePageStatePart06 on _ReviewPracticePageState {
   }
 
 
-  Widget _resultBox(String title, String value, Color color) {
-    return Container(
-      padding: EdgeInsets.symmetric(vertical: 12),
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppColors.border, width: 1.3),
-      ),
+  Widget _resultBox(String title, String value) {
+    return Padding(
+      padding: EdgeInsets.symmetric(vertical: 8),
       child: Column(
         children: [
           Text(
             value,
             style: TextStyle(
-              color: AppColors.border,
+              color: Colors.white,
               fontSize: 22,
-              fontWeight: FontWeight.w900,
+              fontWeight: FontWeight.w400,
             ),
           ),
           Text(
             title,
             style: TextStyle(
-              color: AppColors.border,
-              fontWeight: FontWeight.w800,
+              color: Color(0xff9aa4b8),
+              fontWeight: FontWeight.w400,
             ),
           ),
         ],
@@ -227,21 +263,13 @@ extension ReviewPracticePageStatePart06 on _ReviewPracticePageState {
   }
 
 
-  Widget _statChip({required String text, required Color color}) {
-    return Container(
-      padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: AppColors.border, width: 1.2),
-      ),
-      child: Text(
-        text,
-        style: TextStyle(
-          color: AppColors.border,
-          fontWeight: FontWeight.w900,
-          fontSize: 13,
-        ),
+  Widget _statChip({required String text}) {
+    return Text(
+      text,
+      style: TextStyle(
+        color: Color(0xff9aa4b8),
+        fontWeight: FontWeight.w400,
+        fontSize: 14,
       ),
     );
   }
@@ -257,67 +285,46 @@ extension ReviewPracticePageStatePart06 on _ReviewPracticePageState {
     return Container(
       key: _questionKeys[card.id],
       margin: EdgeInsets.only(bottom: 16),
-      padding: EdgeInsets.all(16),
+      padding: EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: AppColors.panel,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: AppColors.border, width: 1.4),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.border,
-            offset: Offset(0, 5),
-            blurRadius: 0,
-          ),
-          BoxShadow(
-            color: Color(0x14000000),
-            offset: Offset(0, 14),
-            blurRadius: 22,
-          ),
-        ],
+        color: Color(0xff111318),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Color(0xff242832)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Container(
-                padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  color: AppColors.blue,
-                  borderRadius: BorderRadius.circular(999),
-                  border: Border.all(color: AppColors.border, width: 1.1),
-                ),
-                child: Text(
-                  '${index + 1}/$_total',
-                  style: TextStyle(
-                    color: AppColors.onIconButton,
-                    fontWeight: FontWeight.w900,
-                    fontSize: 12,
-                  ),
+              Text(
+                _answerByDefinition ? 'Thuật ngữ' : 'Định nghĩa',
+                style: TextStyle(
+                  color: Color(0xff9aa4b8),
+                  fontWeight: FontWeight.w400,
+                  fontSize: 13,
                 ),
               ),
               Spacer(),
+              Text(
+                '${index + 1} / $_total',
+                style: TextStyle(
+                  color: Color(0xff9aa4b8),
+                  fontWeight: FontWeight.w400,
+                  fontSize: 13,
+                ),
+              ),
             ],
           ),
-          SizedBox(height: 14),
-          Text(
-            _answerByDefinition ? 'Thuật ngữ' : 'Định nghĩa',
-            style: TextStyle(
-              color: AppColors.muted,
-              fontWeight: FontWeight.w900,
-              fontSize: 13,
-            ),
-          ),
-          SizedBox(height: 8),
+          SizedBox(height: 18),
           Center(
             child: Text(
               this._promptOf(card),
               textAlign: TextAlign.center,
               style: TextStyle(
-                color: AppColors.text,
-                fontSize: this._promptOf(card).length > 20 ? 27 : 36,
-                fontWeight: FontWeight.w900,
-                height: 1.15,
+                color: Colors.white,
+                fontSize: this._promptOf(card).length > 28 ? 24 : 32,
+                fontWeight: FontWeight.w400,
+                height: 1.25,
               ),
             ),
           ),
@@ -328,9 +335,9 @@ extension ReviewPracticePageStatePart06 on _ReviewPracticePageState {
                 this._subPromptOf(card),
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  color: AppColors.muted,
+                  color: Color(0xff9aa4b8),
                   fontSize: 15,
-                  fontWeight: FontWeight.w800,
+                  fontWeight: FontWeight.w400,
                 ),
               ),
             ),
@@ -339,29 +346,38 @@ extension ReviewPracticePageStatePart06 on _ReviewPracticePageState {
           Text(
             'Chọn đáp án đúng',
             style: TextStyle(
-              color: AppColors.text,
-              fontWeight: FontWeight.w900,
+              color: Colors.white,
+              fontWeight: FontWeight.w400,
               fontSize: 15,
             ),
           ),
           SizedBox(height: 10),
           LayoutBuilder(
             builder: (context, constraints) {
-              final twoCols = constraints.maxWidth >= 520;
+              final twoCols = constraints.maxWidth >= 340;
               return Wrap(
                 spacing: 10,
                 runSpacing: 10,
-                children: choices.map((choice) {
+                children: choices.asMap().entries.map((entry) {
+                  final choice = entry.value;
                   final isSelected = selected == choice;
                   final isCorrectChoice =
                       this._normalizeAnswer(choice) ==
                       this._normalizeAnswer(correctAnswer);
-                  Color bg = AppColors.activeIsDark ? AppColors.panel2 : Color(0xfff7f9fc);
-                  if (_finished && isCorrectChoice) bg = AppColors.green;
-                  if (_finished && isSelected && !isCorrectChoice)
-                    bg = AppColors.red;
-                  if (!_finished && isSelected)
-                    bg = AppColors.blue.withOpacity(0.35);
+                  Color bg = Colors.transparent;
+                  Color choiceBorder = Color(0xff343b49);
+                  if (_finished && isCorrectChoice) {
+                    bg = Color(0xff163c32);
+                    choiceBorder = Color(0xff57f2bc);
+                  }
+                  if (_finished && isSelected && !isCorrectChoice) {
+                    bg = Color(0xff3f262b);
+                    choiceBorder = Color(0xffff6a00);
+                  }
+                  if (!_finished && isSelected) {
+                    bg = Color(0xff1d2340);
+                    choiceBorder = Color(0xff84a1ff);
+                  }
 
                   return SizedBox(
                     width: twoCols
@@ -374,36 +390,56 @@ extension ReviewPracticePageStatePart06 on _ReviewPracticePageState {
                       child: AnimatedContainer(
                         duration: Duration(milliseconds: 160),
                         constraints: BoxConstraints(minHeight: 52),
-                        alignment: Alignment.center,
                         padding: EdgeInsets.symmetric(
-                          horizontal: 12,
+                          horizontal: 16,
                           vertical: 10,
                         ),
                         decoration: BoxDecoration(
                           color: bg,
-                          borderRadius: BorderRadius.circular(16),
+                          borderRadius: BorderRadius.circular(8),
                           border: Border.all(
-                            color: AppColors.border,
-                            width: 1.25,
+                            color: choiceBorder,
+                            width: isSelected ? 2 : 1.5,
                           ),
-                          boxShadow: (answered || _finished)
-                              ? []
-                              : [
-                                  BoxShadow(
-                                    color: AppColors.border,
-                                    offset: Offset(0, 3),
-                                    blurRadius: 0,
-                                  ),
-                                ],
                         ),
-                        child: Text(
-                          choice,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: AppColors.text,
-                            fontWeight: FontWeight.w900,
-                            fontSize: 14,
-                          ),
+                        child: Row(
+                          children: [
+                            if (_finished && isCorrectChoice)
+                              Icon(
+                                Icons.check_rounded,
+                                color: Color(0xff57f2bc),
+                                size: 25,
+                              )
+                            else if (_finished && isSelected)
+                              Icon(
+                                Icons.close_rounded,
+                                color: Color(0xffff7a1a),
+                                size: 25,
+                              )
+                            else
+                              SizedBox(
+                                width: 25,
+                                child: Text(
+                                  '${entry.key + 1}',
+                                  style: TextStyle(
+                                    color: Color(0xff9aa4b8),
+                                    fontWeight: FontWeight.w400,
+                                  ),
+                                ),
+                              ),
+                            SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                choice,
+                                textAlign: TextAlign.left,
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w400,
+                                  fontSize: 16,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
@@ -422,8 +458,8 @@ extension ReviewPracticePageStatePart06 on _ReviewPracticePageState {
                     : 'Bạn không biết?',
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  color: AppColors.border,
-                  fontWeight: FontWeight.w900,
+                  color: Color(0xffaebcff),
+                  fontWeight: FontWeight.w400,
                 ),
               ),
             ),

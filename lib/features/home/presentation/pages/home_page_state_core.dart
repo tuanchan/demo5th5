@@ -64,13 +64,13 @@ class _HomePageState extends State<HomePage>
   late final StreamSubscription<SyncResult> _homeSyncSubscription;
   final GlobalKey _homeCourseViewportKey = GlobalKey();
   final GlobalKey _homeBackCardKey = GlobalKey();
+  final GlobalKey _homeFirstCourseCardKey = GlobalKey();
   final GlobalKey _homeTopicViewportKey = GlobalKey();
   final GlobalKey _homeCreateTopicCardKey = GlobalKey();
   int _homeCoursePage = 1;
   bool _showFloatingTopicBack = false;
+  bool _homeCourseAtBottom = false;
   bool _showFloatingTopicTop = false;
-  bool _showHomePagination = true;
-  double _lastHomeCourseOffset = 0;
   double _homeDragStartX = 0;
   bool _openedByEdgeSwipe = false;
 
@@ -272,7 +272,8 @@ class _HomePageState extends State<HomePage>
     _homeCourseScrollController.addListener(() {
       if (!_homeCourseScrollController.hasClients) return;
       final offset = _homeCourseScrollController.offset;
-      final delta = offset - _lastHomeCourseOffset;
+      final atBottom =
+          _homeCourseScrollController.position.extentAfter <= 8;
       var shouldShowBack = offset >= 390;
       final backBox = _homeBackCardKey.currentContext?.findRenderObject();
       final viewportBox =
@@ -283,22 +284,12 @@ class _HomePageState extends State<HomePage>
         final viewportTop = viewportBox.localToGlobal(Offset.zero).dy;
         shouldShowBack = backBottom <= viewportTop;
       }
-      var shouldShowPagination = _showHomePagination;
-      if (offset <= 0) {
-        shouldShowPagination = true;
-      } else if (delta > 3) {
-        shouldShowPagination = false;
-      } else if (delta < -3) {
-        shouldShowPagination = true;
-      }
-      _lastHomeCourseOffset = offset;
-
       if (mounted &&
           (shouldShowBack != _showFloatingTopicBack ||
-              shouldShowPagination != _showHomePagination)) {
+              atBottom != _homeCourseAtBottom)) {
         setState(() {
           _showFloatingTopicBack = shouldShowBack;
-          _showHomePagination = shouldShowPagination;
+          _homeCourseAtBottom = atBottom;
         });
       }
     });

@@ -27,7 +27,7 @@ extension ReviewPracticePageStatePart01 on _ReviewPracticePageState {
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: AppColors.text,
-                fontWeight: FontWeight.w900,
+                fontWeight: FontWeight.w400,
                 fontSize: 18,
               ),
             ),
@@ -43,68 +43,7 @@ extension ReviewPracticePageStatePart01 on _ReviewPracticePageState {
           children: [
             Column(
               children: [
-                Container(
-                  width: double.infinity,
-                  padding: EdgeInsets.fromLTRB(14, 12, 14, 12),
-                  decoration: BoxDecoration(
-                    color: AppColors.activeIsDark ? AppColors.bg.withOpacity(0.9) : Colors.white.withOpacity(0.9),
-                    border: Border(
-                      bottom: BorderSide(
-                        color: AppColors.border.withOpacity(0.12),
-                      ),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      SmallIcon3DButton(
-                        icon: Icons.arrow_back_rounded,
-                        color: AppColors.activeIsDark ? AppColors.panel2 : Colors.white,
-                        onTap: () => Navigator.pop(context),
-                      ),
-                      SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          children: [
-                            Text(
-                              '$_done / $_displayTotal',
-                              style: TextStyle(
-                                color: AppColors.text,
-                                fontWeight: FontWeight.w900,
-                                fontSize: 28,
-                              ),
-                            ),
-                            Text(
-                              widget.courseTitle,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: AppColors.muted,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      SizedBox(width: 10),
-                      SmallIcon3DButton(
-                        icon: Icons.tune_rounded,
-                        color: AppColors.yellow,
-                        onTap: this._openSetupSheet,
-                      ),
-                    ],
-                  ),
-                ),
-                if (!_showSetup && _quizCards.isNotEmpty)
-                  Container(
-                    width: double.infinity,
-                    height: 5,
-                    child: LinearProgressIndicator(
-                      value: _displayTotal <= 0 ? 0 : _done / _displayTotal,
-                      backgroundColor: AppColors.panel2,
-                      color: AppColors.green,
-                    ),
-                  ),
+                this._buildReviewStandardHeader(context),
                 Expanded(
                   child: _isGeneratingSentenceQuiz
                       ? this._buildSentenceGeneratingMode()
@@ -150,7 +89,7 @@ extension ReviewPracticePageStatePart01 on _ReviewPracticePageState {
                                                 style: TextStyle(
                                                   color: AppColors.text,
                                                   fontSize: 24,
-                                                  fontWeight: FontWeight.w900,
+                                                  fontWeight: FontWeight.w400,
                                                 ),
                                               ),
                                               SizedBox(height: 8),
@@ -159,7 +98,7 @@ extension ReviewPracticePageStatePart01 on _ReviewPracticePageState {
                                                 textAlign: TextAlign.center,
                                                 style: TextStyle(
                                                   color: AppColors.muted,
-                                                  fontWeight: FontWeight.w700,
+                                                  fontWeight: FontWeight.w400,
                                                   height: 1.35,
                                                 ),
                                               ),
@@ -167,7 +106,7 @@ extension ReviewPracticePageStatePart01 on _ReviewPracticePageState {
                                               this._solidButton(
                                                 text: 'Thiết lập ôn tập',
                                                 icon: Icons.tune_rounded,
-                                                color: AppColors.green,
+                                                color: Color(0xff4257ff),
                                                 onTap: this._openSetupSheet,
                                               ),
                                             ],
@@ -203,11 +142,9 @@ extension ReviewPracticePageStatePart01 on _ReviewPracticePageState {
                 child: Container(
                   padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   decoration: BoxDecoration(
-                    color: AppColors.activeIsDark ? AppColors.panel2.withOpacity(0.86) : Colors.white.withOpacity(0.86),
-                    borderRadius: BorderRadius.circular(22),
-                    border: Border.all(
-                      color: AppColors.border.withOpacity(0.18),
-                    ),
+                    color: Color(0xf20b0c10),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Color(0xff242832)),
                   ),
                   child: Row(
                     children: [
@@ -225,7 +162,7 @@ extension ReviewPracticePageStatePart01 on _ReviewPracticePageState {
                         child: this._solidButton(
                           text: 'Ôn lại',
                           icon: Icons.refresh_rounded,
-                          color: AppColors.yellow,
+                          color: Color(0xff4257ff),
                           onTap: this._restart,
                         ),
                       ),

@@ -22,7 +22,7 @@ extension HomePageStatePart02Split02 on _HomePageState {
               '$value',
               style: TextStyle(
                 color: Color(0xffeaf1ff),
-                fontWeight: FontWeight.w900,
+                fontWeight: FontWeight.w400,
                 fontSize: 16,
               ),
             ),
@@ -77,7 +77,7 @@ extension HomePageStatePart02Split02 on _HomePageState {
                 text,
                 style: TextStyle(
                   color: Color(0xffeaf1ff),
-                  fontWeight: FontWeight.w900,
+                  fontWeight: FontWeight.w400,
                   fontSize: 15,
                 ),
               ),
@@ -122,7 +122,7 @@ extension HomePageStatePart02Split02 on _HomePageState {
       label: Text(
         text,
         overflow: TextOverflow.ellipsis,
-        style: TextStyle(fontWeight: FontWeight.w900),
+        style: TextStyle(fontWeight: FontWeight.w400),
       ),
       style: ElevatedButton.styleFrom(
         elevation: 0,
@@ -145,6 +145,17 @@ extension HomePageStatePart02Split02 on _HomePageState {
     await Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => StatisticsPage()),
+    );
+  }
+
+  Future<void> openWritingPractice() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => WritingPracticePage(
+          initialCourseId: selectedHomeCourse?.id,
+        ),
+      ),
     );
   }
 

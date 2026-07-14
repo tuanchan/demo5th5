@@ -34,14 +34,14 @@ extension _DeepLearnPageStateUi on _DeepLearnPageState {
             label: compact ? const SizedBox.shrink() : const Text('Trang chủ'),
             style: TextButton.styleFrom(
               foregroundColor: Colors.white,
-              textStyle: const TextStyle(fontWeight: FontWeight.w900),
+              textStyle: const TextStyle(fontWeight: FontWeight.w400),
             ),
           ),
           title: Text(
             'Kiểm tra',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w900),
+            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w400),
           ),
           centerTitle: true,
           actions: [
