@@ -116,6 +116,9 @@ class _FlashCardsPageState extends State<FlashCardsPage> {
   @override
   void initState() {
     super.initState();
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+    ]);
 
     Future.delayed(Duration(milliseconds: 350), () {
       if (mounted) {

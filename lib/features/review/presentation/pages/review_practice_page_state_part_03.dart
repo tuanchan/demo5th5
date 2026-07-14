@@ -211,10 +211,9 @@ $cardsJson
           _matchElapsedMs = _matchStopwatch.elapsedMilliseconds;
         });
       });
-      // Auto-rotate to landscape for matching pairs
+      // Keep matching pairs vertical like the other study modes.
       SystemChrome.setPreferredOrientations([
-        DeviceOrientation.landscapeLeft,
-        DeviceOrientation.landscapeRight,
+        DeviceOrientation.portraitUp,
       ]);
     } else {
       // Ensure portrait for other modes

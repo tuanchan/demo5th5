@@ -7,6 +7,7 @@ extension FlashCardsPageStatePart01 on _FlashCardsPageState {
     return Scaffold(
       backgroundColor: Color(0xff000000),
       body: SafeArea(
+        bottom: false,
         child: Stack(
           children: [
             Column(

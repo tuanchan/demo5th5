@@ -632,10 +632,11 @@ extension FlashCardsPageStatePart06 on _FlashCardsPageState {
 
 
   Widget buildBottomBar() {
+    final bottomInset = MediaQuery.viewPaddingOf(context).bottom;
     return Container(
       width: double.infinity,
-      height: 70,
-      padding: EdgeInsets.fromLTRB(18, 8, 18, 10),
+      height: 70 + bottomInset,
+      padding: EdgeInsets.fromLTRB(18, 8, 18, 10 + bottomInset),
       decoration: BoxDecoration(
         color: Color(0xff000000),
         border: Border(top: BorderSide(color: Color(0xff1f2026))),

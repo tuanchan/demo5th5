@@ -72,7 +72,7 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
     this._finishStudySession();
     _matchTimer?.cancel();
     _matchTimer = null;
-    // Reset orientation when leaving matching pairs
+    // Review screens remain portrait on mobile, including matching pairs.
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
     ]);

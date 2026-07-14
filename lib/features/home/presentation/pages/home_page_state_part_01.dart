@@ -12,6 +12,7 @@ extension HomePageStatePart01 on _HomePageState {
     return Scaffold(
       backgroundColor: _homeBg,
       body: SafeArea(
+        bottom: false,
         child: LayoutBuilder(
           builder: (context, constraints) {
             final compact = constraints.maxWidth < 900;
@@ -239,10 +240,17 @@ extension HomePageStatePart01 on _HomePageState {
         });
       }
 
-      await SupabaseConfig.client.auth.signInWithOAuth(
+      final launched = await SupabaseConfig.client.auth.signInWithOAuth(
         OAuthProvider.google,
         redirectTo: redirectTo,
+        authScreenLaunchMode: !kIsWeb && Platform.isIOS
+            ? LaunchMode.externalApplication
+            : LaunchMode.platformDefault,
+        queryParams: const {'prompt': 'select_account'},
       );
+      if (!launched) {
+        throw StateError('Không thể mở trang đăng nhập Google');
+      }
       return null;
     } catch (error) {
       return 'Đăng nhập Google thất bại: $error';

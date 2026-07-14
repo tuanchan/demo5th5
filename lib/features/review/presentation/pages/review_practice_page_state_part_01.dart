@@ -4,17 +4,17 @@ extension ReviewPracticePageStatePart01 on _ReviewPracticePageState {
   Widget _buildReviewPracticePagePage(BuildContext context) {
     if (_isLoading) {
       return Scaffold(
-        backgroundColor: AppColors.bg,
+        backgroundColor: Colors.black,
         body: Center(child: CircularProgressIndicator()),
       );
     }
 
     if (_cards.isEmpty) {
       return Scaffold(
-        backgroundColor: AppColors.bg,
+        backgroundColor: Colors.black,
         appBar: AppBar(
-          backgroundColor: AppColors.activeIsDark ? AppColors.bg : Colors.white,
-          foregroundColor: AppColors.text,
+          backgroundColor: Colors.black,
+          foregroundColor: Colors.white,
           title: Text('Ôn tập'),
         ),
         body: Center(
@@ -26,7 +26,7 @@ extension ReviewPracticePageStatePart01 on _ReviewPracticePageState {
                   : 'Học phần này chưa có thẻ để ôn tập',
               textAlign: TextAlign.center,
               style: TextStyle(
-                color: AppColors.text,
+                color: Colors.white,
                 fontWeight: FontWeight.w400,
                 fontSize: 18,
               ),
@@ -37,8 +37,9 @@ extension ReviewPracticePageStatePart01 on _ReviewPracticePageState {
     }
 
     return Scaffold(
-      backgroundColor: AppColors.bg,
+      backgroundColor: Colors.black,
       body: SafeArea(
+        bottom: false,
         child: Stack(
           children: [
             Column(
@@ -138,7 +139,7 @@ extension ReviewPracticePageStatePart01 on _ReviewPracticePageState {
               Positioned(
                 left: 14,
                 right: 14,
-                bottom: 14,
+                bottom: 14 + MediaQuery.viewPaddingOf(context).bottom,
                 child: Container(
                   padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   decoration: BoxDecoration(
@@ -238,11 +239,9 @@ extension ReviewPracticePageStatePart01 on _ReviewPracticePageState {
         _cards = rows.map((e) => StudyCardItem.fromMap(e)).toList();
         _questionLimit = _cards.isEmpty
             ? 0
-            : (widget.dueOnly && widget.presetMode != null
+            : (_questionLimit <= 0
                   ? _cards.length
-                  : (_questionLimit <= 0
-                        ? _cards.length
-                        : _questionLimit.clamp(1, _cards.length).toInt()));
+                  : _questionLimit.clamp(1, _cards.length).toInt());
         _isLoading = false;
       });
 

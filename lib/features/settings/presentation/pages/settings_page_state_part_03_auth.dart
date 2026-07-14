@@ -293,10 +293,17 @@ extension SettingsPageStateAuth on _SettingsPageState {
         });
       }
 
-      await SupabaseConfig.client.auth.signInWithOAuth(
+      final launched = await SupabaseConfig.client.auth.signInWithOAuth(
         OAuthProvider.google,
         redirectTo: redirectTo,
+        authScreenLaunchMode: !kIsWeb && Platform.isIOS
+            ? LaunchMode.externalApplication
+            : LaunchMode.platformDefault,
+        queryParams: const {'prompt': 'select_account'},
       );
+      if (!launched) {
+        throw StateError('Không thể mở trang đăng nhập Google');
+      }
       if (mounted) {
         setState(() {});
         showAppToast(ctx, 'Đang chuyển đến Google...');

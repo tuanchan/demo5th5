@@ -27,6 +27,213 @@ class _DueReviewLaunchInfo {
 
 enum _DueStudyAction { flash, review }
 
+Future<String?> _showDueReviewSetupDialog(
+  BuildContext context,
+  _DueReviewLaunchInfo info,
+) async {
+  final savedMultipleChoice =
+      await AppSettingsStore.getBool('review.multipleChoice') ?? true;
+  final savedEssay = await AppSettingsStore.getBool('review.essay') ?? false;
+  final savedListening =
+      await AppSettingsStore.getBool('review.listening') ?? false;
+  final savedMatchingPairs =
+      await AppSettingsStore.getBool('review.matchingPairs') ?? false;
+  final savedAnswerByDefinition =
+      await AppSettingsStore.getBool('review.answerByDefinition') ?? true;
+  final savedLimit =
+      await AppSettingsStore.getInt('review.questionLimit') ?? info.count;
+
+  if (!context.mounted) return null;
+
+  var mode = savedEssay
+      ? 'essay'
+      : (savedListening
+            ? 'listening'
+            : (savedMatchingPairs ? 'matchingPairs' : 'multipleChoice'));
+  if (savedMultipleChoice) mode = 'multipleChoice';
+  var answerByDefinition = savedAnswerByDefinition;
+  var questionLimit = savedLimit.clamp(1, info.count).toInt();
+
+  return showDialog<String>(
+    context: context,
+    barrierColor: const Color(0xb3000000),
+    builder: (dialogContext) => StatefulBuilder(
+      builder: (context, setDialogState) {
+        Widget modeTile(String value, String title, IconData icon) {
+          final selected = mode == value;
+          return GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => setDialogState(() => mode = value),
+            child: Container(
+              width: double.infinity,
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+              decoration: BoxDecoration(
+                color: selected ? const Color(0xff171c28) : _dueDialogSurface,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: selected ? const Color(0xff4257ff) : _dueDialogBorder,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(icon, color: selected ? _dueDialogBlue : _dueDialogMuted),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: TextStyle(
+                        color: _dueDialogText,
+                        fontWeight: selected ? FontWeight.w900 : FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  Icon(
+                    selected
+                        ? Icons.radio_button_checked_rounded
+                        : Icons.radio_button_off_rounded,
+                    color: selected ? _dueDialogBlue : _dueDialogMuted,
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 18),
+          child: Container(
+            constraints: BoxConstraints(
+              maxWidth: 560,
+              maxHeight: MediaQuery.sizeOf(context).height * 0.9,
+            ),
+            padding: const EdgeInsets.all(18),
+            decoration: _dueDialogDecoration(),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          'Thiết lập bài kiểm tra SRS',
+                          style: TextStyle(
+                            color: _dueDialogText,
+                            fontSize: 23,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.pop(dialogContext),
+                        icon: const Icon(Icons.close_rounded, color: _dueDialogMuted),
+                      ),
+                    ],
+                  ),
+                  Text(
+                    '${info.count} thẻ đến hạn hôm nay',
+                    style: const TextStyle(
+                      color: _dueDialogMuted,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          'Số câu hỏi',
+                          style: TextStyle(color: _dueDialogText, fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: questionLimit <= 1
+                            ? null
+                            : () => setDialogState(() => questionLimit--),
+                        icon: const Icon(Icons.remove_rounded),
+                        color: _dueDialogBlue,
+                      ),
+                      Text(
+                        '$questionLimit',
+                        style: const TextStyle(color: _dueDialogText, fontWeight: FontWeight.w900),
+                      ),
+                      IconButton(
+                        onPressed: questionLimit >= info.count
+                            ? null
+                            : () => setDialogState(() => questionLimit++),
+                        icon: const Icon(Icons.add_rounded),
+                        color: _dueDialogBlue,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  DropdownButtonFormField<bool>(
+                    value: answerByDefinition,
+                    dropdownColor: _dueDialogSurface,
+                    style: const TextStyle(color: _dueDialogText, fontWeight: FontWeight.w700),
+                    decoration: InputDecoration(
+                      labelText: 'Trả lời bằng',
+                      labelStyle: const TextStyle(color: _dueDialogMuted),
+                      filled: true,
+                      fillColor: _dueDialogSurface,
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: _dueDialogBorder),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: _dueDialogBlue),
+                      ),
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: true, child: Text('Tiếng Việt')),
+                      DropdownMenuItem(value: false, child: Text('Thuật ngữ')),
+                    ],
+                    onChanged: (value) {
+                      if (value != null) {
+                        setDialogState(() => answerByDefinition = value);
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  modeTile('multipleChoice', 'Trắc nghiệm (4 đáp án)', Icons.list_alt_rounded),
+                  modeTile('essay', 'Tự luận', Icons.edit_outlined),
+                  modeTile('listening', 'Nghe', Icons.headphones_rounded),
+                  modeTile('matchingPairs', 'Kiểm tra cặp thẻ', Icons.grid_view_rounded),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: _dueSolidButton(
+                      text: 'Bắt đầu kiểm tra',
+                      icon: Icons.play_arrow_rounded,
+                      color: const Color(0xff4257ff),
+                      onTap: () async {
+                        await Future.wait([
+                          AppSettingsStore.setBool('review.multipleChoice', mode == 'multipleChoice'),
+                          AppSettingsStore.setBool('review.essay', mode == 'essay'),
+                          AppSettingsStore.setBool('review.listening', mode == 'listening'),
+                          AppSettingsStore.setBool('review.matchingPairs', mode == 'matchingPairs'),
+                          AppSettingsStore.setBool('review.sentenceMode', false),
+                          AppSettingsStore.setBool('review.answerByDefinition', answerByDefinition),
+                          AppSettingsStore.setInt('review.questionLimit', questionLimit),
+                        ]);
+                        if (dialogContext.mounted) Navigator.pop(dialogContext, mode);
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    ),
+  );
+}
+
 
 
 
@@ -126,6 +333,9 @@ Future<void> _openDueReviewFlow(
     return;
   }
 
+  final presetMode = await _showDueReviewSetupDialog(context, info);
+  if (!context.mounted || presetMode == null) return;
+
   await Navigator.push(
     context,
     MaterialPageRoute(
@@ -134,6 +344,7 @@ Future<void> _openDueReviewFlow(
         courseTitle: 'Ôn thẻ đến hạn hôm nay',
         courseLanguageCode: info.languageCode,
         dueOnly: true,
+        presetMode: presetMode,
       ),
     ),
   );
