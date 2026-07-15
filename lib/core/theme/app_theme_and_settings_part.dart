@@ -179,9 +179,14 @@ class AppSettingsStore {
     await db.execute(
       'CREATE TABLE IF NOT EXISTS app_settings ('
       'key TEXT PRIMARY KEY, '
-      'value TEXT NOT NULL'
+      'value TEXT NOT NULL, '
+      'updatedAt TEXT'
       ')',
     );
+    final columns = await db.rawQuery('PRAGMA table_info(app_settings)');
+    if (!columns.any((row) => row['name'] == 'updatedAt')) {
+      await db.execute('ALTER TABLE app_settings ADD COLUMN updatedAt TEXT');
+    }
   }
 
   static Future<String?> getString(String key) async {
@@ -207,7 +212,13 @@ class AppSettingsStore {
     await db.insert('app_settings', {
       'key': key,
       'value': value,
+      'updatedAt': DateTime.now().toIso8601String(),
     }, conflictAlgorithm: ConflictAlgorithm.replace);
+    if (SupabaseConfig.isLoggedIn &&
+        key != GeminiFlashLiteClient.apiKeySettingKey &&
+        !key.startsWith('sync.')) {
+      unawaited(SupabaseSyncService.instance.syncPendingChanges());
+    }
   }
 
   static Future<bool?> getBool(String key) async {
@@ -337,4 +348,3 @@ class FlashCardItem {
     this.pronunciation = '',
   });
 }
-

@@ -141,6 +141,11 @@ extension HomePageStatePart03 on _HomePageState {
                           expandedTopicIds.add(topicId);
                           Navigator.pop(dialogContext);
                           await this.loadCourses(showLoading: false);
+                          if (SupabaseConfig.isLoggedIn) {
+                            unawaited(
+                              SupabaseSyncService.instance.syncPendingChanges(),
+                            );
+                          }
                           this.showHomeMessage("Đã tạo chủ đề");
                         },
                         style: ElevatedButton.styleFrom(
@@ -324,6 +329,11 @@ extension HomePageStatePart03 on _HomePageState {
                           if (!mounted) return;
                           Navigator.pop(dialogContext);
                           await this.loadCourses(showLoading: false);
+                          if (SupabaseConfig.isLoggedIn) {
+                            unawaited(
+                              SupabaseSyncService.instance.syncPendingChanges(),
+                            );
+                          }
                           this.showHomeMessage("Đã sửa chủ đề");
                         },
                         style: TextButton.styleFrom(
@@ -862,6 +872,8 @@ extension HomePageStatePart03 on _HomePageState {
                         'languageName': selectedLanguage,
                         'languageCode': newLanguageCode,
                         'updatedAt': now,
+                        'syncOrigin': 'local',
+                        'hasLocalNameConflict': 0,
                       },
                       where: 'id = ? AND deletedAt IS NULL',
                       whereArgs: [course.id],
@@ -903,6 +915,11 @@ extension HomePageStatePart03 on _HomePageState {
 
                     Navigator.pop(dialogContext);
                     await this.loadCourses(showLoading: false);
+                    if (SupabaseConfig.isLoggedIn) {
+                      unawaited(
+                        SupabaseSyncService.instance.syncPendingChanges(),
+                      );
+                    }
                     this.showHomeMessage(
                       languageChanged
                           ? "Đã đổi ngôn ngữ và tạo lại âm thanh"
@@ -1028,9 +1045,12 @@ extension HomePageStatePart03 on _HomePageState {
 
       await this.loadCourses(showLoading: false);
       this.showHomeMessage("Đã xóa học phần khỏi app và DB");
-      if (syncDeletion) {
+      if (syncDeletion && !course.hasLocalNameConflict) {
         unawaited(
-          SupabaseSyncService.instance.syncPendingChanges().then((syncResult) {
+          SupabaseSyncService.instance
+              .deleteRemoteCourseChildren(course.id)
+              .then((_) => SupabaseSyncService.instance.syncPendingChanges())
+              .then((syncResult) {
             if (syncResult.hasError) {
               debugPrint('DELETE COURSE SYNC ERROR: ${syncResult.error}');
             }

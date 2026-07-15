@@ -3,6 +3,7 @@ part of flutterflashcard_main;
 extension StatisticsPageStatePart02 on _StatisticsPageState {
   Future<StatisticsData> loadStatistics() async {
     final db = await AppDatabase.instance.database;
+    await AppDatabase.instance.repairIncompleteReviewSchedules();
     await this._purgeSoftDeletedCourses(db);
     final nowDate = DateTime.now();
     final todayStart = DateTime(nowDate.year, nowDate.month, nowDate.day);
@@ -34,7 +35,7 @@ extension StatisticsPageStatePart02 on _StatisticsPageState {
           WHERE ca.deletedAt IS NULL
             AND ca.isHidden = 0
             AND c.deletedAt IS NULL
-            AND COALESCE(rs.repetitionCount, 0) > 0
+            AND COALESCE(rs.level, 0) > 0
             AND rs.nextReviewAt IS NOT NULL
             AND rs.nextReviewAt < ?
         ) AS needReviewCards,
@@ -100,7 +101,7 @@ extension StatisticsPageStatePart02 on _StatisticsPageState {
         c.languageCode,
         COUNT(ca.id) AS totalCards,
         COALESCE(SUM(CASE WHEN COALESCE(rs.level, 0) >= $masteredLevel THEN 1 ELSE 0 END), 0) AS masteredCards,
-        COALESCE(SUM(CASE WHEN ca.id IS NOT NULL AND COALESCE(rs.repetitionCount, 0) > 0 AND rs.nextReviewAt IS NOT NULL AND rs.nextReviewAt < ? THEN 1 ELSE 0 END), 0) AS needReviewCards,
+        COALESCE(SUM(CASE WHEN ca.id IS NOT NULL AND COALESCE(rs.level, 0) > 0 AND rs.nextReviewAt IS NOT NULL AND rs.nextReviewAt < ? THEN 1 ELSE 0 END), 0) AS needReviewCards,
         (
           SELECT COUNT(DISTINCT sr.cardId)
           FROM study_results sr
@@ -161,7 +162,7 @@ extension StatisticsPageStatePart02 on _StatisticsPageState {
       WHERE ca.deletedAt IS NULL
         AND ca.isHidden = 0
         AND c.deletedAt IS NULL
-        AND COALESCE(rs.repetitionCount, 0) > 0
+        AND COALESCE(rs.level, 0) > 0
         AND rs.nextReviewAt IS NOT NULL
         AND rs.nextReviewAt < ?
       ORDER BY
@@ -202,7 +203,7 @@ extension StatisticsPageStatePart02 on _StatisticsPageState {
               WHERE ca.deletedAt IS NULL
                 AND ca.isHidden = 0
                 AND c.deletedAt IS NULL
-                AND COALESCE(rs.repetitionCount, 0) > 0
+                AND COALESCE(rs.level, 0) > 0
                 AND rs.nextReviewAt IS NOT NULL
                 AND rs.nextReviewAt < ?
             '''
@@ -214,7 +215,7 @@ extension StatisticsPageStatePart02 on _StatisticsPageState {
               WHERE ca.deletedAt IS NULL
                 AND ca.isHidden = 0
                 AND c.deletedAt IS NULL
-                AND COALESCE(rs.repetitionCount, 0) > 0
+                AND COALESCE(rs.level, 0) > 0
                 AND rs.nextReviewAt IS NOT NULL
                 AND rs.nextReviewAt >= ?
                 AND rs.nextReviewAt < ?

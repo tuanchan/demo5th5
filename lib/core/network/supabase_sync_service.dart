@@ -6,6 +6,10 @@ import 'package:sqflite/sqflite.dart';
 import '../database/app_database.dart';
 import 'supabase_config.dart';
 
+enum _SyncOperation { pullReplace, merge, livePush }
+
+class _SyncCancelled implements Exception {}
+
 /// Service to synchronize local SQLite data with Supabase when user logs in.
 /// Uses a "last-write-wins" merge strategy based on updatedAt timestamps.
 class SupabaseSyncService {
@@ -14,10 +18,13 @@ class SupabaseSyncService {
   static final SupabaseSyncService instance = SupabaseSyncService._();
 
   bool _isSyncing = false;
+  bool _cancelSyncRequested = false;
   String? _lastSyncError;
   Future<SyncResult>? _activeSync;
   final StreamController<SyncResult> _syncCompletedController =
       StreamController<SyncResult>.broadcast();
+  final StreamController<void> _remoteDataChangedController =
+      StreamController<void>.broadcast();
   final Map<String, String> _topicRemoteIdByLocal = {};
   final Map<String, String> _courseRemoteIdByLocal = {};
   final Map<String, String> _cardRemoteIdByLocal = {};
@@ -26,14 +33,34 @@ class SupabaseSyncService {
   final Map<String, int> _cardLocalIdByRemote = {};
   final Map<String, List<Map<String, dynamic>>> _prefetchedRemoteRows = {};
   String _localDeviceId = '';
+  _SyncOperation _operation = _SyncOperation.pullReplace;
+  String? _sessionOwnerId;
+  String? _sessionStartedAt;
+  String? _identityOwnerId;
+  RealtimeChannel? _realtimeChannel;
+  Timer? _realtimeMergeDebounce;
+  final Map<String, PostgresChangePayload> _realtimePendingChanges = {};
 
   bool get isSyncing => _isSyncing;
+  bool get isSyncCancellationRequested => _cancelSyncRequested;
   String? get lastSyncError => _lastSyncError;
   Future<SyncResult>? get activeSync => _activeSync;
   Stream<SyncResult> get syncCompleted => _syncCompletedController.stream;
+  Stream<void> get remoteDataChanged => _remoteDataChangedController.stream;
 
-  /// Full bidirectional sync: push local → Supabase, then pull Supabase → local.
-  Future<SyncResult> syncAll() {
+  /// Pull-only replacement. No local rows are uploaded by this action.
+  Future<SyncResult> syncAll() =>
+      _startManualSync(_SyncOperation.pullReplace);
+
+  Future<SyncResult> mergeAll() => _startManualSync(_SyncOperation.merge);
+
+  Future<SyncResult> _startManualSync(_SyncOperation operation) async {
+    final active = _activeSync;
+    if (active != null) await active;
+    return _startSync(operation);
+  }
+
+  Future<SyncResult> _startSync(_SyncOperation operation) {
     final active = _activeSync;
     if (active != null) return active;
     if (!SupabaseConfig.isLoggedIn) {
@@ -42,10 +69,23 @@ class SupabaseSyncService {
       );
     }
 
+    _operation = operation;
+    _cancelSyncRequested = false;
     final future = _syncAllOnce();
     _activeSync = future;
     future.then(_syncCompletedController.add);
     return future;
+  }
+
+  void cancelActiveSync() {
+    if (!_isSyncing) return;
+    _cancelSyncRequested = true;
+    _realtimeMergeDebounce?.cancel();
+    _realtimeMergeDebounce = null;
+  }
+
+  void _throwIfSyncCancelled() {
+    if (_cancelSyncRequested) throw _SyncCancelled();
   }
 
   /// Wait for an in-flight sync, then start a fresh pass that includes local
@@ -53,7 +93,350 @@ class SupabaseSyncService {
   Future<SyncResult> syncPendingChanges() async {
     final active = _activeSync;
     if (active != null) await active;
-    return syncAll();
+    if (!SupabaseConfig.isLoggedIn) {
+      return SyncResult(pushed: 0, pulled: 0, error: 'Chưa đăng nhập');
+    }
+    await beginAuthenticatedSession();
+    return _startSync(_SyncOperation.livePush);
+  }
+
+  /// Pushes the complete SRS state after a study session finishes. Card IDs
+  /// are resolved against Supabase first, matching the desktop sync flow.
+  Future<SyncResult> syncReviewStatesAfterStudy() async {
+    final active = _activeSync;
+    if (active != null) await active;
+    if (!SupabaseConfig.isLoggedIn) {
+      return SyncResult(pushed: 0, pulled: 0, error: 'ChÆ°a Ä‘Äƒng nháº­p');
+    }
+
+    try {
+      final db = await AppDatabase.instance.database;
+      final ownerId = SupabaseConfig.currentUser!.id;
+      // A manually assigned due date is valid even at SRS level 0, so push
+      // every local review state instead of filtering only progressed cards.
+      final localStates = await db.query('review_states');
+      final payload = <Map<String, dynamic>>[];
+      final skippedCardIds = <int>[];
+      final timestamp = DateTime.now().toUtc().toIso8601String();
+      var verifiedScheduleCount = 0;
+
+      for (final state in localStates) {
+        final cardId = _localInt(state['cardId']);
+        if (cardId == null) continue;
+        final remoteCardId = await findRemoteCardId(cardId);
+        if (remoteCardId == null || remoteCardId.isEmpty) {
+          skippedCardIds.add(cardId);
+          continue;
+        }
+
+        final row = _reviewStateLocalToRemote(state, ownerId)
+          ..remove('id')
+          ..['card_id'] = remoteCardId
+          ..['updated_at'] = timestamp;
+        payload.add(row);
+      }
+
+      for (var start = 0; start < payload.length; start += 200) {
+        final end = math.min(start + 200, payload.length);
+        final savedRows = await SupabaseConfig.client
+            .from('review_states')
+            .upsert(payload.sublist(start, end), onConflict: 'owner_id,card_id')
+            .select('card_id,next_review_at,interval_days');
+        verifiedScheduleCount += savedRows.where((row) {
+          final nextReviewAt = row['next_review_at']?.toString() ?? '';
+          return nextReviewAt.isNotEmpty;
+        }).length;
+      }
+
+      final expectedScheduleCount = payload.where((row) {
+        final nextReviewAt = row['next_review_at']?.toString() ?? '';
+        return nextReviewAt.isNotEmpty;
+      }).length;
+      final errors = <String>[
+        if (skippedCardIds.isNotEmpty)
+          'Không tìm thấy ${skippedCardIds.length} thẻ trên server',
+        if (verifiedScheduleCount != expectedScheduleCount)
+          'Server chỉ xác nhận $verifiedScheduleCount/$expectedScheduleCount lịch ôn',
+      ];
+      print(
+        'SRS SERVER RESULT: states=${payload.length}, '
+        'scheduled=$verifiedScheduleCount/$expectedScheduleCount, '
+        'skippedCards=${skippedCardIds.length}',
+      );
+      return SyncResult(
+        pushed: payload.length,
+        pulled: 0,
+        error: errors.isEmpty ? null : errors.join(' | '),
+        logs: [
+          'SRS: đẩy ${payload.length} trạng thái',
+          'Lịch ôn: server xác nhận $verifiedScheduleCount/$expectedScheduleCount ngày',
+        ],
+      );
+    } catch (error) {
+      return SyncResult(pushed: 0, pulled: 0, error: error.toString());
+    }
+  }
+
+  Future<void> beginAuthenticatedSession({bool newLogin = false}) async {
+    final user = SupabaseConfig.currentUser;
+    if (user == null) return;
+    if (!newLogin &&
+        _sessionOwnerId == user.id &&
+        _sessionStartedAt?.isNotEmpty == true) {
+      startRealtimeSync();
+      return;
+    }
+    if (newLogin || _sessionOwnerId != user.id) {
+      _identityOwnerId = null;
+    }
+
+    final db = await AppDatabase.instance.database;
+    final key = 'sync.sessionStartedAt.${user.id}';
+    String? startedAt;
+    if (!newLogin) {
+      final rows = await db.query(
+        'app_settings',
+        columns: ['value'],
+        where: 'key = ?',
+        whereArgs: [key],
+        limit: 1,
+      );
+      startedAt = rows.isEmpty ? null : rows.first['value']?.toString();
+    }
+    startedAt ??= DateTime.now().toIso8601String();
+    _sessionOwnerId = user.id;
+    _sessionStartedAt = startedAt;
+    await _setLocalSetting(db, key, startedAt);
+    await _setLocalSetting(db, 'sync.localBoundOwnerId', user.id);
+    startRealtimeSync();
+  }
+
+  void endAuthenticatedSession() {
+    stopRealtimeSync();
+    _sessionOwnerId = null;
+    _sessionStartedAt = null;
+    _identityOwnerId = null;
+  }
+
+  /// Listens to server-side changes and merges them into the local SQLite
+  /// database after a short debounce window.
+  void startRealtimeSync() {
+    final user = SupabaseConfig.currentUser;
+    if (user == null || _realtimeChannel != null) return;
+
+    void onChange(PostgresChangePayload change) => _queueRealtimeChange(change);
+
+    var channel = SupabaseConfig.client.channel('account-sync:${user.id}');
+    for (final table in const [
+      'topics',
+      'courses',
+      'cards',
+      'review_states',
+      'card_examples',
+    ]) {
+      channel = channel.onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public',
+        table: table,
+        filter: PostgresChangeFilter(
+          type: PostgresChangeFilterType.eq,
+          column: 'owner_id',
+          value: user.id,
+        ),
+        callback: onChange,
+      );
+    }
+    _realtimeChannel = channel;
+    channel.subscribe((status, error) {
+      if (status == RealtimeSubscribeStatus.channelError) {
+        print('REALTIME SUBSCRIPTION ERROR: $error');
+      }
+    });
+  }
+
+  void stopRealtimeSync() {
+    _realtimeMergeDebounce?.cancel();
+    _realtimeMergeDebounce = null;
+    _realtimePendingChanges.clear();
+    final channel = _realtimeChannel;
+    _realtimeChannel = null;
+    if (channel != null) {
+      unawaited(SupabaseConfig.client.removeChannel(channel));
+    }
+  }
+
+  void _queueRealtimeChange(PostgresChangePayload change) {
+    final row = change.newRecord.isNotEmpty ? change.newRecord : change.oldRecord;
+    final id = row['id']?.toString() ?? row['key']?.toString() ?? '';
+    if (id.isEmpty) return;
+    _realtimePendingChanges['${change.table}:$id'] = change;
+    _realtimeMergeDebounce?.cancel();
+    _realtimeMergeDebounce = Timer(const Duration(milliseconds: 1200), () async {
+      if (!SupabaseConfig.isLoggedIn) return;
+      if (_isSyncing) {
+        _realtimeMergeDebounce = Timer(
+          const Duration(milliseconds: 1200),
+          () => _queueRealtimeChanges(),
+        );
+        return;
+      }
+      await _queueRealtimeChanges();
+    });
+  }
+
+  // A Realtime channel created before a hot reload can retain a callback that
+  // referenced this old method. Reconnect it once so subsequent events use
+  // the current row-level callback instead of crashing with a method lookup.
+  void _queueRealtimeMerge() {
+    stopRealtimeSync();
+    startRealtimeSync();
+  }
+
+  Future<void> _queueRealtimeChanges() async {
+    if (!SupabaseConfig.isLoggedIn || _isSyncing || _realtimePendingChanges.isEmpty) {
+      return;
+    }
+    final changes = _realtimePendingChanges.values.toList()
+      ..sort((a, b) => _realtimeTableOrder(a.table).compareTo(_realtimeTableOrder(b.table)));
+    _realtimePendingChanges.clear();
+
+    _isSyncing = true;
+    try {
+      var changed = false;
+      final changesByTable = <String, List<PostgresChangePayload>>{};
+      for (final change in changes) {
+        changesByTable.putIfAbsent(change.table, () => []).add(change);
+      }
+      final tables = changesByTable.keys.toList()
+        ..sort((a, b) => _realtimeTableOrder(a).compareTo(_realtimeTableOrder(b)));
+      for (final table in tables) {
+        changed = await _applyRealtimeChanges(changesByTable[table]!) || changed;
+      }
+      if (changed) _remoteDataChangedController.add(null);
+    } catch (error) {
+      print('REALTIME APPLY ERROR: $error');
+    } finally {
+      _isSyncing = false;
+      if (_realtimePendingChanges.isNotEmpty) {
+        _queueRealtimeChange(_realtimePendingChanges.values.first);
+      }
+    }
+  }
+
+  int _realtimeTableOrder(String table) => switch (table) {
+        'topics' => 0,
+        'courses' => 1,
+        'cards' => 2,
+        'card_examples' => 3,
+        'review_states' => 4,
+        _ => 99,
+      };
+
+  /// Realtime delivers the changed row itself. Apply only that row; do not
+  /// call mergeAll(), which would re-query every synchronized table.
+  Future<bool> _applyRealtimeChanges(
+    List<PostgresChangePayload> changes,
+  ) async {
+    if (changes.isEmpty) return false;
+    final table = changes.first.table;
+    const supportedTables = {
+      'topics',
+      'courses',
+      'cards',
+      'card_examples',
+      'review_states',
+    };
+    if (!supportedTables.contains(table)) return false;
+    final db = await AppDatabase.instance.database;
+    final rows = <Map<String, dynamic>>[];
+    var changed = false;
+    for (final change in changes) {
+      final source = change.newRecord.isNotEmpty
+          ? change.newRecord
+          : change.oldRecord;
+      final remote = Map<String, dynamic>.from(source);
+      final remoteId = remote['id']?.toString();
+      if (remoteId == null || remoteId.isEmpty) continue;
+
+      if (change.eventType == PostgresChangeEvent.delete ||
+          remote['deleted_at'] != null) {
+        final localId = switch (table) {
+          'topics' => _topicLocalIdByRemote[remoteId] ?? _stableLocalId(remoteId),
+          'courses' => _courseLocalIdByRemote[remoteId] ?? _stableLocalId(remoteId),
+          'cards' => _cardLocalIdByRemote[remoteId] ?? _stableLocalId(remoteId),
+          _ => _stableLocalId(remoteId),
+        };
+        await db.delete(table, where: 'id = ?', whereArgs: [localId]);
+        changed = true;
+        continue;
+      }
+
+      if (table == 'topics') {
+        _topicLocalIdByRemote.putIfAbsent(remoteId, () => _stableLocalId(remoteId));
+      } else if (table == 'courses') {
+        _courseLocalIdByRemote.putIfAbsent(remoteId, () => _stableLocalId(remoteId));
+      } else if (table == 'cards') {
+        _cardLocalIdByRemote.putIfAbsent(remoteId, () => _stableLocalId(remoteId));
+      }
+      rows.add(remote);
+    }
+    if (rows.isEmpty) return changed;
+
+    final previousOperation = _operation;
+    _operation = _SyncOperation.merge;
+    try {
+      final ownerId = SupabaseConfig.currentUser!.id;
+      final client = SupabaseConfig.client;
+      switch (table) {
+        case 'topics':
+          await _syncTable(
+            db: db, client: client, ownerId: ownerId, localTable: 'topics',
+            remoteTable: 'topics', idColumn: 'id',
+            localToRemote: _topicLocalToRemote, remoteToLocal: _topicRemoteToLocal,
+            remoteRowsOverride: rows,
+          );
+          break;
+        case 'courses':
+          await _syncTable(
+            db: db, client: client, ownerId: ownerId, localTable: 'courses',
+            remoteTable: 'courses', idColumn: 'id',
+            localToRemote: _courseLocalToRemote, remoteToLocal: _courseRemoteToLocal,
+            remoteRowsOverride: rows,
+          );
+          break;
+        case 'cards':
+          await _syncTable(
+            db: db, client: client, ownerId: ownerId, localTable: 'cards',
+            remoteTable: 'cards', idColumn: 'id',
+            localToRemote: _cardLocalToRemote, remoteToLocal: _cardRemoteToLocal,
+            remoteRowsOverride: rows,
+          );
+          break;
+        case 'card_examples':
+          await _syncTable(
+            db: db, client: client, ownerId: ownerId, localTable: 'card_examples',
+            remoteTable: 'card_examples', idColumn: 'id',
+            localToRemote: _cardExampleLocalToRemote,
+            remoteToLocal: _cardExampleRemoteToLocal,
+            remoteRowsOverride: rows,
+          );
+          break;
+        case 'review_states':
+          await _syncTable(
+            db: db, client: client, ownerId: ownerId, localTable: 'review_states',
+            remoteTable: 'review_states', idColumn: 'id',
+            remoteConflictColumns: 'owner_id,card_id',
+            localConflictColumns: const ['cardId'],
+            localToRemote: _reviewStateLocalToRemote,
+            remoteToLocal: _reviewStateRemoteToLocal,
+            remoteRowsOverride: rows,
+          );
+          break;
+      }
+      return true;
+    } finally {
+      _operation = previousOperation;
+    }
   }
 
   Future<SyncResult> _syncAllOnce() async {
@@ -73,26 +456,45 @@ class SupabaseSyncService {
       int pushed = 0;
       int pulled = 0;
       final syncErrors = <String>[];
+      final syncLogs = <String>[
+        switch (_operation) {
+          _SyncOperation.pullReplace => 'Chế độ: tải xuống và thay thế local',
+          _SyncOperation.merge => 'Chế độ: merge cloud + local',
+          _SyncOperation.livePush => 'Chế độ: cập nhật thay đổi sau đăng nhập',
+        },
+      ];
 
       await _ensureLocalDeviceId(db);
-      await _prepareLocalOwner(db, ownerId);
-      await _cleanupCrossAccountTombstones(db, client, ownerId);
-      await _removeBundledVocabulary(db, client, ownerId);
-      await _prepareIdentityMaps(db, client, ownerId);
+      await beginAuthenticatedSession();
+      _throwIfSyncCancelled();
 
-      // Fetch the last sync timestamp
-      final lastSyncRows = await db.query(
-        'app_settings',
-        columns: ['value'],
-        where: 'key = ?',
-        whereArgs: ['sync.lastSyncAt'],
-        limit: 1,
-      );
-      final lastSyncAt = lastSyncRows.isNotEmpty
-          ? lastSyncRows.first['value']?.toString()
+      if (_operation != _SyncOperation.livePush) {
+        // Download every table successfully before touching local data.
+        await _prefetchAccountSnapshot(client, ownerId);
+        _throwIfSyncCancelled();
+        if (_operation == _SyncOperation.pullReplace) {
+          await _clearLocalAccountData(db);
+        } else {
+          await _markLocalMergeConflicts(db);
+        }
+      }
+      if (_operation != _SyncOperation.livePush ||
+          _identityOwnerId != ownerId) {
+        await _prepareIdentityMaps(db, client, ownerId);
+        _identityOwnerId = ownerId;
+      }
+
+      // Only rows changed after this authenticated session began may upload.
+      // Pull/merge never uploads anything.
+      final lastSyncAt = _operation == _SyncOperation.livePush
+          ? _sessionStartedAt
           : null;
 
       void collectError(String table, SyncResult result) {
+        syncLogs.add(
+          '$table: đẩy ${result.pushed}, tải ${result.pulled}'
+          '${result.hasError ? ' — ${result.error}' : ''}',
+        );
         if (result.hasError) syncErrors.add('$table: ${result.error}');
       }
 
@@ -234,10 +636,6 @@ class SupabaseSyncService {
       pulled += questionResult.pulled;
       collectError('review_sentence_questions', questionResult);
 
-      // import_exports is local operation history, not user learning data.
-      // Syncing it also duplicated bundled asset metadata on every device.
-      await _removeRemoteBundledImportMetadata(client, ownerId);
-
       // 10. Sync app_settings
       final appSettingsResult = await _syncTable(
         db: db,
@@ -255,16 +653,24 @@ class SupabaseSyncService {
       pulled += appSettingsResult.pulled;
       collectError('app_settings', appSettingsResult);
 
-      // Save last sync timestamp
-      final now = DateTime.now().toIso8601String();
-      await _setLocalSetting(db, 'sync.lastSyncAt', now);
+      if (_operation != _SyncOperation.livePush) {
+        final now = DateTime.now().toIso8601String();
+        await _setLocalSetting(db, 'sync.lastSyncAt', now);
+      }
 
       return SyncResult(
         pushed: pushed,
         pulled: pulled,
         pulledCourses: courseResult.pulled,
         pulledCards: cardResult.pulled,
+        logs: syncLogs,
         error: syncErrors.isEmpty ? null : syncErrors.join(' | '),
+      );
+    } on _SyncCancelled {
+      return SyncResult(
+        pushed: 0,
+        pulled: 0,
+        error: 'ÄÃ£ dừng Ä‘ồng bộ',
       );
     } catch (e) {
       _lastSyncError = e.toString();
@@ -276,8 +682,8 @@ class SupabaseSyncService {
     }
   }
 
-  /// Generic table sync. Pushes all local rows to remote, then pulls any
-  /// remote rows not present locally or newer than local.
+  /// Shared table worker. The active operation decides whether this pass is
+  /// upload-only (session mutations) or download-only (replace/merge).
   Future<SyncResult> _syncTable({
     required Database db,
     required SupabaseClient client,
@@ -295,18 +701,22 @@ class SupabaseSyncService {
       Map<String, dynamic> remoteRow,
     ) remoteToLocal,
     String? lastSyncAt,
+    List<Map<String, dynamic>>? remoteRowsOverride,
   }) async {
     int pushed = 0;
     int pulled = 0;
     final errors = <String>[];
 
     try {
-      var remoteRows = await _fetchAllRemoteRows(
-        client: client,
-        table: remoteTable,
-        ownerId: ownerId,
-        lastSyncAt: lastSyncAt,
-      );
+      _throwIfSyncCancelled();
+      var remoteRows = remoteRowsOverride ?? (_operation == _SyncOperation.livePush
+          ? <Map<String, dynamic>>[]
+          : await _fetchAllRemoteRows(
+              client: client,
+              table: remoteTable,
+              ownerId: ownerId,
+              lastSyncAt: lastSyncAt,
+            ));
       final remoteById = <String, Map<String, dynamic>>{
         for (final row in remoteRows)
           if (row[idColumn] != null) row[idColumn].toString(): row,
@@ -337,12 +747,14 @@ class SupabaseSyncService {
 
       List<Map<String, Object?>> queriedLocalRows;
       final timeCol = localTimestampColumns[localTable];
-      if (lastSyncAt != null && lastSyncAt.isNotEmpty && timeCol != null) {
+      if (lastSyncAt != null &&
+          lastSyncAt.isNotEmpty &&
+          timeCol != null) {
         final parsed = DateTime.tryParse(lastSyncAt);
         if (parsed != null) {
-          final safetyTime = parsed
-              .subtract(const Duration(minutes: 5))
-              .toIso8601String();
+          final safetyTime = _operation == _SyncOperation.livePush
+              ? parsed.toIso8601String()
+              : parsed.subtract(const Duration(minutes: 5)).toIso8601String();
           queriedLocalRows = await db.query(
             localTable,
             where: '$timeCol > ?',
@@ -355,11 +767,21 @@ class SupabaseSyncService {
         queriedLocalRows = await db.query(localTable);
       }
 
-      final localRows = localTable == 'app_settings'
+      var localRows = localTable == 'app_settings'
           ? queriedLocalRows
               .where((row) => !_isLocalOnlySetting(row['key']))
               .toList(growable: false)
           : queriedLocalRows;
+      if (_operation == _SyncOperation.livePush) {
+        localRows = await _filterPushableLocalRows(db, localTable, localRows);
+        // SRS is pushed only by syncReviewStatesAfterStudy(), where each
+        // local card is resolved to its actual server card ID first.
+        if (localTable == 'review_states') {
+          localRows = const <Map<String, Object?>>[];
+        }
+      } else {
+        localRows = const <Map<String, Object?>>[];
+      }
       final toPush = <Map<String, dynamic>>[];
       for (final row in localRows) {
         try {
@@ -391,6 +813,7 @@ class SupabaseSyncService {
         try {
           const chunkSize = 200;
           for (var i = 0; i < toPush.length; i += chunkSize) {
+            _throwIfSyncCancelled();
             final chunk = toPush.sublist(i, math.min(i + chunkSize, toPush.length));
             await client.from(remoteTable).upsert(
               chunk,
@@ -405,8 +828,13 @@ class SupabaseSyncService {
         }
       }
 
+      if (_operation == _SyncOperation.livePush) {
+        final error = errors.isEmpty ? null : errors.join(' || ');
+        return SyncResult(pushed: pushed, pulled: 0, error: error);
+      }
+
       // --- PULL Supabase → local ---
-      remoteRows = await _fetchAllRemoteRows(
+      remoteRows = remoteRowsOverride ?? await _fetchAllRemoteRows(
         client: client,
         table: remoteTable,
         ownerId: ownerId,
@@ -486,6 +914,11 @@ class SupabaseSyncService {
 
       await db.transaction((txn) async {
         for (final remote in remoteRows) {
+          _throwIfSyncCancelled();
+          if (_operation == _SyncOperation.merge &&
+              remote['deleted_at'] != null) {
+            continue;
+          }
           if (localTable == 'app_settings' &&
               _isLocalOnlySetting(remote['key'])) {
             continue;
@@ -737,6 +1170,8 @@ class SupabaseSyncService {
       'createdAt': row['created_at'],
       'updatedAt': row['updated_at'],
       'deletedAt': row['deleted_at'],
+      'syncOrigin': 'remote',
+      'hasLocalNameConflict': 0,
     };
   }
 
@@ -866,10 +1301,10 @@ class SupabaseSyncService {
       'repetitionCount': row['repetition_count'] ?? 0,
       'correctCount': row['correct_count'] ?? 0,
       'wrongCount': row['wrong_count'] ?? 0,
-      'lastReviewedAt': row['last_reviewed_at'],
-      'nextReviewAt': row['next_review_at'],
-      'createdAt': row['created_at'],
-      'updatedAt': row['updated_at'],
+      'lastReviewedAt': _remoteTimestampToLocalIso(row['last_reviewed_at']),
+      'nextReviewAt': _remoteTimestampToLocalIso(row['next_review_at']),
+      'createdAt': _remoteTimestampToLocalIso(row['created_at']),
+      'updatedAt': _remoteTimestampToLocalIso(row['updated_at']),
     };
   }
 
@@ -891,7 +1326,7 @@ class SupabaseSyncService {
       'wrong_count': row['wrongCount'] ?? 0,
       'started_at': row['startedAt'],
       'ended_at': row['endedAt'],
-      'updated_at': row['startedAt'],
+      'updated_at': row['endedAt'] ?? row['startedAt'],
     };
   }
 
@@ -1003,6 +1438,153 @@ class SupabaseSyncService {
 
   // ========== Helpers ==========
 
+  static const _snapshotTables = <String>[
+    'topics',
+    'courses',
+    'cards',
+    'card_examples',
+    'review_states',
+    'study_sessions',
+    'study_results',
+    'review_sentence_questions',
+    'app_settings',
+  ];
+
+  Future<void> _prefetchAccountSnapshot(
+    SupabaseClient client,
+    String ownerId,
+  ) async {
+    for (final table in _snapshotTables) {
+      try {
+        await _fetchAllRemoteRows(
+          client: client,
+          table: table,
+          ownerId: ownerId,
+        );
+      } catch (error) {
+        throw StateError('Không tải được bảng $table: $error');
+      }
+    }
+  }
+
+  Future<void> _clearLocalAccountData(Database db) async {
+    const deletionOrder = <String>[
+      'study_results',
+      'review_sentence_questions',
+      'review_states',
+      'study_sessions',
+      'card_examples',
+      'course_tags',
+      'import_exports',
+      'cards',
+      'courses',
+      'topics',
+    ];
+    await db.transaction((txn) async {
+      for (final table in deletionOrder) {
+        await txn.delete(table);
+      }
+      final settings = await txn.query('app_settings', columns: ['key']);
+      for (final row in settings) {
+        final key = row['key']?.toString() ?? '';
+        if (!_isLocalOnlySetting(key)) {
+          await txn.delete('app_settings', where: 'key = ?', whereArgs: [key]);
+        }
+      }
+    });
+  }
+
+  Future<void> _markLocalMergeConflicts(Database db) async {
+    final remoteTitles = (_prefetchedRemoteRows['courses'] ?? const [])
+        .where((row) => row['deleted_at'] == null)
+        .map((row) => _normalizeIdentity(row['title']))
+        .where((title) => title.isNotEmpty)
+        .toSet();
+    final localRows = await db.query(
+      'courses',
+      columns: ['id', 'title', 'syncOrigin'],
+      where: 'deletedAt IS NULL',
+    );
+    await db.transaction((txn) async {
+      for (final row in localRows) {
+        final isCloud = row['syncOrigin']?.toString() == 'remote';
+        final conflict = !isCloud &&
+            remoteTitles.contains(_normalizeIdentity(row['title']));
+        await txn.update(
+          'courses',
+          {
+            'syncOrigin': isCloud ? 'remote' : 'local',
+            'hasLocalNameConflict': conflict ? 1 : 0,
+          },
+          where: 'id = ?',
+          whereArgs: [row['id']],
+        );
+      }
+    });
+  }
+
+  Future<List<Map<String, Object?>>> _filterPushableLocalRows(
+    Database db,
+    String localTable,
+    List<Map<String, Object?>> rows,
+  ) async {
+    if (rows.isEmpty || localTable == 'topics' || localTable == 'app_settings') {
+      return rows;
+    }
+    final conflictCourses = (await db.query(
+      'courses',
+      columns: ['id'],
+      where: 'COALESCE(hasLocalNameConflict, 0) = 1',
+    ))
+        .map((row) => row['id'] as int?)
+        .whereType<int>()
+        .toSet();
+    if (conflictCourses.isEmpty) return rows;
+
+    final placeholders = List.filled(conflictCourses.length, '?').join(',');
+    final conflictCards = (await db.query(
+      'cards',
+      columns: ['id'],
+      where: 'courseId IN ($placeholders)',
+      whereArgs: conflictCourses.toList(),
+    ))
+        .map((row) => row['id'] as int?)
+        .whereType<int>()
+        .toSet();
+    final conflictSessions = (await db.query(
+      'study_sessions',
+      columns: ['id'],
+      where: 'courseId IN ($placeholders)',
+      whereArgs: conflictCourses.toList(),
+    ))
+        .map((row) => row['id'] as int?)
+        .whereType<int>()
+        .toSet();
+
+    bool pushable(Map<String, Object?> row) {
+      switch (localTable) {
+        case 'courses':
+          return !conflictCourses.contains(row['id']);
+        case 'cards':
+        case 'study_sessions':
+          return !conflictCourses.contains(row['courseId']);
+        case 'card_examples':
+        case 'review_states':
+          return !conflictCards.contains(row['cardId']);
+        case 'study_results':
+          return !conflictCards.contains(row['cardId']) &&
+              !conflictSessions.contains(row['sessionId']);
+        case 'review_sentence_questions':
+          return !conflictCourses.contains(row['courseId']) &&
+              !conflictCards.contains(row['cardId']);
+        default:
+          return true;
+      }
+    }
+
+    return rows.where(pushable).toList(growable: false);
+  }
+
   Future<List<Map<String, dynamic>>> _fetchAllRemoteRows({
     required SupabaseClient client,
     required String table,
@@ -1035,6 +1617,7 @@ class SupabaseSyncService {
     }
 
     while (true) {
+      _throwIfSyncCancelled();
       dynamic query = client.from(table).select().eq('owner_id', ownerId);
       if (filterTimestamp != null) {
         query = query.gt('updated_at', filterTimestamp);
@@ -1096,6 +1679,8 @@ class SupabaseSyncService {
     return key == 'sync.localDeviceId' ||
         key == 'sync.localBoundOwnerId' ||
         key == 'sync.lastSyncAt' ||
+        key == 'gemini.apiKey' ||
+        key.startsWith('sync.sessionStartedAt.') ||
         key.startsWith('sync.migration.') ||
         key.startsWith('sync.offlineDeleteRecovery');
   }
@@ -1395,10 +1980,18 @@ class SupabaseSyncService {
       final localId = _localInt(local['id']);
       if (localId == null) continue;
       final identity = _normalizeIdentity(local['title']);
-      var remote = courseByPulledLocalId['$localId'] ??
-          (local['deletedAt'] == null
-              ? activeCourseByTitle[identity] ?? deletedCourseByTitle[identity]
-              : deletedCourseByTitle[identity] ?? activeCourseByTitle[identity]);
+      final preserveLocalCopy =
+          (local['hasLocalNameConflict'] as int? ?? 0) == 1 ||
+              (_operation == _SyncOperation.merge &&
+                  local['syncOrigin']?.toString() != 'remote');
+      var remote = preserveLocalCopy
+          ? null
+          : courseByPulledLocalId['$localId'] ??
+              (local['deletedAt'] == null
+                  ? activeCourseByTitle[identity] ??
+                      deletedCourseByTitle[identity]
+                  : deletedCourseByTitle[identity] ??
+                      activeCourseByTitle[identity]);
       final remoteId = remote?['id']?.toString() ??
           _uuidFromLocalId(localId, 'course');
       _courseRemoteIdByLocal['$localId'] = remoteId;
@@ -1542,10 +2135,17 @@ class SupabaseSyncService {
   DateTime? _parseSyncTimestamp(String value) {
     final text = value.trim();
     if (text.isEmpty) return null;
-    final hasTimezone = RegExp(r'(Z|[+-]\d{2}:?\d{2})$').hasMatch(text);
-    // Legacy SQLite values have no offset. Supabase interpreted those strings
-    // as UTC when writing timestamptz, so parse them the same way locally.
-    return DateTime.tryParse(hasTimezone ? text : '${text}Z')?.toUtc();
+    // App-generated SQLite values have no offset and represent device-local
+    // time. DateTime.parse handles those as local; explicit server offsets are
+    // honored, then both sides are compared as UTC instants.
+    return DateTime.tryParse(text)?.toUtc();
+  }
+
+  String? _remoteTimestampToLocalIso(Object? value) {
+    final text = value?.toString().trim() ?? '';
+    if (text.isEmpty) return null;
+    final parsed = DateTime.tryParse(text);
+    return parsed?.toLocal().toIso8601String() ?? text;
   }
 
   String _normalizeIdentity(Object? value) {
@@ -1589,6 +2189,95 @@ class SupabaseSyncService {
     return _uuidFromLocalId(localCardId, 'card');
   }
 
+  Future<void> deleteRemoteReviewStatesForCards(
+    Iterable<int> localCardIds,
+  ) async {
+    if (!SupabaseConfig.isLoggedIn) return;
+    final remoteIds = <String>[];
+    for (final localId in localCardIds.toSet()) {
+      final remoteId = await findRemoteCardId(localId);
+      if (remoteId != null && remoteId.isNotEmpty) remoteIds.add(remoteId);
+    }
+    if (remoteIds.isEmpty) return;
+    await SupabaseConfig.client
+        .from('review_states')
+        .delete()
+        .eq('owner_id', SupabaseConfig.currentUser!.id)
+        .inFilter('card_id', remoteIds);
+  }
+
+  Future<void> deleteRemoteCourseChildren(int localCourseId) async {
+    if (!SupabaseConfig.isLoggedIn) return;
+    final db = await AppDatabase.instance.database;
+    final cardRows = await db.query(
+      'cards',
+      columns: ['id'],
+      where: 'courseId = ?',
+      whereArgs: [localCourseId],
+    );
+    final remoteCardIds = <String>[];
+    for (final row in cardRows) {
+      final localCardId = row['id'] as int?;
+      if (localCardId == null) continue;
+      final remoteId = await findRemoteCardId(localCardId);
+      if (remoteId != null && remoteId.isNotEmpty) remoteCardIds.add(remoteId);
+    }
+    final remoteCourseId = await findRemoteCourseId(localCourseId);
+    final ownerId = SupabaseConfig.currentUser!.id;
+    if (remoteCardIds.isNotEmpty) {
+      for (final table in const [
+        'study_results',
+        'review_sentence_questions',
+        'review_states',
+        'card_examples',
+      ]) {
+        await SupabaseConfig.client
+            .from(table)
+            .delete()
+            .eq('owner_id', ownerId)
+            .inFilter('card_id', remoteCardIds);
+      }
+    }
+    if (remoteCourseId != null && remoteCourseId.isNotEmpty) {
+      await SupabaseConfig.client
+          .from('study_sessions')
+          .delete()
+          .eq('owner_id', ownerId)
+          .eq('course_id', remoteCourseId);
+    }
+  }
+
+  Future<void> deleteRemoteCardChildren(int localCardId) async {
+    if (!SupabaseConfig.isLoggedIn) return;
+    final db = await AppDatabase.instance.database;
+    final conflict = await db.rawQuery(
+      '''
+      SELECT COALESCE(c.hasLocalNameConflict, 0) AS isConflict
+      FROM cards ca
+      INNER JOIN courses c ON c.id = ca.courseId
+      WHERE ca.id = ?
+      LIMIT 1
+      ''',
+      [localCardId],
+    );
+    if (conflict.isNotEmpty && conflict.first['isConflict'] == 1) return;
+    final remoteCardId = await findRemoteCardId(localCardId);
+    if (remoteCardId == null || remoteCardId.isEmpty) return;
+    final ownerId = SupabaseConfig.currentUser!.id;
+    for (final table in const [
+      'study_results',
+      'review_sentence_questions',
+      'review_states',
+      'card_examples',
+    ]) {
+      await SupabaseConfig.client
+          .from(table)
+          .delete()
+          .eq('owner_id', ownerId)
+          .eq('card_id', remoteCardId);
+    }
+  }
+
   Future<String?> findRemoteCardId(int localCardId) async {
     try {
       final db = await AppDatabase.instance.database;
@@ -1603,18 +2292,25 @@ class SupabaseSyncService {
       final term = card['term']?.toString() ?? '';
       final definition = card['definition']?.toString() ?? '';
       final position = card['position'] ?? 0;
+      final localCourseId = _localInt(card['courseId']);
 
       final ownerId = SupabaseConfig.currentUser?.id;
       if (ownerId == null) return null;
+      final remoteCourseId = localCourseId == null
+          ? null
+          : await findRemoteCourseId(localCourseId);
 
-      final response = await SupabaseConfig.client
+      dynamic query = SupabaseConfig.client
           .from('cards')
           .select('id')
           .eq('owner_id', ownerId)
           .eq('term', term)
           .eq('definition', definition)
-          .eq('position', position)
-          .limit(1);
+          .eq('position', position);
+      if (remoteCourseId != null) {
+        query = query.eq('course_id', remoteCourseId);
+      }
+      final response = await query.limit(1);
 
       if (response.isNotEmpty) {
         return response.first['id']?.toString();
@@ -1679,6 +2375,7 @@ class SyncResult {
   final int pulledCourses;
   final int pulledCards;
   final String? error;
+  final List<String> logs;
 
   SyncResult({
     required this.pushed,
@@ -1686,6 +2383,7 @@ class SyncResult {
     this.pulledCourses = 0,
     this.pulledCards = 0,
     this.error,
+    this.logs = const [],
   });
 
   bool get hasError => error != null;

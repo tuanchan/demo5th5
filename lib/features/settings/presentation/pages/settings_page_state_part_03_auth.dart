@@ -12,6 +12,7 @@ extension SettingsPageStateAuth on _SettingsPageState {
         setState(() {
           accountSyncing = false;
           accountSyncSucceeded = !result.hasError;
+          accountSyncLogs = result.logs;
           accountSyncMessage = result.hasError
               ? 'Đồng bộ thất bại: ${result.error}'
               : result.downloadSummary;
@@ -168,13 +169,40 @@ extension SettingsPageStateAuth on _SettingsPageState {
             SizedBox(width: 10),
             Expanded(
               child: this._actionButton(
-                text: 'Đăng xuất',
-                icon: Icons.logout_rounded,
-                color: Color(0xffffff9f),
-                onTap: () => this._signOut(context),
+                text: accountSyncing ? 'Vui lòng chờ...' : 'Merge dữ liệu',
+                icon: Icons.merge_rounded,
+                color: Color(0xff9ab9ff),
+                onTap: accountSyncing
+                    ? () {}
+                    : () => this._syncData(context, merge: true),
               ),
             ),
           ],
+        ),
+        SizedBox(height: 10),
+        if (accountSyncing) ...[
+          SizedBox(
+            width: double.infinity,
+            child: this._actionButton(
+              text: 'Dừng đồng bộ',
+              icon: Icons.stop_circle_outlined,
+              color: Color(0xffff9f9f),
+              onTap: () {
+                SupabaseSyncService.instance.cancelActiveSync();
+                showAppToast(context, 'Đang dừng đồng bộ...');
+              },
+            ),
+          ),
+          SizedBox(height: 10),
+        ],
+        SizedBox(
+          width: double.infinity,
+          child: this._actionButton(
+            text: 'Đăng xuất',
+            icon: Icons.logout_rounded,
+            color: Color(0xffffff9f),
+            onTap: () => this._signOut(context),
+          ),
         ),
         if (accountSyncing || accountSyncMessage.isNotEmpty) ...[
           SizedBox(height: 12),
@@ -248,11 +276,32 @@ extension SettingsPageStateAuth on _SettingsPageState {
             ),
             SizedBox(height: 7),
             Text(
-              'Đang đẩy dữ liệu lên và tải thay đổi mới nhất về thiết bị.',
+              'Đang tải dữ liệu tài khoản từ máy chủ. Không đẩy toàn bộ dữ liệu local cũ lên.',
               style: TextStyle(
                 color: Color(0xff91a0bd),
                 fontSize: 11.5,
                 fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+          if (!accountSyncing && accountSyncLogs.isNotEmpty) ...[
+            SizedBox(height: 10),
+            Container(
+              width: double.infinity,
+              padding: EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Color(0xff07090d),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: Color(0xff202634)),
+              ),
+              child: SelectableText(
+                accountSyncLogs.join('\n'),
+                style: TextStyle(
+                  color: Color(0xff91a0bd),
+                  fontSize: 11,
+                  height: 1.45,
+                  fontFamily: 'monospace',
+                ),
               ),
             ),
           ],
@@ -337,7 +386,9 @@ extension SettingsPageStateAuth on _SettingsPageState {
     setState(() {});
     if (SupabaseConfig.isLoggedIn) {
       showAppToast(ctx, 'Đăng nhập thành công!');
-      unawaited(this._syncData(ctx));
+      unawaited(
+        SupabaseSyncService.instance.beginAuthenticatedSession(newLogin: true),
+      );
     }
   }
 
@@ -526,8 +577,12 @@ extension SettingsPageStateAuth on _SettingsPageState {
                                         ctx,
                                         'Đăng nhập thành công!',
                                       );
-                                      // Auto-sync after login
-                                      this._syncData(ctx);
+                                      unawaited(
+                                        SupabaseSyncService.instance
+                                            .beginAuthenticatedSession(
+                                          newLogin: true,
+                                        ),
+                                      );
                                     }
                                   }
                                 } on AuthException catch (e) {
@@ -559,20 +614,53 @@ extension SettingsPageStateAuth on _SettingsPageState {
     passwordController.dispose();
   }
 
-  Future<void> _syncData(BuildContext ctx) async {
+  Future<void> _syncData(BuildContext ctx, {bool merge = false}) async {
     if (accountSyncing) return;
+    if (!merge) {
+      final confirmed = await showDialog<bool>(
+        context: ctx,
+        builder: (dialogContext) => AlertDialog(
+          title: Text('Thay thế dữ liệu local?'),
+          content: Text(
+            'Đồng bộ chỉ tải dữ liệu từ máy chủ xuống. Toàn bộ học phần, thẻ, SRS và setting đồng bộ được đang có trên máy sẽ bị xóa và thay thế.\n\n'
+            'Nếu muốn giữ dữ liệu local cũ, hãy chọn Merge dữ liệu.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: Text('Hủy'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+              ),
+              child: Text('Xóa local và tải xuống'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+    }
     if (mounted) {
       setState(() {
         accountSyncing = true;
         accountSyncSucceeded = null;
         accountSyncMessage = '';
+        accountSyncLogs = const [];
       });
     }
-    showAppToast(ctx, 'Đang đồng bộ dữ liệu...');
+    showAppToast(
+      ctx,
+      merge ? 'Đang merge dữ liệu...' : 'Đang tải dữ liệu từ máy chủ...',
+    );
 
     SyncResult result;
     try {
-      result = await SupabaseSyncService.instance.syncAll();
+      result = merge
+          ? await SupabaseSyncService.instance.mergeAll()
+          : await SupabaseSyncService.instance.syncAll();
     } catch (error) {
       result = SyncResult(pushed: 0, pulled: 0, error: error.toString());
     }
@@ -582,6 +670,7 @@ extension SettingsPageStateAuth on _SettingsPageState {
         setState(() {
           accountSyncing = false;
           accountSyncSucceeded = false;
+          accountSyncLogs = result.logs;
           accountSyncMessage = 'Đồng bộ thất bại: ${result.error}';
         });
         showAppToast(ctx, 'Đồng bộ thất bại: ${result.error}');
@@ -589,6 +678,7 @@ extension SettingsPageStateAuth on _SettingsPageState {
         setState(() {
           accountSyncing = false;
           accountSyncSucceeded = true;
+          accountSyncLogs = result.logs;
           accountSyncMessage = result.downloadSummary;
         });
         showAppToast(

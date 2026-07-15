@@ -73,8 +73,9 @@ class _DeepLearnPageState extends State<DeepLearnPage> {
   bool _settingsOpen = false;
   bool _multipleChoice = true;
   bool _written = true;
-  bool _flashcard = true;
+  bool _flashcard = false;
   bool _completed = false;
+  bool _didRequestSrsSync = false;
   bool _correctSoundReady = false;
   Future<void>? _correctSoundPreparation;
   File? _windowsCorrectSoundFile;
@@ -206,7 +207,7 @@ class _DeepLearnPageState extends State<DeepLearnPage> {
     _multipleChoice =
         await AppSettingsStore.getBool('deepLearn.multipleChoice') ?? true;
     _written = await AppSettingsStore.getBool('deepLearn.written') ?? true;
-    _flashcard = await AppSettingsStore.getBool('deepLearn.flashcard') ?? true;
+    _flashcard = await AppSettingsStore.getBool('deepLearn.flashcard') ?? false;
     if (!_multipleChoice && !_written && !_flashcard) _multipleChoice = true;
   }
 
@@ -224,6 +225,7 @@ class _DeepLearnPageState extends State<DeepLearnPage> {
       ..clear()
       ..addAll(cards.where((card) => card.isFavorite).map((card) => card.id));
     _completed = false;
+    _didRequestSrsSync = false;
   }
 
   Future<bool> _restoreState() async {
@@ -267,7 +269,7 @@ class _DeepLearnPageState extends State<DeepLearnPage> {
       final settings = Map<String, dynamic>.from(saved['settings'] as Map? ?? const {});
       _multipleChoice = settings['mc'] != false;
       _written = settings['write'] != false;
-      _flashcard = settings['flash'] != false;
+      _flashcard = settings['flash'] == true;
       if (!_multipleChoice && !_written && !_flashcard) _multipleChoice = true;
       _completed = _correct >= _total && _total > 0;
       return true;
@@ -315,6 +317,7 @@ class _DeepLearnPageState extends State<DeepLearnPage> {
         _current = null;
         _feedback = null;
       });
+      _syncSrsAfterCompletion();
       return;
     }
     if (_queue.length > 1 && _current != null && _queue.first == _current!.card.id) {
@@ -416,7 +419,7 @@ class _DeepLearnPageState extends State<DeepLearnPage> {
     } else {
       _enqueue(question.card.id, _requeueMinGap + _random.nextInt(2));
     }
-    unawaited(_applyCorrectReview(question.card.id));
+    await _applyCorrectReview(question.card.id);
     unawaited(_saveState());
     if (_correct >= _total) {
       _renderNextQuestion();
@@ -640,6 +643,12 @@ class _DeepLearnPageState extends State<DeepLearnPage> {
     }
   }
 
+  void _syncSrsAfterCompletion() {
+    if (_didRequestSrsSync || !SupabaseConfig.isLoggedIn) return;
+    _didRequestSrsSync = true;
+    unawaited(SupabaseSyncService.instance.syncReviewStatesAfterStudy());
+  }
+
   Future<void> _toggleStar() async {
     final question = _current;
     if (question == null) return;
@@ -654,7 +663,18 @@ class _DeepLearnPageState extends State<DeepLearnPage> {
       if (index >= 0) _cards[index] = _cards[index].copyWith(isFavorite: next);
     });
     final db = await AppDatabase.instance.database;
-    await db.update('cards', {'isFavorite': next ? 1 : 0}, where: 'id = ?', whereArgs: [question.card.id]);
+    await db.update(
+      'cards',
+      {
+        'isFavorite': next ? 1 : 0,
+        'updatedAt': DateTime.now().toIso8601String(),
+      },
+      where: 'id = ?',
+      whereArgs: [question.card.id],
+    );
+    if (SupabaseConfig.isLoggedIn) {
+      unawaited(SupabaseSyncService.instance.syncPendingChanges());
+    }
     await _saveState();
   }
 

@@ -318,6 +318,9 @@ extension FlashCardsPageStatePart02 on _FlashCardsPageState {
         where: 'id = ?',
         whereArgs: [result.id],
       );
+      if (SupabaseConfig.isLoggedIn) {
+        unawaited(SupabaseSyncService.instance.syncPendingChanges());
+      }
 
       if (!mounted) return;
 

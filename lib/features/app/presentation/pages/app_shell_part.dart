@@ -202,14 +202,19 @@ class _AppThemeLoaderState extends State<AppThemeLoader> {
   @override
   void initState() {
     super.initState();
+    if (SupabaseConfig.isLoggedIn) {
+      unawaited(SupabaseSyncService.instance.beginAuthenticatedSession());
+    }
     // Listen for auth state changes (e.g., Google OAuth redirect callback)
     _authSubscription = SupabaseConfig.onAuthStateChange.listen((data) {
       final event = data.event;
       if (event == AuthChangeEvent.signedIn) {
-        // Auto-sync when user signs in
-        SupabaseSyncService.instance.syncAll().then((result) {
-          debugPrint('AUTO-SYNC after login: $result');
-        });
+        // Start mutation tracking only. Download remains an explicit action.
+        unawaited(
+          SupabaseSyncService.instance.beginAuthenticatedSession(newLogin: true),
+        );
+      } else if (event == AuthChangeEvent.signedOut) {
+        SupabaseSyncService.instance.endAuthenticatedSession();
       } else if (event == AuthChangeEvent.passwordRecovery) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) showPasswordResetDialog(context);

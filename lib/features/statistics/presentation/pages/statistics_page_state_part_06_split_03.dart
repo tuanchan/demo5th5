@@ -333,6 +333,13 @@ extension StatisticsPageStatePart06Split03 on _StatisticsPageState {
       lastReviewedAt: null,
       nextReviewAt: nextReviewAt,
     );
+    if (SupabaseConfig.isLoggedIn) {
+      final syncResult =
+          await SupabaseSyncService.instance.syncReviewStatesAfterStudy();
+      if (syncResult.hasError) {
+        debugPrint('UPDATE SRS SYNC ERROR: ${syncResult.error}');
+      }
+    }
   }
 
 

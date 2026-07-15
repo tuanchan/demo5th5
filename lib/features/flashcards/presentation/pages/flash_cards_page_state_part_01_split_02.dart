@@ -312,6 +312,9 @@ extension FlashCardsPageStatePart01Split02 on _FlashCardsPageState {
         where: 'id = ?',
         whereArgs: [card.id],
       );
+      if (SupabaseConfig.isLoggedIn) {
+        unawaited(SupabaseSyncService.instance.syncPendingChanges());
+      }
 
       if (!mounted) return;
 

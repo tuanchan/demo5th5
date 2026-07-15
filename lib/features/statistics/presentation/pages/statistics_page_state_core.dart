@@ -5,6 +5,8 @@ const int _hardCardWrongThreshold = 5;
 class _StatisticsPageState extends State<StatisticsPage> {
   late Future<StatisticsData> _future;
   late Future<List<_SrsEditorItem>> _srsManagerFuture;
+  late final StreamSubscription<SyncResult> _statisticsSyncSubscription;
+  late final StreamSubscription<void> _statisticsRealtimeSubscription;
   final Set<int> _expandedCourseIds = {};
   final TextEditingController _srsSearchController = TextEditingController();
   final Map<int, int> _courseSrsLevelDraft = {};
@@ -115,10 +117,20 @@ class _StatisticsPageState extends State<StatisticsPage> {
     super.initState();
     _future = this.loadStatistics();
     _srsManagerFuture = this._loadSrsEditorItems();
+    _statisticsSyncSubscription = SupabaseSyncService.instance.syncCompleted
+        .listen((result) {
+          if (mounted && result.pulled > 0) this.reloadStatistics();
+        });
+    _statisticsRealtimeSubscription =
+        SupabaseSyncService.instance.remoteDataChanged.listen((_) {
+          if (mounted) this.reloadStatistics();
+        });
   }
 
   @override
   void dispose() {
+    _statisticsSyncSubscription.cancel();
+    _statisticsRealtimeSubscription.cancel();
     _srsSearchController.dispose();
     super.dispose();
   }

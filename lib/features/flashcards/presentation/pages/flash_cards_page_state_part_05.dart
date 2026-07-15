@@ -36,6 +36,9 @@ extension FlashCardsPageStatePart05 on _FlashCardsPageState {
           });
         }
       });
+      if (SupabaseConfig.isLoggedIn) {
+        unawaited(SupabaseSyncService.instance.syncPendingChanges());
+      }
 
       if (!mounted) return true;
       if (showMessage) {
@@ -87,12 +90,34 @@ extension FlashCardsPageStatePart05 on _FlashCardsPageState {
       final now = DateTime.now().toIso8601String();
 
       if (SupabaseConfig.isLoggedIn) {
-        await db.update(
-          'cards',
-          {'deletedAt': now, 'updatedAt': now},
-          where: 'id = ?',
-          whereArgs: [card.id],
-        );
+        await db.transaction((txn) async {
+          await txn.delete(
+            'study_results',
+            where: 'cardId = ?',
+            whereArgs: [card.id],
+          );
+          await txn.delete(
+            'review_sentence_questions',
+            where: 'cardId = ?',
+            whereArgs: [card.id],
+          );
+          await txn.delete(
+            'review_states',
+            where: 'cardId = ?',
+            whereArgs: [card.id],
+          );
+          await txn.delete(
+            'card_examples',
+            where: 'cardId = ?',
+            whereArgs: [card.id],
+          );
+          await txn.update(
+            'cards',
+            {'deletedAt': now, 'updatedAt': now},
+            where: 'id = ?',
+            whereArgs: [card.id],
+          );
+        });
       } else {
         await db.delete('cards', where: 'id = ?', whereArgs: [card.id]);
       }
@@ -101,7 +126,10 @@ extension FlashCardsPageStatePart05 on _FlashCardsPageState {
       this.showFlashMessage("Đã xóa thẻ");
       if (SupabaseConfig.isLoggedIn) {
         unawaited(
-          SupabaseSyncService.instance.syncPendingChanges().then((syncResult) {
+          SupabaseSyncService.instance
+              .deleteRemoteCardChildren(card.id)
+              .then((_) => SupabaseSyncService.instance.syncPendingChanges())
+              .then((syncResult) {
             if (syncResult.hasError) {
               debugPrint('DELETE CARD SYNC ERROR: ${syncResult.error}');
             }

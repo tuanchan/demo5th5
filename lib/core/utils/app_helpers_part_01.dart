@@ -298,6 +298,7 @@ class CourseListItem {
   final String title;
   final String languageCode;
   final int cardCount;
+  final bool hasLocalNameConflict;
 
   CourseListItem({
     required this.id,
@@ -306,6 +307,7 @@ class CourseListItem {
     required this.title,
     required this.languageCode,
     required this.cardCount,
+    this.hasLocalNameConflict = false,
   });
 
   factory CourseListItem.fromMap(Map<String, Object?> map) {
@@ -316,6 +318,7 @@ class CourseListItem {
       title: map['title']?.toString() ?? '',
       languageCode: map['languageCode']?.toString() ?? '',
       cardCount: map['cardCount'] as int? ?? 0,
+      hasLocalNameConflict: (map['hasLocalNameConflict'] as int? ?? 0) == 1,
     );
   }
 }
@@ -515,4 +518,3 @@ class _SlideToast extends StatefulWidget {
   @override
   State<_SlideToast> createState() => _SlideToastState();
 }
-

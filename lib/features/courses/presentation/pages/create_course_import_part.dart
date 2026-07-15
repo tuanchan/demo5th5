@@ -323,6 +323,9 @@ extension CreateCourseImportPart on _CreateCoursePageState {
         courseId: courseId,
       );
     });
+    if (SupabaseConfig.isLoggedIn) {
+      unawaited(SupabaseSyncService.instance.syncPendingChanges());
+    }
   }
 }
 

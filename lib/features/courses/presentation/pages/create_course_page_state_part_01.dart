@@ -938,6 +938,10 @@ extension CreateCoursePageStatePart01 on _CreateCoursePageState {
         debugPrint("TỔNG THẺ VỪA LƯU: ${items.length}");
       });
 
+      if (SupabaseConfig.isLoggedIn) {
+        unawaited(SupabaseSyncService.instance.syncPendingChanges());
+      }
+
       final courseId = savedCourseId;
       if (courseId != null) {
         if (mounted) {

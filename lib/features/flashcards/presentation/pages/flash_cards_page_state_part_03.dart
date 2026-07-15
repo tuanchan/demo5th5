@@ -4,6 +4,16 @@ extension FlashCardsPageStatePart03 on _FlashCardsPageState {
   Future<void> resetMemorizedCards() async {
     try {
       final db = await AppDatabase.instance.database;
+      final cardRows = await db.query(
+        'cards',
+        columns: ['id'],
+        where: 'courseId = ? AND deletedAt IS NULL',
+        whereArgs: [selectedCourseId],
+      );
+      final cardIds = cardRows
+          .map((row) => row['id'] as int?)
+          .whereType<int>()
+          .toList(growable: false);
 
       await db.delete(
         'review_states',
@@ -15,6 +25,12 @@ extension FlashCardsPageStatePart03 on _FlashCardsPageState {
       ''',
         whereArgs: [selectedCourseId],
       );
+      if (SupabaseConfig.isLoggedIn) {
+        unawaited(
+          SupabaseSyncService.instance
+              .deleteRemoteReviewStatesForCards(cardIds),
+        );
+      }
 
       if (!mounted) return;
 
@@ -60,17 +76,28 @@ extension FlashCardsPageStatePart03 on _FlashCardsPageState {
           where: 'cardId = ?',
           whereArgs: [undoItem.cardId],
         );
+        if (SupabaseConfig.isLoggedIn) {
+          unawaited(
+            SupabaseSyncService.instance.deleteRemoteReviewStatesForCards(
+              [undoItem.cardId],
+            ),
+          );
+        }
       } else {
         final restored = Map<String, Object?>.from(
           undoItem.previousReviewState!,
         );
         restored.remove('id');
+        restored['updatedAt'] = DateTime.now().toIso8601String();
         await db.update(
           'review_states',
           restored,
           where: 'cardId = ?',
           whereArgs: [undoItem.cardId],
         );
+        if (SupabaseConfig.isLoggedIn) {
+          unawaited(SupabaseSyncService.instance.syncPendingChanges());
+        }
       }
     } catch (e) {
       debugPrint("UNDO ERROR: $e");

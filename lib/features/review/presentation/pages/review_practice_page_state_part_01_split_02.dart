@@ -18,6 +18,9 @@ extension ReviewPracticePageStatePart01Split02 on _ReviewPracticePageState {
         whereArgs: [sessionId],
       );
       _studySessionFinished = true;
+      if (SupabaseConfig.isLoggedIn) {
+        await SupabaseSyncService.instance.syncReviewStatesAfterStudy();
+      }
     } catch (e) {
       debugPrint('FINISH REVIEW SESSION ERROR: $e');
     }

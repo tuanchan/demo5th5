@@ -351,6 +351,9 @@ extension FlashCardsPageStatePart01 on _FlashCardsPageState {
         whereArgs: [sessionId],
       );
       _studySessionFinished = true;
+      if (SupabaseConfig.isLoggedIn) {
+        await SupabaseSyncService.instance.syncReviewStatesAfterStudy();
+      }
     } catch (e) {
       debugPrint('FINISH FLASH SESSION ERROR: $e');
     }

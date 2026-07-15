@@ -11,6 +11,7 @@ class _SettingsPageState extends State<SettingsPage> {
   bool accountSyncing = false;
   bool? accountSyncSucceeded;
   String accountSyncMessage = '';
+  List<String> accountSyncLogs = const [];
 
   final Map<String, String> colorNames = {
     'bg': 'Nền app',

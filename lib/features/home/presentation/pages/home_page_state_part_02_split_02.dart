@@ -265,9 +265,16 @@ extension HomePageStatePart02Split02 on _HomePageState {
 
 
   Future<void> loadCourses({bool showLoading = true}) async {
-    if (!mounted || isLoadingCourses) return;
+    if (!mounted) return;
+    if (_courseLoadInFlight) {
+      _coursesReloadPending = true;
+      return;
+    }
+    _courseLoadInFlight = true;
 
-    if (showLoading) {
+    // Never replace an already-rendered scroll view with a loading spinner.
+    // Detaching its controller during background refresh resets the offset.
+    if (showLoading && courses.isEmpty && topics.isEmpty) {
       setState(() {
         isLoadingCourses = true;
       });
@@ -285,6 +292,7 @@ extension HomePageStatePart02Split02 on _HomePageState {
         COALESCE(t.name, 'Chủ đề khác') AS topicName,
         c.title,
         c.languageCode,
+        COALESCE(c.hasLocalNameConflict, 0) AS hasLocalNameConflict,
         COUNT(cards.id) AS cardCount
       FROM courses c
       LEFT JOIN topics t
@@ -295,7 +303,8 @@ extension HomePageStatePart02Split02 on _HomePageState {
         AND cards.deletedAt IS NULL
         AND cards.isHidden = 0
       WHERE c.deletedAt IS NULL
-      GROUP BY c.id, c.topicId, t.name, c.title, c.languageCode
+      GROUP BY c.id, c.topicId, t.name, c.title, c.languageCode,
+        c.hasLocalNameConflict
       ORDER BY COALESCE(c.updatedAt, c.createdAt) DESC
     ''');
       final topicRows = await db.rawQuery('''
@@ -319,9 +328,6 @@ extension HomePageStatePart02Split02 on _HomePageState {
           OR lower(trim(t.name)) NOT IN ('chủ đề khác', 'toeic', 'tiếng trung b1')
         ORDER BY lower(t.name) ASC
       ''');
-
-      debugPrint("DRAWER COURSES COUNT: ${rows.length}");
-      debugPrint("DRAWER COURSES DATA: $rows");
 
       if (!mounted) return;
 
@@ -368,16 +374,26 @@ extension HomePageStatePart02Split02 on _HomePageState {
         );
         isLoadingCourses = false;
       });
+      _courseLoadInFlight = false;
+      _runQueuedCoursesReload();
     } catch (e) {
       if (!mounted) return;
 
       setState(() {
         isLoadingCourses = false;
       });
+      _courseLoadInFlight = false;
+      _runQueuedCoursesReload();
 
       this.showHomeMessage("Không tải được học phần");
       debugPrint("LOAD COURSES ERROR: $e");
     }
+  }
+
+  void _runQueuedCoursesReload() {
+    if (!_coursesReloadPending || !mounted) return;
+    _coursesReloadPending = false;
+    Future.microtask(() => loadCourses(showLoading: false));
   }
 
 

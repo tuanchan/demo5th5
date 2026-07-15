@@ -314,7 +314,7 @@ Future<_DueReviewLaunchInfo?> _loadDueReviewLaunchInfo() async {
     WHERE ca.deletedAt IS NULL
       AND ca.isHidden = 0
       AND c.deletedAt IS NULL
-      AND COALESCE(rs.repetitionCount, 0) > 0
+      AND COALESCE(rs.level, 0) > 0
       AND rs.nextReviewAt IS NOT NULL
       AND rs.nextReviewAt < ?
     ''',
@@ -336,7 +336,7 @@ Future<_DueReviewLaunchInfo?> _loadDueReviewLaunchInfo() async {
     WHERE ca.deletedAt IS NULL
       AND ca.isHidden = 0
       AND c.deletedAt IS NULL
-      AND COALESCE(rs.repetitionCount, 0) > 0
+      AND COALESCE(rs.level, 0) > 0
       AND rs.nextReviewAt IS NOT NULL
       AND rs.nextReviewAt < ?
     ORDER BY

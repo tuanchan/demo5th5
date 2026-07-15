@@ -613,8 +613,16 @@ extension StatisticsPageStatePart07 on _StatisticsPageState {
         );
       }
     });
+    SyncResult? syncResult;
+    if (SupabaseConfig.isLoggedIn) {
+      syncResult = await SupabaseSyncService.instance.syncReviewStatesAfterStudy();
+    }
     if (!mounted) return;
-    showAppToast(context, 'Đã cập nhật SRS cho ${items.length} thẻ');
+    if (syncResult?.hasError == true) {
+      showAppToast(context, 'Đã lưu local nhưng lỗi đẩy SRS: ${syncResult!.error}');
+    } else {
+      showAppToast(context, 'Đã cập nhật SRS cho ${items.length} thẻ');
+    }
     this._refreshSrsManager();
   }
 
@@ -661,13 +669,6 @@ extension StatisticsPageStatePart07 on _StatisticsPageState {
       } catch (e) {
         debugPrint('DELETE REMOTE COURSE SRS ERROR: $e');
       }
-      unawaited(
-        SupabaseSyncService.instance.syncPendingChanges().then((syncResult) {
-          if (syncResult.hasError) {
-            debugPrint('DELETE COURSE SRS SYNC ERROR: ${syncResult.error}');
-          }
-        }),
-      );
     }
 
     if (!mounted) return;
@@ -904,7 +905,7 @@ extension StatisticsPageStatePart07 on _StatisticsPageState {
     
     if (SupabaseConfig.isLoggedIn) {
       unawaited(
-        SupabaseSyncService.instance.syncPendingChanges().then((syncResult) {
+        SupabaseSyncService.instance.syncReviewStatesAfterStudy().then((syncResult) {
           if (syncResult.hasError) {
             debugPrint('SAVE CARD SRS SYNC ERROR: ${syncResult.error}');
           }
@@ -936,13 +937,6 @@ extension StatisticsPageStatePart07 on _StatisticsPageState {
       } catch (e) {
         debugPrint('DELETE REMOTE SRS ERROR: $e');
       }
-      unawaited(
-        SupabaseSyncService.instance.syncPendingChanges().then((syncResult) {
-          if (syncResult.hasError) {
-            debugPrint('CLEAR CARD SRS SYNC ERROR: ${syncResult.error}');
-          }
-        }),
-      );
     }
   }
 

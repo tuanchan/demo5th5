@@ -1225,16 +1225,38 @@ extension HomePageStatePart01 on _HomePageState {
               alignment: Alignment.topLeft,
               child: Padding(
                 padding: EdgeInsets.only(right: 34),
-                child: Text(
-                  course.title,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: _homeText,
-                    fontSize: 19,
-                    height: 1.3,
-                    fontWeight: FontWeight.w800,
-                  ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (course.hasLocalNameConflict) ...[
+                      Tooltip(
+                        message: 'HP LOCAL',
+                        child: SvgPicture.asset(
+                          'assets/icon/triangle-exclamation-solid-full.svg',
+                          width: 19,
+                          height: 19,
+                          colorFilter: ColorFilter.mode(
+                            Color(0xffffc107),
+                            BlendMode.srcIn,
+                          ),
+                        ),
+                      ),
+                      SizedBox(width: 8),
+                    ],
+                    Expanded(
+                      child: Text(
+                        course.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: _homeText,
+                          fontSize: 19,
+                          height: 1.3,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),

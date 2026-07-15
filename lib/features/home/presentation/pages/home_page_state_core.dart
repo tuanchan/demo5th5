@@ -58,10 +58,13 @@ class _HomePageState extends State<HomePage>
     with SingleTickerProviderStateMixin {
   bool isOpen = false;
   bool _isHomeNavExpanded = false;
+  bool _courseLoadInFlight = false;
+  bool _coursesReloadPending = false;
   late final AnimationController _homeLogoAnimation;
   final ScrollController _homeCourseScrollController = ScrollController();
   final ScrollController _homeTopicScrollController = ScrollController();
   late final StreamSubscription<SyncResult> _homeSyncSubscription;
+  late final StreamSubscription<void> _homeRealtimeSubscription;
   final GlobalKey _homeCourseViewportKey = GlobalKey();
   final GlobalKey _homeBackCardKey = GlobalKey();
   final GlobalKey _homeFirstCourseCardKey = GlobalKey();
@@ -263,9 +266,13 @@ class _HomePageState extends State<HomePage>
     super.initState();
     _homeSyncSubscription = SupabaseSyncService.instance.syncCompleted.listen(
       (_) {
-        if (mounted) this.loadCourses();
+        if (mounted) this.loadCourses(showLoading: false);
       },
     );
+    _homeRealtimeSubscription = SupabaseSyncService.instance.remoteDataChanged
+        .listen((_) {
+          if (mounted) this.loadCourses(showLoading: false);
+        });
     _homeLogoAnimation = AnimationController(
       vsync: this,
       duration: Duration(seconds: 3),
@@ -318,6 +325,7 @@ class _HomePageState extends State<HomePage>
   @override
   void dispose() {
     _homeSyncSubscription.cancel();
+    _homeRealtimeSubscription.cancel();
     _homeLogoAnimation.dispose();
     _homeCourseScrollController.dispose();
     _homeTopicScrollController.dispose();

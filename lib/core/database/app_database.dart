@@ -17,6 +17,51 @@ class AppDatabase {
     return _database!;
   }
 
+  /// Restores schedules for legacy or merged SRS rows that have a level but
+  /// no due date. A positive SRS level must always have a review schedule.
+  Future<int> repairIncompleteReviewSchedules() async {
+    final db = await database;
+    final rows = await db.query(
+      'review_states',
+      columns: ['id', 'level', 'intervalDays'],
+      where: 'COALESCE(level, 0) > 0 AND '
+          "(nextReviewAt IS NULL OR TRIM(nextReviewAt) = '')",
+    );
+    if (rows.isEmpty) return 0;
+
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final nowIso = now.toIso8601String();
+
+    int defaultIntervalForLevel(int level) {
+      const intervals = [1, 2, 4, 7, 15, 30, 60, 120];
+      if (level <= 0) return 0;
+      if (level <= intervals.length) return intervals[level - 1];
+      return intervals.last;
+    }
+
+    await db.transaction((txn) async {
+      for (final row in rows) {
+        final level = (row['level'] as num?)?.toInt() ?? 0;
+        final storedInterval = (row['intervalDays'] as num?)?.toInt() ?? 0;
+        final interval = storedInterval > 0
+            ? storedInterval
+            : defaultIntervalForLevel(level);
+        await txn.update(
+          'review_states',
+          {
+            'intervalDays': interval,
+            'nextReviewAt': today.add(Duration(days: interval)).toIso8601String(),
+            'updatedAt': nowIso,
+          },
+          where: 'id = ?',
+          whereArgs: [row['id']],
+        );
+      }
+    });
+    return rows.length;
+  }
+
   Future<Database> _initDatabase() async {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, 'list_card.db');
@@ -46,7 +91,7 @@ class AppDatabase {
 
     return await openDatabase(
       path,
-      version: 3,
+      version: 4,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
@@ -94,6 +139,8 @@ class AppDatabase {
         createdAt TEXT NOT NULL,
         updatedAt TEXT,
         deletedAt TEXT,
+        syncOrigin TEXT NOT NULL DEFAULT 'local',
+        hasLocalNameConflict INTEGER NOT NULL DEFAULT 0,
 
         FOREIGN KEY (topicId) REFERENCES topics(id) ON DELETE SET NULL,
         FOREIGN KEY (languageId) REFERENCES languages(id)
@@ -264,11 +311,41 @@ class AppDatabase {
     if (oldVersion < 3) {
       await _ensureTopicSchema(db);
     }
+    if (oldVersion < 4) {
+      await _ensureCourseSyncMetadata(db);
+    }
   }
 
   Future<void> ensureTopicSchema() async {
     final db = await database;
     await _ensureTopicSchema(db);
+    await _ensureCourseSyncMetadata(db);
+  }
+
+  Future<void> _ensureCourseSyncMetadata(Database db) async {
+    final columns = await db.rawQuery('PRAGMA table_info(courses)');
+    final names = columns
+        .map((row) => row['name']?.toString())
+        .whereType<String>()
+        .toSet();
+    if (!names.contains('syncOrigin')) {
+      await db.execute(
+        "ALTER TABLE courses ADD COLUMN syncOrigin TEXT NOT NULL DEFAULT 'local'",
+      );
+    }
+    if (!names.contains('hasLocalNameConflict')) {
+      await db.execute(
+        'ALTER TABLE courses ADD COLUMN hasLocalNameConflict INTEGER NOT NULL DEFAULT 0',
+      );
+    }
+
+    // Merge may intentionally keep a cloud course and a local course with the
+    // same display name. Creation/edit screens still validate duplicate names.
+    await db.execute('DROP INDEX IF EXISTS idx_courses_title_unique');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_courses_title '
+      'ON courses(lower(trim(title))) WHERE deletedAt IS NULL',
+    );
   }
 
   Future<void> _ensureTopicSchema(Database db) async {
@@ -630,7 +707,8 @@ class AppDatabase {
       'CREATE INDEX idx_study_results_cardId ON study_results(cardId)',
     );
     await db.execute(
-  'CREATE UNIQUE INDEX IF NOT EXISTS idx_courses_title_unique ON courses(lower(trim(title))) WHERE deletedAt IS NULL',
+      'CREATE INDEX IF NOT EXISTS idx_courses_title '
+      'ON courses(lower(trim(title))) WHERE deletedAt IS NULL',
     );
   }
 
