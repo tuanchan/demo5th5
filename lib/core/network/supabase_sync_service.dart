@@ -224,7 +224,13 @@ class SupabaseSyncService {
     final user = SupabaseConfig.currentUser;
     if (user == null || _realtimeChannel != null) return;
 
-    void onChange(PostgresChangePayload change) => _queueRealtimeChange(change);
+    void onChange(PostgresChangePayload change) {
+      try {
+        _queueRealtimeChange(change);
+      } catch (error, stackTrace) {
+        print('REALTIME CALLBACK ERROR: $error\n$stackTrace');
+      }
+    }
 
     var channel = SupabaseConfig.client.channel('account-sync:${user.id}');
     for (final table in const [
@@ -246,6 +252,15 @@ class SupabaseSyncService {
         callback: onChange,
       );
     }
+    // Supabase cannot apply column filters reliably to DELETE payloads
+    // because their old record may contain only the primary key. Listen to
+    // review-state deletes separately and reconcile only that table.
+    channel = channel.onPostgresChanges(
+      event: PostgresChangeEvent.delete,
+      schema: 'public',
+      table: 'review_states',
+      callback: onChange,
+    );
     _realtimeChannel = channel;
     channel.subscribe((status, error) {
       if (status == RealtimeSubscribeStatus.channelError) {
@@ -271,7 +286,7 @@ class SupabaseSyncService {
     if (id.isEmpty) return;
     _realtimePendingChanges['${change.table}:$id'] = change;
     _realtimeMergeDebounce?.cancel();
-    _realtimeMergeDebounce = Timer(const Duration(milliseconds: 1200), () async {
+    _realtimeMergeDebounce = Timer(const Duration(milliseconds: 400), () async {
       if (!SupabaseConfig.isLoggedIn) return;
       if (_isSyncing) {
         _realtimeMergeDebounce = Timer(
@@ -350,6 +365,7 @@ class SupabaseSyncService {
     final db = await AppDatabase.instance.database;
     final rows = <Map<String, dynamic>>[];
     var changed = false;
+    var reconcileReviewDeletes = false;
     for (final change in changes) {
       final source = change.newRecord.isNotEmpty
           ? change.newRecord
@@ -360,6 +376,10 @@ class SupabaseSyncService {
 
       if (change.eventType == PostgresChangeEvent.delete ||
           remote['deleted_at'] != null) {
+        if (table == 'review_states') {
+          reconcileReviewDeletes = true;
+          continue;
+        }
         final localId = switch (table) {
           'topics' => _topicLocalIdByRemote[remoteId] ?? _stableLocalId(remoteId),
           'courses' => _courseLocalIdByRemote[remoteId] ?? _stableLocalId(remoteId),
@@ -379,6 +399,10 @@ class SupabaseSyncService {
         _cardLocalIdByRemote.putIfAbsent(remoteId, () => _stableLocalId(remoteId));
       }
       rows.add(remote);
+    }
+    if (reconcileReviewDeletes) {
+      final deleted = await _reconcileDeletedReviewStates(db);
+      changed = deleted > 0 || changed;
     }
     if (rows.isEmpty) return changed;
 
@@ -437,6 +461,89 @@ class SupabaseSyncService {
     } finally {
       _operation = previousOperation;
     }
+  }
+
+  Future<int> _reconcileDeletedReviewStates(Database db) async {
+    final user = SupabaseConfig.currentUser;
+    if (user == null) return 0;
+
+    final remoteReviewCardIds = await _fetchRemoteIdColumn(
+      table: 'review_states',
+      column: 'card_id',
+      ownerId: user.id,
+    );
+    final remoteCardIds = await _fetchRemoteIdColumn(
+      table: 'cards',
+      column: 'id',
+      ownerId: user.id,
+    );
+
+    final remoteCardByLocalId = <int, String>{};
+    for (final remoteCardId in remoteCardIds) {
+      final localCardId = _cardLocalIdByRemote[remoteCardId] ??
+          _stableLocalId(remoteCardId);
+      remoteCardByLocalId[localCardId] = remoteCardId;
+      _cardLocalIdByRemote.putIfAbsent(remoteCardId, () => localCardId);
+      _cardRemoteIdByLocal.putIfAbsent('$localCardId', () => remoteCardId);
+    }
+
+    final localStates = await db.query(
+      'review_states',
+      columns: ['id', 'cardId'],
+    );
+    final localIdsToDelete = <int>[];
+    for (final state in localStates) {
+      final localReviewId = _localInt(state['id']);
+      final localCardId = _localInt(state['cardId']);
+      if (localReviewId == null || localCardId == null) continue;
+      final remoteCardId = remoteCardByLocalId[localCardId];
+      // Keep local-only/unmapped cards. Delete only when the corresponding
+      // server card is known and its review state is now absent.
+      if (remoteCardId != null && !remoteReviewCardIds.contains(remoteCardId)) {
+        localIdsToDelete.add(localReviewId);
+      }
+    }
+
+    if (localIdsToDelete.isEmpty) return 0;
+    await db.transaction((txn) async {
+      const batchSize = 300;
+      for (var start = 0; start < localIdsToDelete.length; start += batchSize) {
+        final end = math.min(start + batchSize, localIdsToDelete.length);
+        final batch = localIdsToDelete.sublist(start, end);
+        final placeholders = List.filled(batch.length, '?').join(',');
+        await txn.delete(
+          'review_states',
+          where: 'id IN ($placeholders)',
+          whereArgs: batch,
+        );
+      }
+    });
+    print('REALTIME SRS DELETE: removed=${localIdsToDelete.length}');
+    return localIdsToDelete.length;
+  }
+
+  Future<Set<String>> _fetchRemoteIdColumn({
+    required String table,
+    required String column,
+    required String ownerId,
+  }) async {
+    const pageSize = 1000;
+    var offset = 0;
+    final values = <String>{};
+    while (true) {
+      final rows = await SupabaseConfig.client
+          .from(table)
+          .select(column)
+          .eq('owner_id', ownerId)
+          .range(offset, offset + pageSize - 1);
+      for (final row in rows) {
+        final value = row[column]?.toString();
+        if (value != null && value.isNotEmpty) values.add(value);
+      }
+      if (rows.length < pageSize) break;
+      offset += pageSize;
+    }
+    return values;
   }
 
   Future<SyncResult> _syncAllOnce() async {
