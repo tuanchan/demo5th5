@@ -39,6 +39,7 @@ class SupabaseSyncService {
   String? _identityOwnerId;
   RealtimeChannel? _realtimeChannel;
   Timer? _realtimeMergeDebounce;
+  Timer? _realtimeReconcileTimer;
   final Map<String, PostgresChangePayload> _realtimePendingChanges = {};
 
   bool get isSyncing => _isSyncing;
@@ -60,7 +61,10 @@ class SupabaseSyncService {
     return _startSync(operation);
   }
 
-  Future<SyncResult> _startSync(_SyncOperation operation) {
+  Future<SyncResult> _startSync(
+    _SyncOperation operation, {
+    bool notifyCompletion = true,
+  }) {
     final active = _activeSync;
     if (active != null) return active;
     if (!SupabaseConfig.isLoggedIn) {
@@ -73,7 +77,7 @@ class SupabaseSyncService {
     _cancelSyncRequested = false;
     final future = _syncAllOnce();
     _activeSync = future;
-    future.then(_syncCompletedController.add);
+    if (notifyCompletion) future.then(_syncCompletedController.add);
     return future;
   }
 
@@ -226,7 +230,8 @@ class SupabaseSyncService {
 
     void onChange(PostgresChangePayload change) {
       try {
-        _queueRealtimeChange(change);
+        print('REALTIME EVENT: ${change.eventType.name} ${change.table}');
+        _scheduleRealtimeFullRefresh();
       } catch (error, stackTrace) {
         print('REALTIME CALLBACK ERROR: $error\n$stackTrace');
       }
@@ -244,34 +249,29 @@ class SupabaseSyncService {
         event: PostgresChangeEvent.all,
         schema: 'public',
         table: table,
-        filter: PostgresChangeFilter(
-          type: PostgresChangeFilterType.eq,
-          column: 'owner_id',
-          value: user.id,
-        ),
         callback: onChange,
       );
     }
-    // Supabase cannot apply column filters reliably to DELETE payloads
-    // because their old record may contain only the primary key. Listen to
-    // review-state deletes separately and reconcile only that table.
-    channel = channel.onPostgresChanges(
-      event: PostgresChangeEvent.delete,
-      schema: 'public',
-      table: 'review_states',
-      callback: onChange,
-    );
     _realtimeChannel = channel;
     channel.subscribe((status, error) {
+      if (status == RealtimeSubscribeStatus.subscribed) {
+        print('REALTIME SUBSCRIBED: account-sync:${user.id}');
+      }
       if (status == RealtimeSubscribeStatus.channelError) {
         print('REALTIME SUBSCRIPTION ERROR: $error');
       }
     });
+    _realtimeReconcileTimer ??= Timer.periodic(
+      const Duration(seconds: 20),
+      (_) => _scheduleRealtimeFullRefresh(),
+    );
   }
 
   void stopRealtimeSync() {
     _realtimeMergeDebounce?.cancel();
     _realtimeMergeDebounce = null;
+    _realtimeReconcileTimer?.cancel();
+    _realtimeReconcileTimer = null;
     _realtimePendingChanges.clear();
     final channel = _realtimeChannel;
     _realtimeChannel = null;
@@ -282,7 +282,11 @@ class SupabaseSyncService {
 
   void _queueRealtimeChange(PostgresChangePayload change) {
     final row = change.newRecord.isNotEmpty ? change.newRecord : change.oldRecord;
-    final id = row['id']?.toString() ?? row['key']?.toString() ?? '';
+    var id = row['id']?.toString() ?? row['key']?.toString() ?? '';
+    if (id.isEmpty && change.eventType == PostgresChangeEvent.delete) {
+      id = 'delete:${change.commitTimestamp.microsecondsSinceEpoch}:'
+          '${_realtimePendingChanges.length}';
+    }
     if (id.isEmpty) return;
     _realtimePendingChanges['${change.table}:$id'] = change;
     _realtimeMergeDebounce?.cancel();
@@ -299,12 +303,25 @@ class SupabaseSyncService {
     });
   }
 
-  // A Realtime channel created before a hot reload can retain a callback that
-  // referenced this old method. Reconnect it once so subsequent events use
-  // the current row-level callback instead of crashing with a method lookup.
+  void _scheduleRealtimeFullRefresh() {
+    _realtimeMergeDebounce?.cancel();
+    _realtimeMergeDebounce = Timer(const Duration(milliseconds: 1200), () async {
+      if (!SupabaseConfig.isLoggedIn || _isSyncing) return;
+      final result = await _startSync(
+        _SyncOperation.merge,
+        notifyCompletion: false,
+      );
+      if (!result.hasError) {
+        _remoteDataChangedController.add(null);
+      } else {
+        print('REALTIME FULL REFRESH ERROR: ${result.error}');
+      }
+    });
+  }
+
+  // Kept as the stable callback target across hot reloads.
   void _queueRealtimeMerge() {
-    stopRealtimeSync();
-    startRealtimeSync();
+    _scheduleRealtimeFullRefresh();
   }
 
   Future<void> _queueRealtimeChanges() async {
@@ -367,6 +384,11 @@ class SupabaseSyncService {
     var changed = false;
     var reconcileReviewDeletes = false;
     for (final change in changes) {
+      if (table == 'review_states' &&
+          change.eventType == PostgresChangeEvent.delete) {
+        reconcileReviewDeletes = true;
+        continue;
+      }
       final source = change.newRecord.isNotEmpty
           ? change.newRecord
           : change.oldRecord;
@@ -376,10 +398,6 @@ class SupabaseSyncService {
 
       if (change.eventType == PostgresChangeEvent.delete ||
           remote['deleted_at'] != null) {
-        if (table == 'review_states') {
-          reconcileReviewDeletes = true;
-          continue;
-        }
         final localId = switch (table) {
           'topics' => _topicLocalIdByRemote[remoteId] ?? _stableLocalId(remoteId),
           'courses' => _courseLocalIdByRemote[remoteId] ?? _stableLocalId(remoteId),
@@ -947,6 +965,11 @@ class SupabaseSyncService {
         ownerId: ownerId,
         lastSyncAt: lastSyncAt,
       );
+      if (localTable == 'review_states' &&
+          _operation == _SyncOperation.merge &&
+          remoteRowsOverride == null) {
+        await _removeReviewStatesMissingFromServer(db, remoteRows);
+      }
 
       final existingCardIds = <int>{};
       final deletedCardIds = <int>{};
@@ -1181,6 +1204,51 @@ class SupabaseSyncService {
       'pulled=$pulled, errors=${errors.length}',
     );
     return SyncResult(pushed: pushed, pulled: pulled, error: error);
+  }
+
+  /// Matches WinForms BuildLocalCard behavior: during a full remote refresh,
+  /// absence from the server review-state map means default SRS locally.
+  Future<int> _removeReviewStatesMissingFromServer(
+    Database db,
+    List<Map<String, dynamic>> remoteRows,
+  ) async {
+    final remoteCardIds = remoteRows
+        .map((row) => row['card_id']?.toString() ?? '')
+        .where((id) => id.isNotEmpty)
+        .toSet();
+    final localRows = await db.query(
+      'review_states',
+      columns: ['id', 'cardId'],
+    );
+    final idsToDelete = <int>[];
+    for (final row in localRows) {
+      final localReviewId = _localInt(row['id']);
+      final localCardId = _localInt(row['cardId']);
+      if (localReviewId == null || localCardId == null) continue;
+      final remoteCardId = _cardRemoteIdByLocal['$localCardId'];
+      // Preserve SRS for genuinely local-only cards. For mapped server cards,
+      // missing review_states means the remote SRS was deleted.
+      if (remoteCardId != null && !remoteCardIds.contains(remoteCardId)) {
+        idsToDelete.add(localReviewId);
+      }
+    }
+    if (idsToDelete.isEmpty) return 0;
+
+    await db.transaction((txn) async {
+      const batchSize = 300;
+      for (var start = 0; start < idsToDelete.length; start += batchSize) {
+        final end = math.min(start + batchSize, idsToDelete.length);
+        final batch = idsToDelete.sublist(start, end);
+        final placeholders = List.filled(batch.length, '?').join(',');
+        await txn.delete(
+          'review_states',
+          where: 'id IN ($placeholders)',
+          whereArgs: batch,
+        );
+      }
+    });
+    print('REALTIME SRS RESET: removed=${idsToDelete.length}');
+    return idsToDelete.length;
   }
 
   // ========== Mappers: local (camelCase) ↔ remote (snake_case) ==========
