@@ -401,6 +401,8 @@ class SupabaseSyncService {
         }
       }
 
+      final remoteIdsToDelete = <String>[];
+
       await db.transaction((txn) async {
         for (final remote in remoteRows) {
           if (localTable == 'app_settings' &&
@@ -428,6 +430,8 @@ class SupabaseSyncService {
                     where: 'cardId = ?',
                     whereArgs: [cardId],
                   );
+                  final rId = remote['id']?.toString();
+                  if (rId != null) remoteIdsToDelete.add(rId);
                   continue;
                 }
               }
@@ -446,6 +450,8 @@ class SupabaseSyncService {
                     where: 'courseId = ?',
                     whereArgs: [courseId],
                   );
+                  final rId = remote['id']?.toString();
+                  if (rId != null) remoteIdsToDelete.add(rId);
                   continue;
                 }
               }
@@ -460,6 +466,8 @@ class SupabaseSyncService {
                     where: 'sessionId = ?',
                     whereArgs: [sessionId],
                   );
+                  final rId = remote['id']?.toString();
+                  if (rId != null) remoteIdsToDelete.add(rId);
                   continue;
                 }
               }
@@ -525,6 +533,15 @@ class SupabaseSyncService {
           }
         }
       });
+
+      if (remoteIdsToDelete.isNotEmpty) {
+        try {
+          await client.from(remoteTable).delete().inFilter('id', remoteIdsToDelete);
+          print('SYNC CLEANED UP ${remoteIdsToDelete.length} ORPHANED REMOTE ROWS FROM $remoteTable');
+        } catch (e) {
+          print('SYNC CLEANUP ERROR ($remoteTable): $e');
+        }
+      }
     } catch (e) {
       errors.add('table: $e');
       print('SYNC TABLE ERROR ($localTable): $e');
