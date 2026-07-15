@@ -80,6 +80,18 @@ class SupabaseSyncService {
       await _removeBundledVocabulary(db, client, ownerId);
       await _prepareIdentityMaps(db, client, ownerId);
 
+      // Fetch the last sync timestamp
+      final lastSyncRows = await db.query(
+        'app_settings',
+        columns: ['value'],
+        where: 'key = ?',
+        whereArgs: ['sync.lastSyncAt'],
+        limit: 1,
+      );
+      final lastSyncAt = lastSyncRows.isNotEmpty
+          ? lastSyncRows.first['value']?.toString()
+          : null;
+
       void collectError(String table, SyncResult result) {
         if (result.hasError) syncErrors.add('$table: ${result.error}');
       }
@@ -94,6 +106,7 @@ class SupabaseSyncService {
         idColumn: 'id',
         localToRemote: _topicLocalToRemote,
         remoteToLocal: _topicRemoteToLocal,
+        lastSyncAt: lastSyncAt,
       );
       pushed += topicResult.pushed;
       pulled += topicResult.pulled;
@@ -109,6 +122,7 @@ class SupabaseSyncService {
         idColumn: 'id',
         localToRemote: _courseLocalToRemote,
         remoteToLocal: _courseRemoteToLocal,
+        lastSyncAt: lastSyncAt,
       );
       pushed += courseResult.pushed;
       pulled += courseResult.pulled;
@@ -124,6 +138,7 @@ class SupabaseSyncService {
         idColumn: 'id',
         localToRemote: _cardLocalToRemote,
         remoteToLocal: _cardRemoteToLocal,
+        lastSyncAt: lastSyncAt,
       );
       pushed += cardResult.pushed;
       pulled += cardResult.pulled;
@@ -139,6 +154,7 @@ class SupabaseSyncService {
         idColumn: 'id',
         localToRemote: _cardExampleLocalToRemote,
         remoteToLocal: _cardExampleRemoteToLocal,
+        lastSyncAt: lastSyncAt,
       );
       pushed += exampleResult.pushed;
       pulled += exampleResult.pulled;
@@ -156,6 +172,7 @@ class SupabaseSyncService {
         localConflictColumns: const ['cardId'],
         localToRemote: _reviewStateLocalToRemote,
         remoteToLocal: _reviewStateRemoteToLocal,
+        lastSyncAt: lastSyncAt,
       );
       pushed += reviewResult.pushed;
       pulled += reviewResult.pulled;
@@ -171,6 +188,7 @@ class SupabaseSyncService {
         idColumn: 'id',
         localToRemote: _studySessionLocalToRemote,
         remoteToLocal: _studySessionRemoteToLocal,
+        lastSyncAt: lastSyncAt,
       );
       pushed += sessionResult.pushed;
       pulled += sessionResult.pulled;
@@ -186,6 +204,7 @@ class SupabaseSyncService {
         idColumn: 'id',
         localToRemote: _studyResultLocalToRemote,
         remoteToLocal: _studyResultRemoteToLocal,
+        lastSyncAt: lastSyncAt,
       );
       pushed += studyResultResult.pushed;
       pulled += studyResultResult.pulled;
@@ -209,6 +228,7 @@ class SupabaseSyncService {
         ],
         localToRemote: _questionLocalToRemote,
         remoteToLocal: _questionRemoteToLocal,
+        lastSyncAt: lastSyncAt,
       );
       pushed += questionResult.pushed;
       pulled += questionResult.pulled;
@@ -229,6 +249,7 @@ class SupabaseSyncService {
         remoteConflictColumns: 'owner_id,key',
         localToRemote: _appSettingLocalToRemote,
         remoteToLocal: _appSettingRemoteToLocal,
+        lastSyncAt: lastSyncAt,
       );
       pushed += appSettingsResult.pushed;
       pulled += appSettingsResult.pulled;
@@ -273,6 +294,7 @@ class SupabaseSyncService {
     required Map<String, Object?> Function(
       Map<String, dynamic> remoteRow,
     ) remoteToLocal,
+    String? lastSyncAt,
   }) async {
     int pushed = 0;
     int pulled = 0;
@@ -283,6 +305,7 @@ class SupabaseSyncService {
         client: client,
         table: remoteTable,
         ownerId: ownerId,
+        lastSyncAt: lastSyncAt,
       );
       final remoteById = <String, Map<String, dynamic>>{
         for (final row in remoteRows)
@@ -300,7 +323,38 @@ class SupabaseSyncService {
       };
 
       // --- PUSH local → Supabase ---
-      final queriedLocalRows = await db.query(localTable);
+      final Map<String, String> localTimestampColumns = {
+        'topics': 'COALESCE(updatedAt, createdAt)',
+        'courses': 'COALESCE(updatedAt, createdAt)',
+        'cards': 'COALESCE(updatedAt, createdAt)',
+        'card_examples': 'COALESCE(updatedAt, createdAt)',
+        'review_states': 'COALESCE(updatedAt, createdAt)',
+        'study_sessions': 'startedAt',
+        'study_results': 'reviewedAt',
+        'review_sentence_questions': 'COALESCE(updatedAt, createdAt)',
+        'app_settings': 'updatedAt',
+      };
+
+      List<Map<String, Object?>> queriedLocalRows;
+      final timeCol = localTimestampColumns[localTable];
+      if (lastSyncAt != null && lastSyncAt.isNotEmpty && timeCol != null) {
+        final parsed = DateTime.tryParse(lastSyncAt);
+        if (parsed != null) {
+          final safetyTime = parsed
+              .subtract(const Duration(minutes: 5))
+              .toIso8601String();
+          queriedLocalRows = await db.query(
+            localTable,
+            where: '$timeCol > ?',
+            whereArgs: [safetyTime],
+          );
+        } else {
+          queriedLocalRows = await db.query(localTable);
+        }
+      } else {
+        queriedLocalRows = await db.query(localTable);
+      }
+
       final localRows = localTable == 'app_settings'
           ? queriedLocalRows
               .where((row) => !_isLocalOnlySetting(row['key']))
@@ -356,6 +410,7 @@ class SupabaseSyncService {
         client: client,
         table: remoteTable,
         ownerId: ownerId,
+        lastSyncAt: lastSyncAt,
       );
 
       final existingCardIds = <int>{};
@@ -402,6 +457,32 @@ class SupabaseSyncService {
       }
 
       final remoteIdsToDelete = <String>[];
+
+      // --- Build memory cache of local rows to avoid O(N) database queries ---
+      final columnsToFetch = <String>{idColumn};
+      if (localConflictColumns != null) {
+        columnsToFetch.addAll(localConflictColumns);
+      }
+      final timeColName = localTable == 'study_sessions'
+          ? 'startedAt'
+          : (localTable == 'study_results' ? 'reviewedAt' : 'updatedAt');
+      columnsToFetch.add(timeColName);
+
+      final allLocalList = await db.query(
+        localTable,
+        columns: columnsToFetch.toList(),
+      );
+
+      final localById = <String, Map<String, Object?>>{
+        for (final row in allLocalList)
+          if (row[idColumn] != null) row[idColumn].toString(): row,
+      };
+
+      final localByConflict = <String, Map<String, Object?>>{
+        if (localConflictColumns != null && localConflictColumns.isNotEmpty)
+          for (final row in allLocalList)
+            _syncConflictKey(row, localConflictColumns): row,
+      };
 
       await db.transaction((txn) async {
         for (final remote in remoteRows) {
@@ -473,28 +554,19 @@ class SupabaseSyncService {
               }
             }
 
-            var existing = await txn.query(
-              localTable,
-              where: '$idColumn = ?',
-              whereArgs: [localId],
-              limit: 1,
-            );
-            if (existing.isEmpty &&
+            // Find existing local row using memory maps instead of txn.query
+            Map<String, Object?>? existingRow;
+            final localIdStr = localId?.toString();
+            if (localIdStr != null) {
+              existingRow = localById[localIdStr];
+            }
+            if (existingRow == null &&
                 localConflictColumns != null &&
                 localConflictColumns.isNotEmpty) {
-              existing = await txn.query(
-                localTable,
-                where: localConflictColumns
-                    .map((column) => '$column = ?')
-                    .join(' AND '),
-                whereArgs: localConflictColumns
-                    .map((column) => localData[column])
-                    .toList(growable: false),
-                limit: 1,
-              );
+              existingRow = localByConflict[_syncConflictKey(localData, localConflictColumns)];
             }
 
-            if (existing.isEmpty) {
+            if (existingRow == null) {
               // A tombstone only matters when this device still has the row it
               // deletes. Do not import historical deleted rows as new local
               // data on every login.
@@ -507,23 +579,37 @@ class SupabaseSyncService {
                 localData,
                 conflictAlgorithm: ConflictAlgorithm.abort,
               );
+              // Update memory cache
+              if (localIdStr != null) {
+                localById[localIdStr] = localData;
+              }
+              if (localConflictColumns != null && localConflictColumns.isNotEmpty) {
+                localByConflict[_syncConflictKey(localData, localConflictColumns)] = localData;
+              }
               pulled++;
             } else {
               // Compare updatedAt: remote wins if newer
-              final localUpdated = existing.first['updatedAt']?.toString() ?? '';
+              final localUpdated = existingRow[timeColName]?.toString() ?? '';
               final remoteUpdated = remote['updated_at']?.toString() ?? '';
               if (_isRemoteNewer(remoteUpdated, localUpdated)) {
                 // When the natural key matches but IDs differ between devices,
                 // preserve the existing SQLite ID. Replacing it would create a
                 // new remote UUID on the next push and repeat the conflict.
                 final mergedData = Map<String, Object?>.from(localData)
-                  ..[idColumn] = existing.first[idColumn];
+                  ..[idColumn] = existingRow[idColumn];
                 await txn.update(
                   localTable,
                   mergedData,
                   where: '$idColumn = ?',
-                  whereArgs: [existing.first[idColumn]],
+                  whereArgs: [existingRow[idColumn]],
                 );
+                // Update memory cache
+                if (localIdStr != null) {
+                  localById[localIdStr] = mergedData;
+                }
+                if (localConflictColumns != null && localConflictColumns.isNotEmpty) {
+                  localByConflict[_syncConflictKey(mergedData, localConflictColumns)] = mergedData;
+                }
                 pulled++;
               }
             }
@@ -921,19 +1007,39 @@ class SupabaseSyncService {
     required SupabaseClient client,
     required String table,
     required String ownerId,
+    String? lastSyncAt,
   }) async {
-    if (_prefetchedRemoteRows.containsKey(table)) {
-      return _prefetchedRemoteRows[table]!;
+    final useIncremental = lastSyncAt != null &&
+        lastSyncAt.isNotEmpty &&
+        table != 'topics' &&
+        table != 'courses' &&
+        table != 'cards';
+
+    final cacheKey = useIncremental ? '$table:$lastSyncAt' : table;
+    if (_prefetchedRemoteRows.containsKey(cacheKey)) {
+      return _prefetchedRemoteRows[cacheKey]!;
     }
     const pageSize = 500;
     final rows = <Map<String, dynamic>>[];
     var offset = 0;
 
+    String? filterTimestamp;
+    if (useIncremental) {
+      final parsed = DateTime.tryParse(lastSyncAt);
+      if (parsed != null) {
+        filterTimestamp = parsed
+            .subtract(const Duration(minutes: 5))
+            .toUtc()
+            .toIso8601String();
+      }
+    }
+
     while (true) {
-      final response = await client
-          .from(table)
-          .select()
-          .eq('owner_id', ownerId)
+      dynamic query = client.from(table).select().eq('owner_id', ownerId);
+      if (filterTimestamp != null) {
+        query = query.gt('updated_at', filterTimestamp);
+      }
+      final response = await query
           .order(table == 'app_settings' ? 'key' : 'id')
           .range(offset, offset + pageSize - 1);
       final page = List<Map<String, dynamic>>.from(response);
@@ -942,7 +1048,7 @@ class SupabaseSyncService {
       offset += pageSize;
     }
 
-    _prefetchedRemoteRows[table] = rows;
+    _prefetchedRemoteRows[cacheKey] = rows;
     return rows;
   }
 
@@ -989,6 +1095,7 @@ class SupabaseSyncService {
     final key = keyValue?.toString() ?? '';
     return key == 'sync.localDeviceId' ||
         key == 'sync.localBoundOwnerId' ||
+        key == 'sync.lastSyncAt' ||
         key.startsWith('sync.migration.') ||
         key.startsWith('sync.offlineDeleteRecovery');
   }
@@ -1042,8 +1149,8 @@ class SupabaseSyncService {
         }
         final settingRows = await txn.query('app_settings', columns: ['key']);
         for (final setting in settingRows) {
-          final settingKey = setting['key'];
-          if (!_isLocalOnlySetting(settingKey)) {
+          final settingKey = setting['key']?.toString() ?? '';
+          if (!_isLocalOnlySetting(settingKey) || settingKey == 'sync.lastSyncAt') {
             await txn.delete(
               'app_settings',
               where: 'key = ?',
