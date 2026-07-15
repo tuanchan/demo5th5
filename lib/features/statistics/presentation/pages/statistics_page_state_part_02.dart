@@ -360,6 +360,14 @@ extension StatisticsPageStatePart02 on _StatisticsPageState {
     });
   }
 
+  /// Refreshes only the SRS management table without reloading dashboard data.
+  void _refreshSrsTable() {
+    if (!mounted) return;
+    setState(() {
+      _srsManagerFuture = this._loadSrsEditorItems();
+    });
+  }
+
   Widget _buildDashboard(StatisticsData data) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -451,7 +459,7 @@ extension StatisticsPageStatePart02 on _StatisticsPageState {
         SizedBox(width: 8),
         this._dashIconButton(
           icon: Icons.refresh_rounded,
-          onTap: this.reloadStatistics,
+          onTap: this._refreshSrsTable,
         ),
       ],
     );
