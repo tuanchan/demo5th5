@@ -185,7 +185,11 @@ extension SettingsPageStatePart01 on _SettingsPageState {
           GeminiFlashLiteClient.apiKeySettingKey,
         ) ??
         '';
-    
+    if (!mounted) return;
+    setState(() {
+      themeMode = mode;
+      geminiApiKeyController.text = geminiApiKey;
+    });
   }
 
 

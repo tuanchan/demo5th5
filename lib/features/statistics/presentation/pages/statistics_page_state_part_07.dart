@@ -635,6 +635,41 @@ extension StatisticsPageStatePart07 on _StatisticsPageState {
       where: 'cardId IN ($placeholders)',
       whereArgs: ids,
     );
+
+    if (SupabaseConfig.isLoggedIn) {
+      try {
+        final ownerId = SupabaseConfig.currentUser!.id;
+        final remoteCourseId =
+            await SupabaseSyncService.instance.findRemoteCourseId(course.id);
+        if (remoteCourseId != null) {
+          final cardsResponse = await SupabaseConfig.client
+              .from('cards')
+              .select('id')
+              .eq('course_id', remoteCourseId);
+          final remoteCardIds = cardsResponse
+              .map((r) => r['id']?.toString())
+              .whereType<String>()
+              .toList();
+          if (remoteCardIds.isNotEmpty) {
+            await SupabaseConfig.client
+                .from('review_states')
+                .delete()
+                .eq('owner_id', ownerId)
+                .inFilter('card_id', remoteCardIds);
+          }
+        }
+      } catch (e) {
+        debugPrint('DELETE REMOTE COURSE SRS ERROR: $e');
+      }
+      unawaited(
+        SupabaseSyncService.instance.syncPendingChanges().then((syncResult) {
+          if (syncResult.hasError) {
+            debugPrint('DELETE COURSE SRS SYNC ERROR: ${syncResult.error}');
+          }
+        }),
+      );
+    }
+
     if (!mounted) return;
     showAppToast(context, 'Đã xóa SRS học phần ${course.title}');
     this._refreshSrsManager();
@@ -887,6 +922,20 @@ extension StatisticsPageStatePart07 on _StatisticsPageState {
     );
     
     if (SupabaseConfig.isLoggedIn) {
+      try {
+        final remoteCardId =
+            await SupabaseSyncService.instance.findRemoteCardId(cardId);
+        if (remoteCardId != null) {
+          final ownerId = SupabaseConfig.currentUser!.id;
+          await SupabaseConfig.client
+              .from('review_states')
+              .delete()
+              .eq('owner_id', ownerId)
+              .eq('card_id', remoteCardId);
+        }
+      } catch (e) {
+        debugPrint('DELETE REMOTE SRS ERROR: $e');
+      }
       unawaited(
         SupabaseSyncService.instance.syncPendingChanges().then((syncResult) {
           if (syncResult.hasError) {

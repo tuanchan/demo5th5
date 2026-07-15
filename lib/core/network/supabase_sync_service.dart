@@ -24,6 +24,7 @@ class SupabaseSyncService {
   final Map<String, int> _topicLocalIdByRemote = {};
   final Map<String, int> _courseLocalIdByRemote = {};
   final Map<String, int> _cardLocalIdByRemote = {};
+  final Map<String, List<Map<String, dynamic>>> _prefetchedRemoteRows = {};
   String _localDeviceId = '';
 
   bool get isSyncing => _isSyncing;
@@ -61,6 +62,7 @@ class SupabaseSyncService {
     _lastSyncError = null;
 
     try {
+      _prefetchedRemoteRows.clear();
       final ownerId = SupabaseConfig.currentUser!.id;
       final db = await AppDatabase.instance.database;
       final client = SupabaseConfig.client;
@@ -247,6 +249,7 @@ class SupabaseSyncService {
       _lastSyncError = e.toString();
       return SyncResult(pushed: 0, pulled: 0, error: e.toString());
     } finally {
+      _prefetchedRemoteRows.clear();
       _isSyncing = false;
       _activeSync = null;
     }
@@ -303,6 +306,7 @@ class SupabaseSyncService {
               .where((row) => !_isLocalOnlySetting(row['key']))
               .toList(growable: false)
           : queriedLocalRows;
+      final toPush = <Map<String, dynamic>>[];
       for (final row in localRows) {
         try {
           final remoteData = localToRemote(row, ownerId);
@@ -322,15 +326,28 @@ class SupabaseSyncService {
               !_localRowIsNewer(remoteData, existingRemote)) {
             continue;
           }
-          await client.from(remoteTable).upsert(
-            remoteData,
-            onConflict: remoteConflictColumns ?? idColumn,
-          );
-          pushed++;
+          toPush.add(remoteData);
         } catch (e) {
-          // Skip individual row errors
-          errors.add('push row ${row[idColumn]}: $e');
-          print('SYNC PUSH ERROR ($localTable row ${row[idColumn]}): $e');
+          errors.add('prepare push row ${row[idColumn]}: $e');
+          print('SYNC PREPARE PUSH ERROR ($localTable row ${row[idColumn]}): $e');
+        }
+      }
+
+      if (toPush.isNotEmpty) {
+        try {
+          const chunkSize = 200;
+          for (var i = 0; i < toPush.length; i += chunkSize) {
+            final chunk = toPush.sublist(i, math.min(i + chunkSize, toPush.length));
+            await client.from(remoteTable).upsert(
+              chunk,
+              onConflict: remoteConflictColumns ?? idColumn,
+            );
+            pushed += chunk.length;
+          }
+          _prefetchedRemoteRows.remove(remoteTable);
+        } catch (e) {
+          errors.add('push batch error: $e');
+          print('SYNC PUSH BATCH ERROR ($localTable): $e');
         }
       }
 
@@ -341,74 +358,173 @@ class SupabaseSyncService {
         ownerId: ownerId,
       );
 
-      for (final remote in remoteRows) {
-        if (localTable == 'app_settings' &&
-            _isLocalOnlySetting(remote['key'])) {
-          continue;
-        }
-        try {
-          final localData = remoteToLocal(remote);
-          final localId = localData[idColumn];
-
-          var existing = await db.query(
-            localTable,
-            where: '$idColumn = ?',
-            whereArgs: [localId],
-            limit: 1,
-          );
-          if (existing.isEmpty &&
-              localConflictColumns != null &&
-              localConflictColumns.isNotEmpty) {
-            existing = await db.query(
-              localTable,
-              where: localConflictColumns
-                  .map((column) => '$column = ?')
-                  .join(' AND '),
-              whereArgs: localConflictColumns
-                  .map((column) => localData[column])
-                  .toList(growable: false),
-              limit: 1,
-            );
-          }
-
-          if (existing.isEmpty) {
-            // A tombstone only matters when this device still has the row it
-            // deletes. Do not import historical deleted rows as new local
-            // data on every login.
-            if (remote.containsKey('deleted_at') &&
-                remote['deleted_at'] != null) {
-              continue;
-            }
-            await db.insert(
-              localTable,
-              localData,
-              conflictAlgorithm: ConflictAlgorithm.abort,
-            );
-            pulled++;
-          } else {
-            // Compare updatedAt: remote wins if newer
-            final localUpdated = existing.first['updatedAt']?.toString() ?? '';
-            final remoteUpdated = remote['updated_at']?.toString() ?? '';
-            if (_isRemoteNewer(remoteUpdated, localUpdated)) {
-              // When the natural key matches but IDs differ between devices,
-              // preserve the existing SQLite ID. Replacing it would create a
-              // new remote UUID on the next push and repeat the conflict.
-              final mergedData = Map<String, Object?>.from(localData)
-                ..[idColumn] = existing.first[idColumn];
-              await db.update(
-                localTable,
-                mergedData,
-                where: '$idColumn = ?',
-                whereArgs: [existing.first[idColumn]],
-              );
-              pulled++;
+      final existingCardIds = <int>{};
+      final deletedCardIds = <int>{};
+      if (localTable == 'review_states' ||
+          localTable == 'card_examples' ||
+          localTable == 'review_sentence_questions' ||
+          localTable == 'study_results') {
+        final rows = await db.query('cards', columns: ['id', 'deletedAt']);
+        for (final r in rows) {
+          final id = r['id'] as int?;
+          if (id != null) {
+            existingCardIds.add(id);
+            if (r['deletedAt'] != null) {
+              deletedCardIds.add(id);
             }
           }
-        } catch (e) {
-          errors.add('pull row ${remote['id'] ?? remote['key']}: $e');
-          print('SYNC PULL ERROR ($localTable): $e');
         }
       }
+
+      final existingCourseIds = <int>{};
+      final deletedCourseIds = <int>{};
+      if (localTable == 'study_sessions' ||
+          localTable == 'review_sentence_questions') {
+        final rows = await db.query('courses', columns: ['id', 'deletedAt']);
+        for (final r in rows) {
+          final id = r['id'] as int?;
+          if (id != null) {
+            existingCourseIds.add(id);
+            if (r['deletedAt'] != null) {
+              deletedCourseIds.add(id);
+            }
+          }
+        }
+      }
+
+      final existingSessionIds = <int>{};
+      if (localTable == 'study_results') {
+        final rows = await db.query('study_sessions', columns: ['id']);
+        for (final r in rows) {
+          final id = r['id'] as int?;
+          if (id != null) existingSessionIds.add(id);
+        }
+      }
+
+      await db.transaction((txn) async {
+        for (final remote in remoteRows) {
+          if (localTable == 'app_settings' &&
+              _isLocalOnlySetting(remote['key'])) {
+            continue;
+          }
+          try {
+            final localData = remoteToLocal(remote);
+            final localId = localData[idColumn];
+
+            // Check for orphaned/deleted parent records to prevent pulling data
+            // for soft-deleted/deleted cards or courses.
+            if (localTable == 'review_states' ||
+                localTable == 'card_examples' ||
+                localTable == 'review_sentence_questions' ||
+                localTable == 'study_results') {
+              final cardId = localData['cardId'];
+              if (cardId != null) {
+                final isDeletedOrMissing =
+                    !existingCardIds.contains(cardId) ||
+                    deletedCardIds.contains(cardId);
+                if (isDeletedOrMissing) {
+                  await txn.delete(
+                    localTable,
+                    where: 'cardId = ?',
+                    whereArgs: [cardId],
+                  );
+                  continue;
+                }
+              }
+            }
+
+            if (localTable == 'study_sessions' ||
+                localTable == 'review_sentence_questions') {
+              final courseId = localData['courseId'];
+              if (courseId != null) {
+                final isDeletedOrMissing =
+                    !existingCourseIds.contains(courseId) ||
+                    deletedCourseIds.contains(courseId);
+                if (isDeletedOrMissing) {
+                  await txn.delete(
+                    localTable,
+                    where: 'courseId = ?',
+                    whereArgs: [courseId],
+                  );
+                  continue;
+                }
+              }
+            }
+
+            if (localTable == 'study_results') {
+              final sessionId = localData['sessionId'];
+              if (sessionId != null) {
+                if (!existingSessionIds.contains(sessionId)) {
+                  await txn.delete(
+                    'study_results',
+                    where: 'sessionId = ?',
+                    whereArgs: [sessionId],
+                  );
+                  continue;
+                }
+              }
+            }
+
+            var existing = await txn.query(
+              localTable,
+              where: '$idColumn = ?',
+              whereArgs: [localId],
+              limit: 1,
+            );
+            if (existing.isEmpty &&
+                localConflictColumns != null &&
+                localConflictColumns.isNotEmpty) {
+              existing = await txn.query(
+                localTable,
+                where: localConflictColumns
+                    .map((column) => '$column = ?')
+                    .join(' AND '),
+                whereArgs: localConflictColumns
+                    .map((column) => localData[column])
+                    .toList(growable: false),
+                limit: 1,
+              );
+            }
+
+            if (existing.isEmpty) {
+              // A tombstone only matters when this device still has the row it
+              // deletes. Do not import historical deleted rows as new local
+              // data on every login.
+              if (remote.containsKey('deleted_at') &&
+                  remote['deleted_at'] != null) {
+                continue;
+              }
+              await txn.insert(
+                localTable,
+                localData,
+                conflictAlgorithm: ConflictAlgorithm.abort,
+              );
+              pulled++;
+            } else {
+              // Compare updatedAt: remote wins if newer
+              final localUpdated = existing.first['updatedAt']?.toString() ?? '';
+              final remoteUpdated = remote['updated_at']?.toString() ?? '';
+              if (_isRemoteNewer(remoteUpdated, localUpdated)) {
+                // When the natural key matches but IDs differ between devices,
+                // preserve the existing SQLite ID. Replacing it would create a
+                // new remote UUID on the next push and repeat the conflict.
+                final mergedData = Map<String, Object?>.from(localData)
+                  ..[idColumn] = existing.first[idColumn];
+                await txn.update(
+                  localTable,
+                  mergedData,
+                  where: '$idColumn = ?',
+                  whereArgs: [existing.first[idColumn]],
+                );
+                pulled++;
+              }
+            }
+          } catch (e) {
+            errors.add('pull row ${remote['id'] ?? remote['key']}: $e');
+            print('SYNC PULL ERROR ($localTable): $e');
+          }
+        }
+      });
     } catch (e) {
       errors.add('table: $e');
       print('SYNC TABLE ERROR ($localTable): $e');
@@ -789,6 +905,9 @@ class SupabaseSyncService {
     required String table,
     required String ownerId,
   }) async {
+    if (_prefetchedRemoteRows.containsKey(table)) {
+      return _prefetchedRemoteRows[table]!;
+    }
     const pageSize = 500;
     final rows = <Map<String, dynamic>>[];
     var offset = 0;
@@ -806,6 +925,7 @@ class SupabaseSyncService {
       offset += pageSize;
     }
 
+    _prefetchedRemoteRows[table] = rows;
     return rows;
   }
 
@@ -1337,6 +1457,86 @@ class SupabaseSyncService {
     final hash = _stableHash32(seed);
     final hex = hash.toRadixString(16).padLeft(8, '0');
     return '00000000-0000-4000-8000-$hex${hex.substring(0, 4)}';
+  }
+
+  Future<String> getRemoteCardId(int localCardId) async {
+    final db = await AppDatabase.instance.database;
+    await _ensureLocalDeviceId(db);
+    return _uuidFromLocalId(localCardId, 'card');
+  }
+
+  Future<String?> findRemoteCardId(int localCardId) async {
+    try {
+      final db = await AppDatabase.instance.database;
+      final rows = await db.query(
+        'cards',
+        where: 'id = ?',
+        whereArgs: [localCardId],
+        limit: 1,
+      );
+      if (rows.isEmpty) return null;
+      final card = rows.first;
+      final term = card['term']?.toString() ?? '';
+      final definition = card['definition']?.toString() ?? '';
+      final position = card['position'] ?? 0;
+
+      final ownerId = SupabaseConfig.currentUser?.id;
+      if (ownerId == null) return null;
+
+      final response = await SupabaseConfig.client
+          .from('cards')
+          .select('id')
+          .eq('owner_id', ownerId)
+          .eq('term', term)
+          .eq('definition', definition)
+          .eq('position', position)
+          .limit(1);
+
+      if (response.isNotEmpty) {
+        return response.first['id']?.toString();
+      }
+    } catch (e) {
+      print('findRemoteCardId error: $e');
+    }
+    return getRemoteCardId(localCardId);
+  }
+
+  Future<String> getRemoteCourseId(int localCourseId) async {
+    final db = await AppDatabase.instance.database;
+    await _ensureLocalDeviceId(db);
+    return _uuidFromLocalId(localCourseId, 'course');
+  }
+
+  Future<String?> findRemoteCourseId(int localCourseId) async {
+    try {
+      final db = await AppDatabase.instance.database;
+      final rows = await db.query(
+        'courses',
+        where: 'id = ?',
+        whereArgs: [localCourseId],
+        limit: 1,
+      );
+      if (rows.isEmpty) return null;
+      final course = rows.first;
+      final title = course['title']?.toString() ?? '';
+
+      final ownerId = SupabaseConfig.currentUser?.id;
+      if (ownerId == null) return null;
+
+      final response = await SupabaseConfig.client
+          .from('courses')
+          .select('id')
+          .eq('owner_id', ownerId)
+          .eq('title', title)
+          .limit(1);
+
+      if (response.isNotEmpty) {
+        return response.first['id']?.toString();
+      }
+    } catch (e) {
+      print('findRemoteCourseId error: $e');
+    }
+    return getRemoteCourseId(localCourseId);
   }
 
   Future<void> _setLocalSetting(Database db, String key, String value) async {

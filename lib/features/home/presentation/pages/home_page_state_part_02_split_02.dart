@@ -264,12 +264,14 @@ extension HomePageStatePart02Split02 on _HomePageState {
 
 
 
-  Future<void> loadCourses() async {
+  Future<void> loadCourses({bool showLoading = true}) async {
     if (!mounted || isLoadingCourses) return;
 
-    setState(() {
-      isLoadingCourses = true;
-    });
+    if (showLoading) {
+      setState(() {
+        isLoadingCourses = true;
+      });
+    }
 
     try {
       await AppDatabase.instance.ensureTopicSchema();
