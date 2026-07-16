@@ -553,8 +553,9 @@ extension HomePageStatePart01 on _HomePageState {
             ? 4
             : constraints.maxWidth >= 580
                 ? 2
-                : 1;
-        final width = (constraints.maxWidth - ((columns - 1) * 20)) / columns;
+                : 2;
+        final spacing = constraints.maxWidth < 580 ? 12.0 : 20.0;
+        final width = (constraints.maxWidth - ((columns - 1) * spacing)) / columns;
         return Stack(
           children: [
             Positioned.fill(
@@ -566,8 +567,8 @@ extension HomePageStatePart01 on _HomePageState {
                     children: [
                       this._buildScrollableHomeDashboardHeader(compact),
                       Wrap(
-                        spacing: 20,
-                        runSpacing: 20,
+                        spacing: spacing,
+                        runSpacing: spacing,
                         children: [
                           SizedBox(
                             width: width,
@@ -637,6 +638,8 @@ extension HomePageStatePart01 on _HomePageState {
   }
 
   Widget _buildHomeTopicCard(CourseTopicItem topic) {
+    final isMobile = MediaQuery.of(context).size.width < 580;
+    final cardHeight = isMobile ? 140.0 : 200.0;
     return InkWell(
       onTap: () {
         courseSearchController.clear();
@@ -665,8 +668,8 @@ extension HomePageStatePart01 on _HomePageState {
       onLongPress: () => this.openEditTopicDialog(topic),
       borderRadius: BorderRadius.circular(12),
       child: Container(
-        height: 200,
-        padding: EdgeInsets.all(20),
+        height: cardHeight,
+        padding: EdgeInsets.all(isMobile ? 12 : 20),
         decoration: BoxDecoration(
           color: _homePanel,
           borderRadius: BorderRadius.circular(12),
@@ -691,31 +694,35 @@ extension HomePageStatePart01 on _HomePageState {
               ),
             ),
             Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    topic.name,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: _homeText,
-                      fontSize: 30,
-                      height: 1.15,
-                      fontWeight: FontWeight.w800,
+              child: Padding(
+                padding: EdgeInsets.only(top: isMobile ? 8.0 : 0.0),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    AutoShrinkText(
+                      topic.name,
+                      maxLines: 2,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: _homeText,
+                        fontSize: isMobile ? 20 : 30,
+                        height: 1.15,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
-                  ),
-                  SizedBox(height: 9),
-                  Text(
-                    '${topic.courseCount} học phần · ${topic.cardCount} thẻ',
-                    style: TextStyle(
-                      color: _homeMuted,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
+                    SizedBox(height: isMobile ? 4 : 9),
+                    AutoShrinkText(
+                      '${topic.courseCount} học phần · ${topic.cardCount} thẻ',
+                      maxLines: 1,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: _homeMuted,
+                        fontSize: isMobile ? 11 : 13,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ],
@@ -745,9 +752,10 @@ extension HomePageStatePart01 on _HomePageState {
                         ? 4
                         : constraints.maxWidth >= 580
                             ? 2
-                            : 1;
+                            : 2;
+                    final spacing = constraints.maxWidth < 580 ? 12.0 : 20.0;
                     final width =
-                        (constraints.maxWidth - ((columns - 1) * 20)) /
+                        (constraints.maxWidth - ((columns - 1) * spacing)) /
                             columns;
                     final cards = <Widget>[
                       this._buildHomeCourseActionCard(
@@ -782,8 +790,8 @@ extension HomePageStatePart01 on _HomePageState {
                         children: [
                           this._buildScrollableHomeDashboardHeader(compact),
                           Wrap(
-                            spacing: 20,
-                            runSpacing: 20,
+                            spacing: spacing,
+                            runSpacing: spacing,
                             children: cards
                                 .map(
                                   (card) => SizedBox(width: width, child: card),
@@ -1139,6 +1147,8 @@ extension HomePageStatePart01 on _HomePageState {
     required String label,
     required VoidCallback onTap,
   }) {
+    final isMobile = MediaQuery.of(context).size.width < 580;
+    final cardHeight = isMobile ? 140.0 : 200.0;
     return InkWell(
       key: key,
       onTap: onTap,
@@ -1150,7 +1160,7 @@ extension HomePageStatePart01 on _HomePageState {
           strokeWidth: 1.5,
         ),
         child: Container(
-          height: 200,
+          height: cardHeight,
           decoration: BoxDecoration(
             color: _homePanel,
             borderRadius: BorderRadius.circular(12),
@@ -1158,13 +1168,14 @@ extension HomePageStatePart01 on _HomePageState {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(icon, color: Color(0xff3983ff), size: 27),
-              SizedBox(height: 18),
-              Text(
+              Icon(icon, color: Color(0xff3983ff), size: isMobile ? 22 : 27),
+              SizedBox(height: isMobile ? 10 : 18),
+              AutoShrinkText(
                 label,
+                maxLines: 1,
                 style: TextStyle(
                   color: Color(0xff3983ff),
-                  fontSize: 15,
+                  fontSize: isMobile ? 13 : 15,
                   fontWeight: FontWeight.w800,
                 ),
               ),
@@ -1177,6 +1188,8 @@ extension HomePageStatePart01 on _HomePageState {
 
   Widget _buildWebCourseTile(CourseListItem course, {Key? key}) {
     final selected = selectedHomeCourse?.id == course.id;
+    final isMobile = MediaQuery.of(context).size.width < 580;
+    final cardHeight = isMobile ? 140.0 : 200.0;
     return InkWell(
       key: key,
       onTap: () => setState(() => selectedHomeCourse = course),
@@ -1186,8 +1199,8 @@ extension HomePageStatePart01 on _HomePageState {
       },
       borderRadius: BorderRadius.circular(12),
       child: Container(
-        height: 200,
-        padding: EdgeInsets.all(20),
+        height: cardHeight,
+        padding: EdgeInsets.all(isMobile ? 12 : 20),
         decoration: BoxDecoration(
           color: selected ? Color(0xff101b35) : _homePanel,
           borderRadius: BorderRadius.circular(12),
@@ -1233,8 +1246,8 @@ extension HomePageStatePart01 on _HomePageState {
                         message: 'HP LOCAL',
                         child: SvgPicture.asset(
                           'assets/icon/triangle-exclamation-solid-full.svg',
-                          width: 19,
-                          height: 19,
+                          width: isMobile ? 15 : 19,
+                          height: isMobile ? 15 : 19,
                           colorFilter: ColorFilter.mode(
                             Color(0xffffc107),
                             BlendMode.srcIn,
@@ -1244,13 +1257,12 @@ extension HomePageStatePart01 on _HomePageState {
                       SizedBox(width: 8),
                     ],
                     Expanded(
-                      child: Text(
+                      child: AutoShrinkText(
                         course.title,
                         maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           color: _homeText,
-                          fontSize: 19,
+                          fontSize: isMobile ? 15 : 19,
                           height: 1.3,
                           fontWeight: FontWeight.w800,
                         ),
@@ -1262,11 +1274,12 @@ extension HomePageStatePart01 on _HomePageState {
             ),
             Align(
               alignment: Alignment.bottomLeft,
-              child: Text(
+              child: AutoShrinkText(
                 '${course.cardCount} thẻ · ${course.languageCode}',
+                maxLines: 1,
                 style: TextStyle(
                   color: _homeText,
-                  fontSize: 15,
+                  fontSize: isMobile ? 12 : 15,
                   fontWeight: FontWeight.w800,
                 ),
               ),
@@ -1327,5 +1340,92 @@ class _HomeDashedBorderPainter extends CustomPainter {
     return oldDelegate.color != color ||
         oldDelegate.radius != radius ||
         oldDelegate.strokeWidth != strokeWidth;
+  }
+}
+
+class AutoShrinkText extends StatelessWidget {
+  final String text;
+  final TextStyle style;
+  final int maxLines;
+  final double minFontSize;
+  final double minSingleLineFontSize;
+  final TextAlign textAlign;
+  final TextOverflow overflow;
+
+  const AutoShrinkText(
+    this.text, {
+    Key? key,
+    required this.style,
+    this.maxLines = 2,
+    this.minFontSize = 10,
+    this.minSingleLineFontSize = 13,
+    this.textAlign = TextAlign.left,
+    this.overflow = TextOverflow.ellipsis,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxWidth = constraints.maxWidth;
+        if (maxWidth <= 0 || maxWidth.isInfinite) {
+          return Text(
+            text,
+            style: style,
+            maxLines: maxLines,
+            overflow: overflow,
+            textAlign: textAlign,
+          );
+        }
+
+        final double maxFontSize = style.fontSize ?? 14.0;
+
+        // 1. Try to fit on 1 line if maxLines > 1
+        if (maxLines > 1) {
+          for (double s = maxFontSize; s >= minSingleLineFontSize; s -= 1.0) {
+            final textPainter = TextPainter(
+              text: TextSpan(text: text, style: style.copyWith(fontSize: s)),
+              maxLines: 1,
+              textDirection: TextDirection.ltr,
+              textAlign: textAlign,
+            );
+            textPainter.layout(maxWidth: maxWidth);
+            if (!textPainter.didExceedMaxLines) {
+              return Text(
+                text,
+                maxLines: 1,
+                overflow: overflow,
+                textAlign: textAlign,
+                style: style.copyWith(fontSize: s),
+              );
+            }
+          }
+        }
+
+        // 2. Try to fit within maxLines
+        double chosenFontSize = minFontSize;
+        for (double s = maxFontSize; s >= minFontSize; s -= 1.0) {
+          final textPainter = TextPainter(
+            text: TextSpan(text: text, style: style.copyWith(fontSize: s)),
+            maxLines: maxLines,
+            textDirection: TextDirection.ltr,
+            textAlign: textAlign,
+          );
+          textPainter.layout(maxWidth: maxWidth);
+          if (!textPainter.didExceedMaxLines) {
+            chosenFontSize = s;
+            break;
+          }
+        }
+
+        return Text(
+          text,
+          maxLines: maxLines,
+          overflow: overflow,
+          textAlign: textAlign,
+          style: style.copyWith(fontSize: chosenFontSize),
+        );
+      },
+    );
   }
 }

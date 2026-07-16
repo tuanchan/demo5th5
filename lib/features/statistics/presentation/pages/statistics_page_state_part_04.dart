@@ -4,7 +4,6 @@ extension StatisticsPageStatePart04 on _StatisticsPageState {
   Widget _buildHardCoursesPanel(StatisticsData data) {
     return this._dashCard(
       title: 'HỌC PHẦN NHIỀU THẺ KHÓ NHẤT',
-      icon: Icons.stacked_bar_chart_rounded,
       minHeight: 240,
       child: data.hardCourseItems.isEmpty
           ? SizedBox(

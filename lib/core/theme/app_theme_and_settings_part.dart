@@ -256,7 +256,8 @@ class GeminiFlashLiteClient {
 
   static const String defaultApiKey = 'AIzaSyAy7tpyPpnGt5PTXkO_ryFes7aAuk5uHFk';
   static const String apiKeySettingKey = 'gemini.apiKey';
-  static const String model = 'gemini-flash-lite-latest';
+  static const String modelSettingKey = 'gemini.model';
+  static const String defaultModel = 'gemini-flash-lite-latest';
 
   static Future<String> _apiKey() async {
     final saved = await AppSettingsStore.getString(apiKeySettingKey);
@@ -269,15 +270,21 @@ class GeminiFlashLiteClient {
     return key;
   }
 
+  static Future<String> _modelName() async {
+    final saved = await AppSettingsStore.getString(modelSettingKey);
+    return saved?.trim().isNotEmpty == true ? saved!.trim() : defaultModel;
+  }
+
   static Future<String> generateText(
     String prompt, {
     int maxOutputTokens = 900,
     String? responseMimeType,
   }) async {
     final apiKey = await _apiKey();
+    final modelName = await _modelName();
     final uri = Uri.https(
       'generativelanguage.googleapis.com',
-      '/v1beta/models/$model:generateContent',
+      '/v1beta/models/$modelName:generateContent',
       {'key': apiKey},
     );
 

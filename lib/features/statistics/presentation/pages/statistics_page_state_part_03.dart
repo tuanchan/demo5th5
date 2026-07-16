@@ -16,7 +16,6 @@ extension StatisticsPageStatePart03 on _StatisticsPageState {
 
   Widget _dashCard({
     required String title,
-    required IconData icon,
     required Widget child,
     double minHeight = 220,
   }) {
@@ -31,23 +30,15 @@ extension StatisticsPageStatePart03 on _StatisticsPageState {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Icon(icon, color: _dashBlue, size: 18),
-              SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: _dashText,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-              ),
-            ],
+          Text(
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: _dashText,
+              fontSize: 15,
+              fontWeight: FontWeight.w900,
+            ),
           ),
           SizedBox(height: 14),
           Container(height: 1, color: _dashBorder.withOpacity(0.35)),
@@ -62,7 +53,6 @@ extension StatisticsPageStatePart03 on _StatisticsPageState {
   Widget _buildSrsDistributionPanel(StatisticsData data) {
     return this._dashCard(
       title: 'PHÂN BỐ CẤP ĐỘ SRS',
-      icon: Icons.layers_rounded,
       child: Column(
         children: data.srsItems.map((item) {
           final percent = this._percent(item.count, data.totalCards);
@@ -118,7 +108,6 @@ extension StatisticsPageStatePart03 on _StatisticsPageState {
   Widget _buildDueSchedulePanel(StatisticsData data) {
     return this._dashCard(
       title: 'LỊCH THẺ ĐẾN HẠN (7 NGÀY TỚI)',
-      icon: Icons.hourglass_empty_rounded,
       minHeight: 306,
       child: Column(
         children: [
@@ -145,7 +134,6 @@ extension StatisticsPageStatePart03 on _StatisticsPageState {
   Widget _buildLanguageDistributionPanel(StatisticsData data) {
     return this._dashCard(
       title: 'CƠ CẤU NGÔN NGỮ HỌC',
-      icon: Icons.translate_rounded,
       minHeight: 242,
       child: data.languageItems.isEmpty
           ? this._dashEmpty('Chưa có dữ liệu ngôn ngữ')
@@ -219,7 +207,6 @@ extension StatisticsPageStatePart03 on _StatisticsPageState {
   Widget _buildOverviewPanel(StatisticsData data) {
     return this._dashCard(
       title: 'CHỈ SỐ TỔNG QUAN',
-      icon: Icons.bar_chart_rounded,
       child: LayoutBuilder(
         builder: (context, constraints) {
           final columns = constraints.maxWidth < 620 ? 2 : 4;
@@ -266,7 +253,6 @@ extension StatisticsPageStatePart03 on _StatisticsPageState {
   Widget _buildMemoryChallengePanel(StatisticsData data) {
     return this._dashCard(
       title: 'CHỈ SỐ GHI NHỚ & THỬ THÁCH',
-      icon: Icons.insights_rounded,
       child: LayoutBuilder(
         builder: (context, constraints) {
           final columns = constraints.maxWidth < 440 ? 1 : 2;
@@ -360,7 +346,6 @@ extension StatisticsPageStatePart03 on _StatisticsPageState {
 
     return this._dashCard(
       title: 'TỈ LỆ TRẠNG THÁI THẺ',
-      icon: Icons.radio_button_checked_rounded,
       minHeight: 240,
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,

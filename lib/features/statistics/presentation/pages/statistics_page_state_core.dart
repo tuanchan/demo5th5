@@ -12,6 +12,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
   final Map<int, int> _courseSrsLevelDraft = {};
   final Map<int, DateTime> _courseSrsDateDraft = {};
   bool _srsOnlyDueToday = true;
+  bool _isDashboardRefreshing = false;
 
   List<Map<String, Object?>> _extractSrsImportItems(Object? decoded) {
     final source = decoded is Map ? decoded['items'] : decoded;

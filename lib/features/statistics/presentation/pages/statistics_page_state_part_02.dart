@@ -189,48 +189,49 @@ extension StatisticsPageStatePart02 on _StatisticsPageState {
     ''');
     final srs = srsRows.isEmpty ? <String, Object?>{} : srsRows.first;
 
-    final dueScheduleItems = <DueScheduleItem>[];
-    for (var i = 0; i < 7; i++) {
-      final start = todayStart.add(Duration(days: i));
-      final end = todayStart.add(Duration(days: i + 1));
-      final rows = await db.rawQuery(
-        i == 0
-            ? '''
-              SELECT COUNT(*) AS count
-              FROM cards ca
-              INNER JOIN courses c ON c.id = ca.courseId
-              INNER JOIN review_states rs ON rs.cardId = ca.id
-              WHERE ca.deletedAt IS NULL
-                AND ca.isHidden = 0
-                AND c.deletedAt IS NULL
-                AND COALESCE(rs.level, 0) > 0
-                AND rs.nextReviewAt IS NOT NULL
-                AND rs.nextReviewAt < ?
-            '''
-            : '''
-              SELECT COUNT(*) AS count
-              FROM cards ca
-              INNER JOIN courses c ON c.id = ca.courseId
-              INNER JOIN review_states rs ON rs.cardId = ca.id
-              WHERE ca.deletedAt IS NULL
-                AND ca.isHidden = 0
-                AND c.deletedAt IS NULL
-                AND COALESCE(rs.level, 0) > 0
-                AND rs.nextReviewAt IS NOT NULL
-                AND rs.nextReviewAt >= ?
-                AND rs.nextReviewAt < ?
-            ''',
-        i == 0
-            ? [end.toIso8601String()]
-            : [start.toIso8601String(), end.toIso8601String()],
-      );
-      dueScheduleItems.add(
-        DueScheduleItem(
-          label: i == 0 ? 'Hôm nay' : (i == 1 ? 'Ngày mai' : 'Ngày $i'),
-          count: rows.isEmpty ? 0 : this._asInt(rows.first['count']),
-        ),
-      );
+    // nextReviewAt can contain either a device-local ISO value or a timestamp
+    // with a server timezone offset. Comparing those strings in SQLite puts
+    // some cards on the wrong day, so normalize every value to local time.
+    final scheduleRows = await db.rawQuery('''
+      SELECT rs.nextReviewAt
+      FROM cards ca
+      INNER JOIN courses c ON c.id = ca.courseId
+      INNER JOIN review_states rs ON rs.cardId = ca.id
+      WHERE ca.deletedAt IS NULL
+        AND ca.isHidden = 0
+        AND c.deletedAt IS NULL
+        AND COALESCE(rs.level, 0) > 0
+        AND rs.nextReviewAt IS NOT NULL
+        AND TRIM(rs.nextReviewAt) <> ''
+    ''');
+    final scheduleCounts = List<int>.filled(7, 0);
+    for (final row in scheduleRows) {
+      final parsed = DateTime.tryParse(row['nextReviewAt']?.toString() ?? '');
+      if (parsed == null) continue;
+      final dueAt = parsed.toLocal();
+      if (dueAt.isBefore(tomorrowStart)) {
+        scheduleCounts[0]++;
+        continue;
+      }
+      for (var i = 1; i < 7; i++) {
+        final start = todayStart.add(Duration(days: i));
+        final end = todayStart.add(Duration(days: i + 1));
+        if (!dueAt.isBefore(start) && dueAt.isBefore(end)) {
+          scheduleCounts[i]++;
+          break;
+        }
+      }
     }
+
+    final dueScheduleItems = List<DueScheduleItem>.generate(7, (i) {
+      final date = todayStart.add(Duration(days: i));
+      final label = i == 0
+          ? 'Hôm nay'
+          : i == 1
+              ? 'Ngày mai'
+              : '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}';
+      return DueScheduleItem(label: label, count: scheduleCounts[i]);
+    });
 
     final languageRows = await db.rawQuery('''
       SELECT c.languageCode, COUNT(ca.id) AS cardCount
@@ -360,12 +361,26 @@ extension StatisticsPageStatePart02 on _StatisticsPageState {
     });
   }
 
-  /// Refreshes only the SRS management table without reloading dashboard data.
-  void _refreshSrsTable() {
-    if (!mounted) return;
-    setState(() {
-      _srsManagerFuture = this._loadSrsEditorItems();
-    });
+  Future<void> _refreshDashboard() async {
+    if (!mounted || _isDashboardRefreshing) return;
+    setState(() => _isDashboardRefreshing = true);
+
+    final statisticsFuture = this.loadStatistics();
+    final srsManagerFuture = this._loadSrsEditorItems();
+    try {
+      await Future.wait([statisticsFuture, srsManagerFuture]);
+      if (!mounted) return;
+      setState(() {
+        // Both futures are already complete, so the current dashboard remains
+        // visible during refresh and is replaced without a full-page spinner.
+        _future = statisticsFuture;
+        _srsManagerFuture = srsManagerFuture;
+      });
+    } catch (error) {
+      debugPrint('REFRESH SRS DASHBOARD ERROR: $error');
+    } finally {
+      if (mounted) setState(() => _isDashboardRefreshing = false);
+    }
   }
 
   Widget _buildDashboard(StatisticsData data) {
@@ -373,7 +388,18 @@ extension StatisticsPageStatePart02 on _StatisticsPageState {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         this._buildDashboardTopBar(),
-        SizedBox(height: 16),
+        SizedBox(height: 8),
+        SizedBox(
+          height: 3,
+          child: _isDashboardRefreshing
+              ? LinearProgressIndicator(
+                  minHeight: 3,
+                  color: _dashBlue,
+                  backgroundColor: _dashBorder.withOpacity(0.28),
+                )
+              : const SizedBox.shrink(),
+        ),
+        SizedBox(height: 13),
         LayoutBuilder(
           builder: (context, constraints) {
             final wide = constraints.maxWidth >= 980;
@@ -453,13 +479,8 @@ extension StatisticsPageStatePart02 on _StatisticsPageState {
           ),
         ),
         this._dashIconButton(
-          icon: Icons.edit_calendar_rounded,
-          onTap: this.openSrsEditor,
-        ),
-        SizedBox(width: 8),
-        this._dashIconButton(
           icon: Icons.refresh_rounded,
-          onTap: this._refreshSrsTable,
+          onTap: this._refreshDashboard,
         ),
       ],
     );
@@ -472,15 +493,10 @@ extension StatisticsPageStatePart02 on _StatisticsPageState {
     return InkWell(
       borderRadius: BorderRadius.circular(12),
       onTap: onTap,
-      child: Container(
+      child: SizedBox(
         width: 42,
         height: 42,
-        decoration: BoxDecoration(
-          color: _dashPanel,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: _dashBorder),
-        ),
-        child: Icon(icon, color: _dashText, size: 22),
+        child: Center(child: Icon(icon, color: _dashText, size: 24)),
       ),
     );
   }

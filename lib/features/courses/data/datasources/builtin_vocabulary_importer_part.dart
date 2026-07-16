@@ -9,6 +9,35 @@ class BuiltInVocabularyImporter {
     await AppDatabase.instance.ensureTopicSchema();
     final db = await AppDatabase.instance.database;
     await db.transaction((txn) async {
+      // Topics named "11" and "22" were created by a faulty import. Remove
+      // their dependent data first so they cannot be shown on the home screen
+      // when the app starts.
+      await txn.rawDelete(
+        '''
+        DELETE FROM cards
+        WHERE courseId IN (
+          SELECT id FROM courses
+          WHERE topicId IN (
+            SELECT id FROM topics WHERE trim(name) IN (?, ?)
+          )
+        )
+        ''',
+        ['11', '22'],
+      );
+      await txn.rawDelete(
+        '''
+        DELETE FROM courses
+        WHERE topicId IN (
+          SELECT id FROM topics WHERE trim(name) IN (?, ?)
+        )
+        ''',
+        ['11', '22'],
+      );
+      await txn.rawDelete(
+        'DELETE FROM topics WHERE trim(name) IN (?, ?)',
+        ['11', '22'],
+      );
+
       // Bundled vocabulary is reference data shipped with the app, not user
       // data. Delete it physically so it cannot create hundreds of sync
       // tombstones. The sync service independently removes old cloud copies.

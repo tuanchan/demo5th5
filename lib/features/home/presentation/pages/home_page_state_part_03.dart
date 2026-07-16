@@ -617,11 +617,17 @@ extension HomePageStatePart03 on _HomePageState {
       this.showHomeMessage("Đã xóa chủ đề");
       if (syncDeletion) {
         unawaited(
-          SupabaseSyncService.instance.syncPendingChanges().then((syncResult) {
-            if (syncResult.hasError) {
-              debugPrint('DELETE TOPIC SYNC ERROR: ${syncResult.error}');
-            }
-          }),
+          SupabaseSyncService.instance
+              .markRemoteCoursesDeleted(courseIds, deletedAt: now)
+              .then((_) => SupabaseSyncService.instance.syncPendingChanges())
+              .then((syncResult) {
+                if (syncResult.hasError) {
+                  debugPrint('DELETE TOPIC SYNC ERROR: ${syncResult.error}');
+                }
+              })
+              .catchError((error, stackTrace) {
+                debugPrint('DELETE TOPIC REMOTE ERROR: $error\n$stackTrace');
+              }),
         );
       }
     } catch (e, stackTrace) {

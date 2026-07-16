@@ -233,7 +233,7 @@ class _WritingPracticePageState extends State<WritingPracticePage> {
     }
   }
 
-  Future<List<StudyCardItem>> _loadVocabulary() async {
+  Future<List<StudyCardItem>> _loadVocabulary({int? limit = 90}) async {
     final courseId = _selectedCourseId;
     if (courseId == null) return [];
     final db = await AppDatabase.instance.database;
@@ -244,7 +244,7 @@ class _WritingPracticePageState extends State<WritingPracticePage> {
       orderBy: 'position ASC, id ASC',
     );
     final cards = rows.map(StudyCardItem.fromMap).toList()..shuffle();
-    return cards.take(90).toList();
+    return limit == null ? cards : cards.take(limit).toList();
   }
 
   String _languageName(String code) {
@@ -608,22 +608,103 @@ Schema: {"score":82,"overallFeedback":"nhận xét","suggestedRewrite":"bản vi
     });
   }
 
-  String _buildImportPrompt() {
+  String _promptLanguageName(String code) {
+    final normalized = code.toLowerCase();
+    if (normalized.startsWith('zh')) return 'Tiếng Trung (Chinese)';
+    if (normalized.startsWith('ja')) return 'Tiếng Nhật (Japanese)';
+    if (normalized.startsWith('ko')) return 'Tiếng Hàn (Korean)';
+    if (normalized.startsWith('fr')) return 'Tiếng Pháp (French)';
+    if (normalized.startsWith('de')) return 'Tiếng Đức (German)';
+    if (normalized.startsWith('es')) return 'Tiếng Tây Ban Nha (Spanish)';
+    if (normalized.startsWith('vi')) return 'Tiếng Việt (Vietnamese)';
+    return 'Tiếng Anh (English)';
+  }
+
+  String _buildImportPrompt(List<StudyCardItem> cards) {
     final course = _selectedCourse;
     final info = _difficultyInfo;
     final code = _targetLanguageCode;
+    final languageName = _promptLanguageName(code);
+    final promptSentences = _difficulty == 'basic' ? 3 : info.sentences;
+    final promptInstruction = _difficulty == 'basic'
+        ? 'câu ngắn, cấu trúc quen thuộc, ít mệnh đề phụ, phù hợp để luyện nền tảng'
+        : info.instruction;
+    final topic = _topicController.text.trim().isEmpty
+        ? course?.title ?? 'giao tiếp đời thường'
+        : _topicController.text.trim();
+    final vocabulary = cards
+        .map(
+          (card) => <String, String>{
+            'term': card.term.trim(),
+            'meaning': card.definition.trim(),
+            'pinyin': card.pronunciation.trim(),
+          },
+        )
+        .toList();
+    final vocabularyJson = const JsonEncoder.withIndent('  ').convert(
+      vocabulary,
+    );
+    final suggestedParagraphs = cards.isEmpty
+        ? 0
+        : (cards.length / 5).ceil();
     return '''
-Hãy tạo JSON thuần để import vào app luyện viết. Không dùng markdown.
-Ngôn ngữ đích: ${_languageName(code)} ($code)
-Chủ đề: ${_topicController.text.trim().isEmpty ? course?.title ?? 'giao tiếp đời thường' : _topicController.text.trim()}
-Độ khó: ${info.label}; khoảng ${info.sentences} câu tiếng Việt.
-Tạo vietnameseText tự nhiên và targetText cùng ý bằng ngôn ngữ đích.
-Schema: {"title":"tiêu đề","topic":"chủ đề","difficulty":"${info.label}","vietnameseText":"đoạn tiếng Việt","targetText":"bản đúng","targetLanguageName":"${_languageName(code)}","targetLanguageCode":"$code","usedVocabulary":[],"contextNote":"ghi chú"}
+Hãy tạo JSON để import vào app luyện viết.
+
+Ngôn ngữ đích: $languageName ($code)
+Chủ đề/ngữ cảnh: $topic
+Mức độ: ${info.label}
+Số câu tiếng Việt mỗi đoạn: khoảng $promptSentences câu.
+Yêu cầu: $promptInstruction.
+
+Học phần hiện tại: ${course?.title ?? 'Chưa chọn học phần'}
+
+Danh sách từ vựng học phần hiện tại JSON (đã trộn ngẫu nhiên, tổng ${cards.length} từ/cụm):
+$vocabularyJson
+
+Yêu cầu tạo đoạn:
+- Tự đếm tổng số từ vựng trong JSON.
+- Tự tính số đoạn phù hợp để phủ hết từ vựng.
+- Mỗi đoạn dùng linh hoạt khoảng 4-6 từ/cụm từ khác nhau.
+- Công thức gợi ý: số đoạn = làm tròn lên của tổng số từ vựng / 5. Với danh sách này, số đoạn gợi ý là $suggestedParagraphs.
+- Nếu còn dư từ, phân bổ vào các đoạn cuối.
+- Ưu tiên dùng gần hết từ vựng, nhưng không ép nếu câu bị mất tự nhiên.
+- Mỗi đoạn phải có tổ hợp từ vựng khác nhau, tránh lặp lại nếu chưa cần.
+- Nội dung giống TOEIC Part 1: mô tả người, đồ vật, văn phòng, thiết bị, cảnh làm việc.
+- Đoạn tiếng Việt phải tự nhiên, ngắn, thực tế, không văn phong AI.
+- targetText là bản viết đúng bằng ngôn ngữ đích, cùng ý với vietnameseText.
+- Dùng từ vựng tự nhiên trong targetText; vietnameseText phải giữ cùng ý để người học dịch/viết lại.
+- Độ khó phải bám đúng mức độ đã chọn.
+- Không dùng từ quá khó, không viết dài.
+
+Cách trả lời:
+- Mỗi đoạn đặt trong một text box/code block JSON riêng để dễ sao chép.
+- Ghi rõ: Đoạn 1, Đoạn 2, Đoạn 3...
+- Không gộp nhiều đoạn vào một JSON lớn.
+- Mỗi text box chỉ chứa đúng 1 object JSON theo schema sau:
+
+{
+  "title": "tiêu đề ngắn",
+  "topic": "chủ đề",
+  "difficulty": "${info.label}",
+  "vietnameseText": "đoạn tiếng Việt để người học nhìn và viết lại",
+  "targetText": "bản đúng bằng ngôn ngữ đích để app dùng chấm",
+  "targetLanguageName": "$languageName",
+  "targetLanguageCode": "$code",
+  "usedVocabulary": ["từ/cụm đã dùng nếu có"],
+  "contextNote": "ghi chú ngắn bằng tiếng Việt"
+}
 ''';
   }
 
   Future<void> _copyPrompt() async {
-    await Clipboard.setData(ClipboardData(text: _buildImportPrompt()));
+    if (_selectedCourse == null) {
+      _showMessage('Hãy chọn học phần trước');
+      return;
+    }
+    final cards = await _loadVocabulary(limit: null);
+    await Clipboard.setData(
+      ClipboardData(text: _buildImportPrompt(cards)),
+    );
     _showMessage('Đã chép prompt tạo JSON');
   }
 
@@ -706,6 +787,19 @@ Schema: {"title":"tiêu đề","topic":"chủ đề","difficulty":"${info.label}
   void _showMessage(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _scrollToWidget(BuildContext widgetContext) async {
+    await Future.delayed(const Duration(milliseconds: 280));
+    if (!mounted) return;
+    try {
+      Scrollable.ensureVisible(
+        widgetContext,
+        alignment: 0.15,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+      );
+    } catch (_) {}
   }
 
   TextStyle _titleStyle(double size) => TextStyle(
@@ -982,6 +1076,7 @@ Schema: {"title":"tiêu đề","topic":"chủ đề","difficulty":"${info.label}
               _busyPhase == 'generate' ? 'Đang tạo...' : 'Tạo đoạn viết',
               Icons.auto_awesome_rounded,
               _busy ? null : _generate,
+              primary: false,
               iconWidget: geminiColorIcon(size: 19),
             ),
           ),
@@ -1033,39 +1128,42 @@ Schema: {"title":"tiêu đề","topic":"chủ đề","difficulty":"${info.label}
           width: math
               .max(80, math.min(180, item.answer.length * 14.0))
               .toDouble(),
-          child: TextField(
-            controller: item.controller,
-            cursorColor: Color(0xff9ab9ff),
-            textAlign: TextAlign.center,
-            textInputAction: i == _clozeItems.length - 1
-                ? TextInputAction.done
-                : TextInputAction.next,
-            onEditingComplete: () {
-              if (i == _clozeItems.length - 1) {
-                FocusScope.of(context).unfocus();
-                return;
-              }
-              FocusScope.of(context).nextFocus();
-            },
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-            ),
-            decoration: InputDecoration(
-              isDense: true,
-              filled: false,
-              contentPadding: EdgeInsets.fromLTRB(4, 2, 4, 5),
-              enabledBorder: UnderlineInputBorder(
-                borderSide: BorderSide(
-                  color: Color(0xffb7ccff),
-                  width: 2,
-                ),
+          child: Builder(
+            builder: (textFieldContext) => TextField(
+              controller: item.controller,
+              cursorColor: Color(0xff9ab9ff),
+              textAlign: TextAlign.center,
+              onTap: () => _scrollToWidget(textFieldContext),
+              textInputAction: i == _clozeItems.length - 1
+                  ? TextInputAction.done
+                  : TextInputAction.next,
+              onEditingComplete: () {
+                if (i == _clozeItems.length - 1) {
+                  FocusScope.of(context).unfocus();
+                  return;
+                }
+                FocusScope.of(context).nextFocus();
+              },
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
               ),
-              focusedBorder: UnderlineInputBorder(
-                borderSide: BorderSide(
-                  color: Color(0xff4257ff),
-                  width: 2.4,
+              decoration: InputDecoration(
+                isDense: true,
+                filled: false,
+                contentPadding: EdgeInsets.fromLTRB(4, 2, 4, 5),
+                enabledBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(
+                    color: Color(0xffb7ccff),
+                    width: 2,
+                  ),
+                ),
+                focusedBorder: UnderlineInputBorder(
+                  borderSide: BorderSide(
+                    color: Color(0xff4257ff),
+                    width: 2.4,
+                  ),
                 ),
               ),
             ),
@@ -1495,15 +1593,18 @@ Schema: {"title":"tiêu đề","topic":"chủ đề","difficulty":"${info.label}
             ],
             if (_practiceMode != 'cloze') ...[
               _label('Bài viết của bạn (${script.targetLanguageCode})'),
-              TextField(
-                controller: _answerController,
-                minLines: 7,
-                maxLines: 14,
-                style: TextStyle(color: Colors.white, height: 1.5),
-                decoration: _inputDecoration(
-                  _practiceMode == 'dictation'
-                      ? 'Chép lại toàn bộ nội dung vừa nghe'
-                      : 'Viết lại toàn bộ ý ở trên bằng ngôn ngữ đích',
+              Builder(
+                builder: (textFieldContext) => TextField(
+                  controller: _answerController,
+                  minLines: 7,
+                  maxLines: 14,
+                  onTap: () => _scrollToWidget(textFieldContext),
+                  style: TextStyle(color: Colors.white, height: 1.5),
+                  decoration: _inputDecoration(
+                    _practiceMode == 'dictation'
+                        ? 'Chép lại toàn bộ nội dung vừa nghe'
+                        : 'Viết lại toàn bộ ý ở trên bằng ngôn ngữ đích',
+                  ),
                 ),
               ),
               SizedBox(height: 14),
@@ -1522,6 +1623,7 @@ Schema: {"title":"tiêu đề","topic":"chủ đề","difficulty":"${info.label}
                   _busyPhase == 'grade' ? 'Đang chấm...' : 'Gửi chấm',
                   Icons.fact_check_outlined,
                   _busy ? null : _gradeWriting,
+                  primary: false,
                   iconWidget: geminiColorIcon(size: 19),
                 ),
                 _actionButton(

@@ -110,20 +110,35 @@ class SupabaseSyncService {
     }
 
     try {
+      // Push newly created topics/courses/cards first. Otherwise an SRS row can
+      // be skipped because its card does not exist on Supabase yet.
+      final dependencySync = await syncPendingChanges();
       final db = await AppDatabase.instance.database;
       final ownerId = SupabaseConfig.currentUser!.id;
       // A manually assigned due date is valid even at SRS level 0, so push
       // every local review state instead of filtering only progressed cards.
-      final localStates = await db.query('review_states');
+      final localStates = await db.rawQuery('''
+        SELECT rs.*
+        FROM review_states rs
+        INNER JOIN cards ca ON ca.id = rs.cardId
+        INNER JOIN courses c ON c.id = ca.courseId
+        WHERE ca.deletedAt IS NULL
+          AND c.deletedAt IS NULL
+          AND COALESCE(c.hasLocalNameConflict, 0) = 0
+      ''');
       final payload = <Map<String, dynamic>>[];
       final skippedCardIds = <int>[];
+      final failedRemoteCardIds = <String>[];
+      final missingScheduleCardIds = <String>{};
       final timestamp = DateTime.now().toUtc().toIso8601String();
-      var verifiedScheduleCount = 0;
 
       for (final state in localStates) {
         final cardId = _localInt(state['cardId']);
         if (cardId == null) continue;
-        final remoteCardId = await findRemoteCardId(cardId);
+        final mappedRemoteCardId = _cardRemoteIdByLocal['$cardId'];
+        final remoteCardId = mappedRemoteCardId?.isNotEmpty == true
+            ? mappedRemoteCardId
+            : await findRemoteCardId(cardId);
         if (remoteCardId == null || remoteCardId.isEmpty) {
           skippedCardIds.add(cardId);
           continue;
@@ -138,37 +153,121 @@ class SupabaseSyncService {
 
       for (var start = 0; start < payload.length; start += 200) {
         final end = math.min(start + 200, payload.length);
-        final savedRows = await SupabaseConfig.client
+        final chunk = payload.sublist(start, end);
+        try {
+          final savedRows = await SupabaseConfig.client
+              .from('review_states')
+              .upsert(chunk, onConflict: 'owner_id,card_id')
+              .select('card_id,next_review_at,interval_days');
+          if (savedRows.length != chunk.length) {
+            throw StateError(
+              'Server chỉ trả về ${savedRows.length}/${chunk.length} SRS',
+            );
+          }
+          missingScheduleCardIds.addAll(
+            savedRows
+                .where((row) {
+                  final value = row['next_review_at']?.toString() ?? '';
+                  return value.isEmpty;
+                })
+                .map((row) => row['card_id']?.toString())
+                .whereType<String>(),
+          );
+        } catch (_) {
+          // One stale foreign key must not prevent every valid SRS state in
+          // the same batch from reaching Supabase.
+          for (final row in chunk) {
+            try {
+              final savedRows = await SupabaseConfig.client
+                  .from('review_states')
+                  .upsert([row], onConflict: 'owner_id,card_id')
+                  .select('card_id,next_review_at,interval_days');
+              if (savedRows.length != 1) {
+                throw StateError('Server không xác nhận SRS vừa lưu');
+              }
+              final savedSchedule =
+                  savedRows.first['next_review_at']?.toString() ?? '';
+              if (savedSchedule.isEmpty) {
+                missingScheduleCardIds.add(row['card_id'].toString());
+              }
+            } catch (_) {
+              failedRemoteCardIds.add(row['card_id']?.toString() ?? '?');
+            }
+          }
+        }
+      }
+
+      // Some existing server rows can acknowledge the conflict update while
+      // still returning an empty schedule. Apply those SRS fields explicitly
+      // before the final read-back verification.
+      for (final cardId in missingScheduleCardIds) {
+        final source = payload.where((row) => row['card_id'] == cardId);
+        if (source.isEmpty) continue;
+        final row = source.first;
+        await SupabaseConfig.client
             .from('review_states')
-            .upsert(payload.sublist(start, end), onConflict: 'owner_id,card_id')
-            .select('card_id,next_review_at,interval_days');
-        verifiedScheduleCount += savedRows.where((row) {
-          final nextReviewAt = row['next_review_at']?.toString() ?? '';
-          return nextReviewAt.isNotEmpty;
-        }).length;
+            .update({
+              'level': row['level'],
+              'ease_factor': row['ease_factor'],
+              'interval_days': row['interval_days'],
+              'repetition_count': row['repetition_count'],
+              'correct_count': row['correct_count'],
+              'wrong_count': row['wrong_count'],
+              'last_reviewed_at': row['last_reviewed_at'],
+              'next_review_at': row['next_review_at'],
+              'updated_at': timestamp,
+            })
+            .eq('owner_id', ownerId)
+            .eq('card_id', cardId);
       }
 
       final expectedScheduleCount = payload.where((row) {
         final nextReviewAt = row['next_review_at']?.toString() ?? '';
         return nextReviewAt.isNotEmpty;
       }).length;
+      var verifiedStateCount = 0;
+      var verifiedScheduleCount = 0;
+      final remoteCardIds = payload
+          .map((row) => row['card_id']?.toString())
+          .whereType<String>()
+          .toSet()
+          .toList();
+      for (var start = 0; start < remoteCardIds.length; start += 200) {
+        final end = math.min(start + 200, remoteCardIds.length);
+        final rows = await SupabaseConfig.client
+            .from('review_states')
+            .select('card_id,next_review_at,interval_days')
+            .eq('owner_id', ownerId)
+            .inFilter('card_id', remoteCardIds.sublist(start, end));
+        verifiedStateCount += rows.length;
+        verifiedScheduleCount += rows.where((row) {
+          final nextReviewAt = row['next_review_at']?.toString() ?? '';
+          return nextReviewAt.isNotEmpty;
+        }).length;
+      }
       final errors = <String>[
+        if (dependencySync.hasError)
+          'Lỗi đồng bộ dữ liệu cha: ${dependencySync.error}',
         if (skippedCardIds.isNotEmpty)
           'Không tìm thấy ${skippedCardIds.length} thẻ trên server',
+        if (failedRemoteCardIds.isNotEmpty)
+          'Không đẩy được SRS của ${failedRemoteCardIds.length} thẻ',
+        if (verifiedStateCount != payload.length - failedRemoteCardIds.length)
+          'Server chỉ lưu $verifiedStateCount/${payload.length - failedRemoteCardIds.length} SRS',
         if (verifiedScheduleCount != expectedScheduleCount)
           'Server chỉ xác nhận $verifiedScheduleCount/$expectedScheduleCount lịch ôn',
       ];
       print(
-        'SRS SERVER RESULT: states=${payload.length}, '
+        'SRS SERVER RESULT: states=$verifiedStateCount/${payload.length}, '
         'scheduled=$verifiedScheduleCount/$expectedScheduleCount, '
         'skippedCards=${skippedCardIds.length}',
       );
       return SyncResult(
-        pushed: payload.length,
+        pushed: verifiedStateCount,
         pulled: 0,
         error: errors.isEmpty ? null : errors.join(' | '),
         logs: [
-          'SRS: đẩy ${payload.length} trạng thái',
+          'SRS: server xác nhận $verifiedStateCount/${payload.length} trạng thái',
           'Lịch ôn: server xác nhận $verifiedScheduleCount/$expectedScheduleCount ngày',
         ],
       );
@@ -478,11 +577,11 @@ class SupabaseSyncService {
           await _markLocalMergeConflicts(db);
         }
       }
-      if (_operation != _SyncOperation.livePush ||
-          _identityOwnerId != ownerId) {
-        await _prepareIdentityMaps(db, client, ownerId);
-        _identityOwnerId = ownerId;
-      }
+      // Refresh on every pass. Pull/cleanup may change local IDs while a hot
+      // reload keeps this singleton alive, making cached parent IDs stale and
+      // causing foreign-key failures for study sessions and SRS.
+      await _prepareIdentityMaps(db, client, ownerId);
+      _identityOwnerId = ownerId;
 
       // Only rows changed after this authenticated session began may upload.
       // Pull/merge never uploads anything.
@@ -810,21 +909,45 @@ class SupabaseSyncService {
       }
 
       if (toPush.isNotEmpty) {
-        try {
-          const chunkSize = 200;
-          for (var i = 0; i < toPush.length; i += chunkSize) {
-            _throwIfSyncCancelled();
-            final chunk = toPush.sublist(i, math.min(i + chunkSize, toPush.length));
+        const chunkSize = 200;
+        for (var i = 0; i < toPush.length; i += chunkSize) {
+          _throwIfSyncCancelled();
+          final chunk = toPush.sublist(
+            i,
+            math.min(i + chunkSize, toPush.length),
+          );
+          try {
             await client.from(remoteTable).upsert(
               chunk,
               onConflict: remoteConflictColumns ?? idColumn,
             );
             pushed += chunk.length;
+          } catch (batchError) {
+            print(
+              'SYNC PUSH BATCH ERROR ($localTable), retrying rows: '
+              '$batchError',
+            );
+            // PostgREST applies a batch atomically. Retry its rows separately
+            // so one stale foreign key cannot block every valid session/result.
+            for (final remoteData in chunk) {
+              try {
+                await client.from(remoteTable).upsert(
+                  [remoteData],
+                  onConflict: remoteConflictColumns ?? idColumn,
+                );
+                pushed++;
+              } catch (rowError) {
+                final rowId = remoteData[idColumn]?.toString() ?? '?';
+                errors.add('push row $rowId: $rowError');
+                print(
+                  'SYNC PUSH ROW ERROR ($localTable row $rowId): $rowError',
+                );
+              }
+            }
           }
+        }
+        if (pushed > 0) {
           _prefetchedRemoteRows.remove(remoteTable);
-        } catch (e) {
-          errors.add('push batch error: $e');
-          print('SYNC PUSH BATCH ERROR ($localTable): $e');
         }
       }
 
@@ -840,6 +963,19 @@ class SupabaseSyncService {
         ownerId: ownerId,
         lastSyncAt: lastSyncAt,
       );
+
+      final existingTopicIds = <int>{};
+      final deletedTopicIds = <int>{};
+      if (localTable == 'courses') {
+        final rows = await db.query('topics', columns: ['id', 'deletedAt']);
+        for (final r in rows) {
+          final id = r['id'] as int?;
+          if (id != null) {
+            existingTopicIds.add(id);
+            if (r['deletedAt'] != null) deletedTopicIds.add(id);
+          }
+        }
+      }
 
       final existingCardIds = <int>{};
       final deletedCardIds = <int>{};
@@ -861,7 +997,8 @@ class SupabaseSyncService {
 
       final existingCourseIds = <int>{};
       final deletedCourseIds = <int>{};
-      if (localTable == 'study_sessions' ||
+      if (localTable == 'cards' ||
+          localTable == 'study_sessions' ||
           localTable == 'review_sentence_questions') {
         final rows = await db.query('courses', columns: ['id', 'deletedAt']);
         for (final r in rows) {
@@ -929,6 +1066,28 @@ class SupabaseSyncService {
 
             // Check for orphaned/deleted parent records to prevent pulling data
             // for soft-deleted/deleted cards or courses.
+            if (localTable == 'courses') {
+              final topicId = localData['topicId'];
+              if (topicId != null &&
+                  (!existingTopicIds.contains(topicId) ||
+                      deletedTopicIds.contains(topicId))) {
+                // Keep an active orphaned course usable instead of violating
+                // SQLite's topic foreign key. It will appear as "Chủ đề khác".
+                localData['topicId'] = null;
+              }
+            }
+
+            if (localTable == 'cards') {
+              final courseId = localData['courseId'];
+              if (courseId == null ||
+                  !existingCourseIds.contains(courseId) ||
+                  deletedCourseIds.contains(courseId)) {
+                // The server may retain active child rows after their course
+                // was tombstoned. Ignore them instead of failing the snapshot.
+                continue;
+              }
+            }
+
             if (localTable == 'review_states' ||
                 localTable == 'card_examples' ||
                 localTable == 'review_sentence_questions' ||
@@ -2245,6 +2404,83 @@ class SupabaseSyncService {
           .eq('owner_id', ownerId)
           .eq('course_id', remoteCourseId);
     }
+  }
+
+  Future<void> markRemoteCoursesDeleted(
+    Iterable<int> localCourseIds, {
+    required String deletedAt,
+  }) async {
+    if (!SupabaseConfig.isLoggedIn) return;
+
+    final db = await AppDatabase.instance.database;
+    final ownerId = SupabaseConfig.currentUser!.id;
+    final remoteCourseIds = <String>[];
+    final remoteCardIds = <String>[];
+    final requestedCourseIds = localCourseIds.toSet().toList();
+    if (requestedCourseIds.isEmpty) return;
+
+    final placeholders = List.filled(requestedCourseIds.length, '?').join(',');
+    final conflictCourseIds = (await db.query(
+      'courses',
+      columns: ['id'],
+      where:
+          'id IN ($placeholders) AND COALESCE(hasLocalNameConflict, 0) = 1',
+      whereArgs: requestedCourseIds,
+    ))
+        .map((row) => row['id'] as int?)
+        .whereType<int>()
+        .toSet();
+
+    for (final localCourseId in requestedCourseIds) {
+      // A conflict copy was never uploaded, so a same-title server course may
+      // belong to another topic and must not be touched.
+      if (conflictCourseIds.contains(localCourseId)) continue;
+      final remoteCourseId = await findRemoteCourseId(localCourseId);
+      if (remoteCourseId != null && remoteCourseId.isNotEmpty) {
+        remoteCourseIds.add(remoteCourseId);
+      }
+    }
+
+    const chunkSize = 100;
+    final uniqueCourseIds = remoteCourseIds.toSet().toList();
+    for (var i = 0; i < uniqueCourseIds.length; i += chunkSize) {
+      final chunk = uniqueCourseIds.sublist(
+        i,
+        math.min(i + chunkSize, uniqueCourseIds.length),
+      );
+      final rows = await SupabaseConfig.client
+          .from('cards')
+          .select('id')
+          .eq('owner_id', ownerId)
+          .inFilter('course_id', chunk);
+      remoteCardIds.addAll(
+        List<Map<String, dynamic>>.from(rows)
+            .map((row) => row['id']?.toString())
+            .whereType<String>(),
+      );
+    }
+
+    Future<void> markDeleted(
+      String table,
+      List<String> remoteIds,
+    ) async {
+      for (var i = 0; i < remoteIds.length; i += chunkSize) {
+        final chunk = remoteIds.sublist(
+          i,
+          math.min(i + chunkSize, remoteIds.length),
+        );
+        await SupabaseConfig.client
+            .from(table)
+            .update({'deleted_at': deletedAt, 'updated_at': deletedAt})
+            .eq('owner_id', ownerId)
+            .inFilter('id', chunk);
+      }
+    }
+
+    // Mark children first so every server row in the deleted topic receives a
+    // tombstone before its parent course is hidden.
+    await markDeleted('cards', remoteCardIds.toSet().toList());
+    await markDeleted('courses', remoteCourseIds.toSet().toList());
   }
 
   Future<void> deleteRemoteCardChildren(int localCardId) async {

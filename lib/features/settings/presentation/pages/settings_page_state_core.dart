@@ -12,6 +12,15 @@ class _SettingsPageState extends State<SettingsPage> {
   bool? accountSyncSucceeded;
   String accountSyncMessage = '';
   List<String> accountSyncLogs = const [];
+  
+  final List<String> geminiModels = const [
+    'gemini-3.1-flash-lite',
+    'gemini-3.5-flash',
+    'gemini-2.5-flash',
+    'gemini-2.5-flash-lite',
+    'gemini-flash-lite-latest',
+  ];
+  String selectedGeminiModel = 'gemini-flash-lite-latest';
 
   final Map<String, String> colorNames = {
     'bg': 'Nền app',

@@ -78,6 +78,59 @@ extension SettingsPageStatePart01 on _SettingsPageState {
                         ),
                       ),
                     ),
+                    SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      value: selectedGeminiModel,
+                      dropdownColor: Color(0xff07090d),
+                      borderRadius: BorderRadius.circular(12),
+                      icon: Icon(
+                        Icons.keyboard_arrow_down_rounded,
+                        color: Color(0xff91a0bd),
+                      ),
+                      style: TextStyle(
+                        color: Color(0xfff8fbff),
+                        fontWeight: FontWeight.w800,
+                        fontSize: 14,
+                      ),
+                      decoration: InputDecoration(
+                        filled: true,
+                        fillColor: Color(0xff07090d),
+                        prefixIcon: Icon(
+                          Icons.psychology_outlined,
+                          color: Color(0xff91a0bd),
+                          size: 20,
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(
+                            color: Color(0xff202634),
+                          ),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide(
+                            color: Color(0xff9ab9ff),
+                            width: 1.2,
+                          ),
+                        ),
+                      ),
+                      items: geminiModels.map((String model) {
+                        return DropdownMenuItem<String>(
+                          value: model,
+                          child: Text(model),
+                        );
+                      }).toList(),
+                      onChanged: (String? newValue) async {
+                        if (newValue == null) return;
+                        setState(() {
+                          selectedGeminiModel = newValue;
+                        });
+                        await AppSettingsStore.setString(
+                          GeminiFlashLiteClient.modelSettingKey,
+                          newValue,
+                        );
+                      },
+                    ),
                     SizedBox(height: 10),
                     Text(
                       geminiKeyMessage,
@@ -113,60 +166,6 @@ extension SettingsPageStatePart01 on _SettingsPageState {
               ),
               SizedBox(height: 14),
               this._buildAccountSection(),
-              SizedBox(height: 14),
-              this._sectionCard(
-                title: 'Đối chiếu & Xuất bản Database',
-                icon: Icons.storage_rounded,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Các tùy chọn dành cho Nhà phát triển để đồng bộ SQLite và Supabase, hoặc đóng gói dữ liệu vào assets.',
-                      style: TextStyle(
-                        color: Color(0xff91a0bd),
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    SizedBox(height: 14),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: this._actionButton(
-                            text: 'Xuất sang Assets',
-                            icon: Icons.input_rounded,
-                            color: Color(0xff8ee88b),
-                            onTap: () async {
-                              try {
-                                final res = await BackupManager.exportToProjectAssets();
-                                if (mounted) showAppToast(context, res);
-                              } catch (e) {
-                                if (mounted) showAppToast(context, 'Thất bại: $e');
-                              }
-                            },
-                          ),
-                        ),
-                        SizedBox(width: 10),
-                        Expanded(
-                          child: this._actionButton(
-                            text: 'Mở thư mục DB',
-                            icon: Icons.folder_open_rounded,
-                            color: Color(0xffa1a7fb),
-                            onTap: () async {
-                              try {
-                                await BackupManager.openDbFolder();
-                                if (mounted) showAppToast(context, 'Đang mở thư mục database...');
-                              } catch (e) {
-                                if (mounted) showAppToast(context, 'Thất bại: $e');
-                              }
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
             ],
           ),
         ),
@@ -185,10 +184,16 @@ extension SettingsPageStatePart01 on _SettingsPageState {
           GeminiFlashLiteClient.apiKeySettingKey,
         ) ??
         '';
+    final geminiModel =
+        await AppSettingsStore.getString(
+          GeminiFlashLiteClient.modelSettingKey,
+        ) ??
+        GeminiFlashLiteClient.defaultModel;
     if (!mounted) return;
     setState(() {
       themeMode = mode;
       geminiApiKeyController.text = geminiApiKey;
+      selectedGeminiModel = geminiModel;
     });
   }
 
@@ -241,16 +246,11 @@ extension SettingsPageStatePart01 on _SettingsPageState {
   }) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        width: 42,
-        height: 42,
-        decoration: BoxDecoration(
-          color: Color(0xff07090d),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Color(0xff202634), width: 1.0),
-        ),
-        child: Icon(icon, color: Color(0xfff8fbff), size: 20),
+      borderRadius: BorderRadius.circular(20),
+      child: SizedBox(
+        width: 40,
+        height: 40,
+        child: Icon(icon, color: Color(0xfff8fbff), size: 24),
       ),
     );
   }
@@ -272,19 +272,13 @@ extension SettingsPageStatePart01 on _SettingsPageState {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Icon(icon, color: Color(0xff9ab9ff), size: 18),
-              SizedBox(width: 8),
-              Text(
-                title,
-                style: TextStyle(
-                  color: Color(0xfff8fbff),
-                  fontSize: 16,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ],
+          Text(
+            title,
+            style: TextStyle(
+              color: Color(0xfff8fbff),
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+            ),
           ),
           SizedBox(height: 14),
           child,
