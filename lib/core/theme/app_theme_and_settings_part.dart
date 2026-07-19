@@ -175,6 +175,8 @@ class AppThemeController extends ValueNotifier<int> {
 class AppSettingsStore {
   AppSettingsStore._();
 
+  static Timer? _syncDebounce;
+
   static Future<void> _ensureTable(Database db) async {
     await db.execute(
       'CREATE TABLE IF NOT EXISTS app_settings ('
@@ -209,6 +211,18 @@ class AppSettingsStore {
     final db = await AppDatabase.instance.database;
     await _ensureTable(db);
 
+    final currentRows = await db.query(
+      'app_settings',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: [key],
+      limit: 1,
+    );
+    if (currentRows.isNotEmpty &&
+        currentRows.first['value']?.toString() == value) {
+      return;
+    }
+
     await db.insert('app_settings', {
       'key': key,
       'value': value,
@@ -217,7 +231,11 @@ class AppSettingsStore {
     if (SupabaseConfig.isLoggedIn &&
         key != GeminiFlashLiteClient.apiKeySettingKey &&
         !key.startsWith('sync.')) {
-      unawaited(SupabaseSyncService.instance.syncPendingChanges());
+      _syncDebounce?.cancel();
+      _syncDebounce = Timer(const Duration(milliseconds: 350), () {
+        _syncDebounce = null;
+        unawaited(SupabaseSyncService.instance.syncPendingChanges());
+      });
     }
   }
 

@@ -1,6 +1,132 @@
 part of flutterflashcard_main;
 
 extension FlashCardsPageStatePart01Split02 on _FlashCardsPageState {
+  Future<void> refreshRealtimeRows(RealtimeDataChange change) async {
+    final selectedId = selectedCourseId;
+    if (selectedId == null || !mounted) return;
+
+    if (change.tables.contains('topics') ||
+        change.tables.contains('courses') ||
+        change.tables.contains('cards')) {
+      await this._loadAllCourses();
+    }
+
+    if (change.tables.contains('courses') &&
+        change.courseIds.contains(selectedId)) {
+      final db = await AppDatabase.instance.database;
+      final courseRows = await db.query(
+        'courses',
+        columns: ['languageCode'],
+        where: 'id = ? AND deletedAt IS NULL',
+        whereArgs: [selectedId],
+        limit: 1,
+      );
+      if (mounted && courseRows.isNotEmpty) {
+        setState(() {
+          _languageCode =
+              courseRows.first['languageCode']?.toString() ?? _languageCode;
+        });
+      }
+    }
+
+    final cardRowsChanged = change.tables.contains('cards');
+    final dueStateChanged =
+        widget.dueOnly && change.tables.contains('review_states');
+    if ((!cardRowsChanged && !dueStateChanged) || change.cardIds.isEmpty) {
+      return;
+    }
+
+    final db = await AppDatabase.instance.database;
+    final oldCardId = currentCard?.id;
+    final oldVisibleCardIds = visibleOrder
+        .where((index) => index >= 0 && index < allCards.length)
+        .map((index) => allCards[index].id)
+        .toList(growable: false);
+    final replacements = <int, StudyCardItem>{};
+    final tomorrow = DateTime.now();
+    final tomorrowStart = DateTime(
+      tomorrow.year,
+      tomorrow.month,
+      tomorrow.day,
+    ).add(const Duration(days: 1));
+
+    for (final cardId in change.cardIds) {
+      List<Map<String, Object?>> rows;
+      if (widget.dueOnly) {
+        rows = await db.rawQuery(
+          '''
+          SELECT ca.*
+          FROM cards ca
+          INNER JOIN courses c ON c.id = ca.courseId
+          INNER JOIN review_states rs ON rs.cardId = ca.id
+          WHERE ca.id = ?
+            AND ca.deletedAt IS NULL
+            AND ca.isHidden = 0
+            AND c.deletedAt IS NULL
+            AND COALESCE(rs.repetitionCount, 0) > 0
+            AND rs.nextReviewAt IS NOT NULL
+            AND rs.nextReviewAt < ?
+          LIMIT 1
+          ''',
+          [cardId, tomorrowStart.toIso8601String()],
+        );
+      } else {
+        rows = await db.query(
+          'cards',
+          where: 'id = ? AND courseId = ? AND deletedAt IS NULL '
+              'AND isHidden = 0',
+          whereArgs: [cardId, selectedId],
+          limit: 1,
+        );
+      }
+      if (rows.isNotEmpty &&
+          (widget.cardIds == null || widget.cardIds!.contains(cardId))) {
+        replacements[cardId] = StudyCardItem.fromMap(rows.first);
+      }
+    }
+
+    if (!mounted) return;
+    setState(() {
+      allCards.removeWhere((card) => change.cardIds.contains(card.id));
+      allCards.addAll(replacements.values);
+      allCards.sort((a, b) {
+        final byPosition = a.position.compareTo(b.position);
+        return byPosition != 0 ? byPosition : a.id.compareTo(b.id);
+      });
+      final indexByCardId = <int, int>{
+        for (var i = 0; i < allCards.length; i++) allCards[i].id: i,
+      };
+      final eligibleIds = allCards
+          .where((card) => !starredOnly || card.isFavorite)
+          .map((card) => card.id)
+          .toSet();
+      final orderedIds = oldVisibleCardIds
+          .where(eligibleIds.contains)
+          .toList(growable: true);
+      orderedIds.addAll(
+        allCards
+            .map((card) => card.id)
+            .where((id) => eligibleIds.contains(id) && !orderedIds.contains(id)),
+      );
+      visibleOrder = orderedIds
+          .map((id) => indexByCardId[id])
+          .whereType<int>()
+          .toList(growable: false);
+      final preservedPosition = oldCardId == null
+          ? -1
+          : orderedIds.indexOf(oldCardId);
+      currentPos = visibleOrder.isEmpty
+          ? 0
+          : (preservedPosition >= 0
+              ? preservedPosition
+              : currentPos.clamp(0, visibleOrder.length - 1));
+      if (oldCardId != null && currentCard?.id != oldCardId) {
+        isFlipped = false;
+      }
+      if (visibleOrder.isEmpty) showCompletion = false;
+    });
+  }
+
   Future<void> loadCardsForCourse(int? courseId) async {
     if (courseId == null) {
       if (!mounted) return;
@@ -141,8 +267,11 @@ extension FlashCardsPageStatePart01Split02 on _FlashCardsPageState {
     }
   }
 
-  void rebuildVisibleOrder({bool resetPosition = false}) {
-    final oldCardId = currentCard?.id;
+  void rebuildVisibleOrder({
+    bool resetPosition = false,
+    int? preserveCardId,
+  }) {
+    final oldCardId = preserveCardId ?? currentCard?.id;
 
     final indices = <int>[];
     for (int i = 0; i < allCards.length; i++) {

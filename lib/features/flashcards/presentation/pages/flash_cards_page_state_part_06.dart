@@ -63,16 +63,8 @@ extension FlashCardsPageStatePart06 on _FlashCardsPageState {
               child: Center(
                 child: Padding(
                   padding: EdgeInsets.symmetric(horizontal: 24),
-                  child: Text(
+                  child: this.buildAdaptiveCardText(
                     mainText.isEmpty ? "Chưa có thẻ" : mainText,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: Color(0xffeef0f7),
-                      fontSize: mainText.length > 40 ? 34 : 52,
-                      height: 1.15,
-                      fontWeight: FontWeight.w500,
-                      fontFamily: 'Segoe UI',
-                    ),
                   ),
                 ),
               ),
@@ -96,6 +88,90 @@ extension FlashCardsPageStatePart06 on _FlashCardsPageState {
           ],
         ),
       ),
+    );
+  }
+
+
+  Widget buildAdaptiveCardText(String value) {
+    final displayText = value.trim();
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final words = displayText
+            .split(RegExp(r'\s+'))
+            .where((word) => word.isNotEmpty)
+            .toList(growable: false);
+        final baseFontSize = displayText.length > 100
+            ? 25.0
+            : displayText.length > 70
+            ? 29.0
+            : displayText.length > 40
+            ? 33.0
+            : displayText.length > 22
+            ? 38.0
+            : 44.0;
+        final availableWidth = constraints.maxWidth.isFinite
+            ? constraints.maxWidth
+            : 320.0;
+
+        double longestWordWidth = 0;
+        for (final word in words) {
+          final painter = TextPainter(
+            text: TextSpan(
+              text: word,
+              style: TextStyle(
+                fontSize: baseFontSize,
+                fontWeight: FontWeight.w500,
+                fontFamily: 'Segoe UI',
+              ),
+            ),
+            maxLines: 1,
+            textDirection: Directionality.of(context),
+          )..layout();
+          longestWordWidth = math.max(longestWordWidth, painter.width);
+        }
+
+        final wordFitScale = longestWordWidth > availableWidth
+            ? availableWidth / longestWordWidth
+            : 1.0;
+        final fontSize = math.max(18.0, baseFontSize * wordFitScale * 0.97);
+        final textStyle = TextStyle(
+          color: Color(0xffeef0f7),
+          fontSize: fontSize,
+          height: 1.12,
+          fontWeight: FontWeight.w500,
+          fontFamily: 'Segoe UI',
+        );
+
+        return Semantics(
+          label: displayText,
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.center,
+            child: SizedBox(
+              width: availableWidth,
+              child: Wrap(
+                alignment: WrapAlignment.center,
+                runAlignment: WrapAlignment.center,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: fontSize * 0.24,
+                runSpacing: fontSize * 0.12,
+                children: [
+                  for (final word in words)
+                    Text(
+                      word,
+                      maxLines: 1,
+                      softWrap: false,
+                      overflow: TextOverflow.visible,
+                      textAlign: TextAlign.center,
+                      style: textStyle,
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 

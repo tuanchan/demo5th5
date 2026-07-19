@@ -33,6 +33,8 @@ class _FlashCardsPageState extends State<FlashCardsPage> {
   String? _selectedListeningAnswer;
   bool _isPlayingListeningAudio = false;
   bool _studySessionFinished = true;
+  late final StreamSubscription<void> _flashcardsRealtimeSubscription;
+  Future<void> _realtimeRefreshTail = Future<void>.value();
 
   // lịch sử để undo khi bật tiến độ
   final List<ProgressUndoItem> _progressHistory = [];
@@ -120,6 +122,15 @@ class _FlashCardsPageState extends State<FlashCardsPage> {
       DeviceOrientation.portraitUp,
     ]);
 
+    _flashcardsRealtimeSubscription =
+        SupabaseSyncService.instance.remoteDataChanged.listen((_) {
+      final change = SupabaseSyncService.instance.lastRealtimeDataChange;
+      if (change == null) return;
+      _realtimeRefreshTail = _realtimeRefreshTail.then((_) async {
+        if (mounted) await this.refreshRealtimeRows(change);
+      });
+    });
+
     Future.delayed(Duration(milliseconds: 350), () {
       if (mounted) {
         this.loadInitialData();
@@ -129,6 +140,7 @@ class _FlashCardsPageState extends State<FlashCardsPage> {
 
   @override
   void dispose() {
+    _flashcardsRealtimeSubscription.cancel();
     this._finishStudySession();
     super.dispose();
   }

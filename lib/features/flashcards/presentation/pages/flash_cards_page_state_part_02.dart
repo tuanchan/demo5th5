@@ -94,6 +94,90 @@ extension FlashCardsPageStatePart02 on _FlashCardsPageState {
     );
 
     String? errorText;
+    String? geminiErrorText;
+    var meaningSuggestions = <String>[];
+    String? pronunciationSuggestion;
+    var isGeneratingMeanings = false;
+    var isDialogOpen = true;
+
+    String cleanGeminiJson(String raw) {
+      var value = raw.trim();
+      if (value.startsWith('```')) {
+        value = value.replaceFirst(RegExp(r'^```(?:json)?\s*'), '');
+        value = value.replaceFirst(RegExp(r'\s*```$'), '');
+      }
+      return value.trim();
+    }
+
+    Future<void> generateMeanings(StateSetter setDialogState) async {
+      final term = termController.text.trim();
+      if (term.isEmpty) {
+        setDialogState(() {
+          geminiErrorText = 'Vui lòng nhập từ vựng trước khi tạo nghĩa.';
+        });
+        return;
+      }
+
+      setDialogState(() {
+        isGeneratingMeanings = true;
+        geminiErrorText = null;
+        meaningSuggestions = <String>[];
+        pronunciationSuggestion = null;
+      });
+
+      try {
+        final raw = await GeminiFlashLiteClient.generateText(
+          '''Chỉ dựa vào từ hoặc cụm từ ${jsonEncode(term)} thuộc ngôn ngữ $_languageCode để tạo dữ liệu học từ vựng.
+Tuyệt đối không suy đoán hoặc sử dụng bất kỳ nghĩa cũ nào do người dùng đã nhập.
+Tạo từ 3 đến 8 nghĩa tiếng Việt ngắn gọn, không lặp. Mỗi mục chỉ chứa nghĩa, không ghi từ loại, ngữ cảnh, giải thích hoặc chú thích trong ngoặc đơn.
+Đồng thời tạo phiên âm chuẩn, ưu tiên IPA nếu ngôn ngữ này dùng IPA.
+Chỉ trả về JSON đúng mẫu: {"meanings":["nghĩa 1","nghĩa 2"],"pronunciation":"phiên âm"}.''',
+          maxOutputTokens: 500,
+          responseMimeType: 'application/json',
+        );
+        final decoded = jsonDecode(cleanGeminiJson(raw));
+        final source = decoded is Map<String, dynamic>
+            ? decoded['meanings']
+            : decoded;
+        final suggestions = source is List
+            ? source
+                  .map(
+                    (item) => item
+                        .toString()
+                        .replaceAll(RegExp(r'\s*\([^()]*\)'), '')
+                        .replaceAll(RegExp(r'\s+'), ' ')
+                        .trim(),
+                  )
+                  .where((item) => item.isNotEmpty)
+                  .toSet()
+                  .take(8)
+                  .toList(growable: false)
+            : <String>[];
+        final pronunciation = decoded is Map<String, dynamic>
+            ? decoded['pronunciation']?.toString().trim() ?? ''
+            : '';
+
+        if (!isDialogOpen || termController.text.trim() != term) return;
+        setDialogState(() {
+          meaningSuggestions = suggestions;
+          pronunciationSuggestion = pronunciation.isEmpty
+              ? null
+              : pronunciation;
+          if (suggestions.isEmpty && pronunciation.isEmpty) {
+            geminiErrorText = 'Gemini chưa trả về dữ liệu phù hợp.';
+          }
+        });
+      } catch (e) {
+        if (!isDialogOpen || termController.text.trim() != term) return;
+        setDialogState(() {
+          geminiErrorText = 'Không tạo được nghĩa và phiên âm: ${e.toString().replaceFirst('Exception: ', '')}';
+        });
+      } finally {
+        if (isDialogOpen) {
+          setDialogState(() => isGeneratingMeanings = false);
+        }
+      }
+    }
 
     final result = await showDialog<StudyCardItem>(
       context: context,
@@ -105,6 +189,7 @@ extension FlashCardsPageStatePart02 on _FlashCardsPageState {
               required TextEditingController controller,
               required String label,
               int maxLines = 1,
+              ValueChanged<String>? onChanged,
             }) {
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -121,6 +206,7 @@ extension FlashCardsPageStatePart02 on _FlashCardsPageState {
                   SizedBox(height: 6),
                   TextField(
                     controller: controller,
+                    onChanged: onChanged,
                     maxLines: maxLines,
                     minLines: maxLines,
                     style: TextStyle(
@@ -146,6 +232,40 @@ extension FlashCardsPageStatePart02 on _FlashCardsPageState {
                     ),
                   ),
                 ],
+              );
+            }
+
+            Widget geminiActionButton({
+              required String tooltip,
+              required bool isLoading,
+              required VoidCallback onPressed,
+            }) {
+              return Tooltip(
+                message: tooltip,
+                child: Material(
+                  color: Color(0x14ffffff),
+                  borderRadius: BorderRadius.circular(10),
+                  child: InkWell(
+                    onTap: isLoading ? null : onPressed,
+                    borderRadius: BorderRadius.circular(10),
+                    child: SizedBox(
+                      width: 36,
+                      height: 34,
+                      child: Center(
+                        child: isLoading
+                            ? SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Color(0xff8fa2ff),
+                                ),
+                              )
+                            : geminiColorIcon(size: 19),
+                      ),
+                    ),
+                  ),
+                ),
               );
             }
 
@@ -184,8 +304,17 @@ extension FlashCardsPageStatePart02 on _FlashCardsPageState {
                               ),
                             ),
                           ),
+                          geminiActionButton(
+                            tooltip: 'Gemini tạo nghĩa và phiên âm',
+                            isLoading: isGeneratingMeanings,
+                            onPressed: () => generateMeanings(setDialogState),
+                          ),
+                          SizedBox(width: 4),
                           IconButton(
-                            onPressed: () => Navigator.pop(dialogContext),
+                            onPressed: () {
+                              isDialogOpen = false;
+                              Navigator.pop(dialogContext);
+                            },
                             icon: Icon(
                               Icons.close_rounded,
                               color: Color(0xffe6e6f0),
@@ -198,7 +327,184 @@ extension FlashCardsPageStatePart02 on _FlashCardsPageState {
                       editInput(
                         controller: termController,
                         label: "Từ vựng",
+                        onChanged: (_) {
+                          if (meaningSuggestions.isEmpty &&
+                              pronunciationSuggestion == null &&
+                              geminiErrorText == null) {
+                            return;
+                          }
+                          setDialogState(() {
+                            meaningSuggestions = <String>[];
+                            pronunciationSuggestion = null;
+                            geminiErrorText = null;
+                          });
+                        },
                       ),
+                      if (meaningSuggestions.isNotEmpty) ...[
+                        SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Text(
+                              'NGHĨA GỢI Ý TỪ GEMINI',
+                              style: TextStyle(
+                                color: Color(0xffe6e6f0),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                            Spacer(),
+                            Text(
+                              'Bấm + để thêm',
+                              style: TextStyle(
+                                color: Color(0xff969bb2),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                        SizedBox(height: 7),
+                        ...meaningSuggestions.map((suggestion) {
+                          return Padding(
+                            padding: EdgeInsets.only(bottom: 7),
+                            child: Container(
+                              padding: EdgeInsets.only(left: 12),
+                              decoration: BoxDecoration(
+                                color: Color(0xff1a1a2e),
+                                borderRadius: BorderRadius.circular(11),
+                                border: Border.all(color: Color(0xff3c3c50)),
+                              ),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: SelectableText(
+                                      suggestion,
+                                      style: TextStyle(
+                                        color: Color(0xffe6e6f0),
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                  IconButton(
+                                    tooltip: 'Thêm nghĩa này',
+                                    onPressed: () {
+                                      final current = definitionController.text
+                                          .trim();
+                                      final existingMeanings = current
+                                          .split(RegExp(r'[,\n]'))
+                                          .map((meaning) => meaning.trim())
+                                          .where(
+                                            (meaning) => meaning.isNotEmpty,
+                                          )
+                                          .toSet();
+                                      if (!existingMeanings.contains(
+                                        suggestion,
+                                      )) {
+                                        final normalizedCurrent =
+                                            existingMeanings.join(', ');
+                                        definitionController.text =
+                                            normalizedCurrent.isEmpty
+                                            ? suggestion
+                                            : '$normalizedCurrent, $suggestion';
+                                        definitionController.selection =
+                                            TextSelection.collapsed(
+                                              offset: definitionController
+                                                  .text
+                                                  .length,
+                                            );
+                                      }
+                                      setDialogState(() {
+                                        meaningSuggestions =
+                                            meaningSuggestions
+                                                .where(
+                                                  (item) => item != suggestion,
+                                                )
+                                                .toList(growable: false);
+                                      });
+                                    },
+                                    icon: Icon(
+                                      Icons.add_rounded,
+                                      color: Color(0xff8fa2ff),
+                                      size: 21,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        }),
+                      ],
+                      if (pronunciationSuggestion != null) ...[
+                        SizedBox(height: 5),
+                        Divider(color: Color(0xff3c3c50), height: 20),
+                        Row(
+                          children: [
+                            Text(
+                              'PHIÊN ÂM GỢI Ý TỪ GEMINI',
+                              style: TextStyle(
+                                color: Color(0xffe6e6f0),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                            Spacer(),
+                            Text(
+                              'Bấm + để thêm',
+                              style: TextStyle(
+                                color: Color(0xff969bb2),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                        SizedBox(height: 7),
+                        Container(
+                          padding: EdgeInsets.only(left: 12),
+                          decoration: BoxDecoration(
+                            color: Color(0xff1a1a2e),
+                            borderRadius: BorderRadius.circular(11),
+                            border: Border.all(color: Color(0xff3c3c50)),
+                          ),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: SelectableText(
+                                  pronunciationSuggestion!,
+                                  style: TextStyle(
+                                    color: Color(0xffe6e6f0),
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                              IconButton(
+                                tooltip: 'Thêm phiên âm này',
+                                onPressed: () {
+                                  pronunciationController.text =
+                                      pronunciationSuggestion!;
+                                  pronunciationController.selection =
+                                      TextSelection.collapsed(
+                                        offset:
+                                            pronunciationController.text.length,
+                                      );
+                                  setDialogState(() {
+                                    pronunciationSuggestion = null;
+                                  });
+                                },
+                                icon: Icon(
+                                  Icons.add_rounded,
+                                  color: Color(0xff8fa2ff),
+                                  size: 21,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                       SizedBox(height: 12),
                       editInput(
                         controller: definitionController,
@@ -210,6 +516,17 @@ extension FlashCardsPageStatePart02 on _FlashCardsPageState {
                         controller: pronunciationController,
                         label: "Phiên âm",
                       ),
+                      if (geminiErrorText != null) ...[
+                        SizedBox(height: 10),
+                        Text(
+                          geminiErrorText!,
+                          style: TextStyle(
+                            color: Color(0xffffb4ab),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
                       if (errorText != null) ...[
                         SizedBox(height: 10),
                         Text(
@@ -225,7 +542,10 @@ extension FlashCardsPageStatePart02 on _FlashCardsPageState {
                         mainAxisAlignment: MainAxisAlignment.end,
                         children: [
                           OutlinedButton(
-                            onPressed: () => Navigator.pop(dialogContext),
+                            onPressed: () {
+                              isDialogOpen = false;
+                              Navigator.pop(dialogContext);
+                            },
                             style: OutlinedButton.styleFrom(
                               foregroundColor: Color(0xffe6e6f0),
                               backgroundColor: Color(0x14ffffff),
@@ -270,6 +590,7 @@ extension FlashCardsPageStatePart02 on _FlashCardsPageState {
                                   return;
                                 }
 
+                                isDialogOpen = false;
                                 Navigator.pop(
                                   dialogContext,
                                   card.copyWith(
@@ -311,6 +632,7 @@ extension FlashCardsPageStatePart02 on _FlashCardsPageState {
       },
     );
 
+    isDialogOpen = false;
     termController.dispose();
     definitionController.dispose();
     pronunciationController.dispose();

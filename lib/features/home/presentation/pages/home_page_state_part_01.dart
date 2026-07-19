@@ -1200,7 +1200,6 @@ extension HomePageStatePart01 on _HomePageState {
       borderRadius: BorderRadius.circular(12),
       child: Container(
         height: cardHeight,
-        padding: EdgeInsets.all(isMobile ? 12 : 20),
         decoration: BoxDecoration(
           color: selected ? Color(0xff101b35) : _homePanel,
           borderRadius: BorderRadius.circular(12),
@@ -1218,6 +1217,10 @@ extension HomePageStatePart01 on _HomePageState {
         ),
         child: Stack(
           children: [
+            Padding(
+              padding: EdgeInsets.all(isMobile ? 12 : 20),
+              child: Stack(
+                children: [
             Align(
               alignment: Alignment.topRight,
               child: PopupMenuButton<String>(
@@ -1284,6 +1287,80 @@ extension HomePageStatePart01 on _HomePageState {
                 ),
               ),
             ),
+                ],
+              ),
+            ),
+            if (selected)
+              Positioned.fill(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(11),
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 5.5, sigmaY: 5.5),
+                    child: ColoredBox(color: Color(0x78000000)),
+                  ),
+                ),
+              ),
+            if (selected)
+              Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox(
+                      width: isMobile ? 112 : 132,
+                      height: isMobile ? 36 : 40,
+                      child: OutlinedButton.icon(
+                        onPressed: () => this.openFlashCards(course),
+                        icon: Icon(Icons.style_rounded, size: 17),
+                        label: Text('Học thẻ'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.white,
+                          backgroundColor: Color(0xd90b0d12),
+                          side: BorderSide(color: Color(0xff4f7ee8)),
+                          padding: EdgeInsets.symmetric(horizontal: 10),
+                          textStyle: TextStyle(
+                            fontSize: isMobile ? 12 : 13,
+                            fontWeight: FontWeight.w800,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(9),
+                          ),
+                        ),
+                      ),
+                    ),
+                    SizedBox(height: isMobile ? 7 : 9),
+                    SizedBox(
+                      width: isMobile ? 112 : 132,
+                      height: isMobile ? 36 : 40,
+                      child: OutlinedButton.icon(
+                        onPressed: () => this.openReviewPractice(course),
+                        icon: SvgPicture.asset(
+                          'assets/icon/lightbulb-solid-full.svg',
+                          width: 17,
+                          height: 17,
+                          colorFilter: ColorFilter.mode(
+                            Colors.white,
+                            BlendMode.srcIn,
+                          ),
+                        ),
+                        label: Text('Kiểm tra'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.white,
+                          backgroundColor: Color(0xd90b0d12),
+                          side: BorderSide(color: Color(0xff4f7ee8)),
+                          padding: EdgeInsets.symmetric(horizontal: 10),
+                          textStyle: TextStyle(
+                            fontSize: isMobile ? 12 : 13,
+                            fontWeight: FontWeight.w800,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(9),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
           ],
         ),
       ),

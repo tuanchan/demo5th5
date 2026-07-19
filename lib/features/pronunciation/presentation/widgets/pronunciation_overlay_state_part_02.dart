@@ -9,6 +9,7 @@ extension PronunciationOverlayStatePart02 on _PronunciationOverlayState {
       await _speech.stop();
       setState(() {
         _isRecording = false;
+        _listenStarted = false;
         _pulseController.stop();
         _pulseController.reset();
         _statusText = 'Đã dừng. Nhấn lại để thử.';
@@ -26,6 +27,7 @@ extension PronunciationOverlayStatePart02 on _PronunciationOverlayState {
     }
 
     bool available = false;
+    String lastWords = '';
 
     try {
       available = await _speech.initialize(
@@ -33,6 +35,7 @@ extension PronunciationOverlayStatePart02 on _PronunciationOverlayState {
           if (!mounted) return;
           setState(() {
             _isRecording = false;
+            _listenStarted = false;
             _pulseController.stop();
             _pulseController.reset();
             _statusText = 'Lỗi nhận diện: ${e.errorMsg}';
@@ -40,6 +43,20 @@ extension PronunciationOverlayStatePart02 on _PronunciationOverlayState {
         },
         onStatus: (status) {
           debugPrint('SPEECH STATUS: $status');
+          if (status != 'done' && status != 'notListening') return;
+          if (!mounted || !_isRecording || !_listenStarted) return;
+
+          Future.microtask(() {
+            if (!mounted || !_isRecording || !_listenStarted) return;
+            this._micStop();
+            if (lastWords.isNotEmpty) {
+              this._micShowResult(lastWords);
+            } else {
+              setState(() {
+                _statusText = 'Không nhận được giọng nói. Thử lại nhé!';
+              });
+            }
+          });
         },
       );
     } catch (e) {
@@ -47,6 +64,7 @@ extension PronunciationOverlayStatePart02 on _PronunciationOverlayState {
 
       setState(() {
         _isRecording = false;
+        _listenStarted = false;
         _pulseController.stop();
         _pulseController.reset();
         _statusText =
@@ -72,13 +90,12 @@ extension PronunciationOverlayStatePart02 on _PronunciationOverlayState {
       return;
     }
 
-    String lastWords = '';
-
     setState(() {
       _hasResult = false;
       _wordResults = [];
       _score = 0;
       _isRecording = true;
+      _listenStarted = true;
       _statusText = 'Đang nghe...';
     });
 
@@ -86,16 +103,20 @@ extension PronunciationOverlayStatePart02 on _PronunciationOverlayState {
 
     await _speech.listen(
       localeId: widget.languageCode.isNotEmpty ? widget.languageCode : 'zh-TW',
-      listenFor: Duration(seconds: 20),
-      pauseFor: Duration(seconds: 3),
+      listenFor: Duration(seconds: 30),
+      pauseFor: Duration(seconds: 5),
       partialResults: true,
       cancelOnError: false,
       listenMode: stt.ListenMode.dictation,
       onResult: (result) {
         lastWords = result.recognizedWords.trim();
-        debugPrint('SPEECH WORDS: $lastWords');
+        debugPrint(
+          'SPEECH WORDS: $lastWords | final=${result.finalResult}',
+        );
 
-        if (lastWords.isNotEmpty) {
+        // Partial results arrive after just the first word on many devices.
+        // Keep listening through short pauses and only score the final phrase.
+        if (result.finalResult && lastWords.isNotEmpty) {
           this._micStop();
           this._micShowResult(lastWords);
         }
@@ -116,7 +137,10 @@ extension PronunciationOverlayStatePart02 on _PronunciationOverlayState {
 
   void _micStop() {
     _speech.stop();
-    setState(() => _isRecording = false);
+    setState(() {
+      _isRecording = false;
+      _listenStarted = false;
+    });
     _pulseController.stop();
     _pulseController.reset();
   }

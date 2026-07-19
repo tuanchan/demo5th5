@@ -11,6 +11,23 @@ enum _SyncOperation { pullReplace, merge, livePush }
 
 class _SyncCancelled implements Exception {}
 
+/// Describes only the rows touched by one realtime batch. UI pages can use
+/// these IDs to refresh their current view from SQLite without starting a
+/// full account sync.
+class RealtimeDataChange {
+  RealtimeDataChange({
+    required Set<String> tables,
+    required Set<int> courseIds,
+    required Set<int> cardIds,
+  })  : tables = Set.unmodifiable(tables),
+        courseIds = Set.unmodifiable(courseIds),
+        cardIds = Set.unmodifiable(cardIds);
+
+  final Set<String> tables;
+  final Set<int> courseIds;
+  final Set<int> cardIds;
+}
+
 /// Service to synchronize local SQLite data with Supabase when user logs in.
 /// Uses a "last-write-wins" merge strategy based on updatedAt timestamps.
 class SupabaseSyncService {
@@ -24,8 +41,11 @@ class SupabaseSyncService {
   Future<SyncResult>? _activeSync;
   final StreamController<SyncResult> _syncCompletedController =
       StreamController<SyncResult>.broadcast();
+  // Keep this controller void-typed so an existing singleton remains valid
+  // across Flutter hot reloads. The typed payload is exposed separately.
   final StreamController<void> _remoteDataChangedController =
       StreamController<void>.broadcast();
+  RealtimeDataChange? _lastRealtimeDataChange;
   final Map<String, String> _topicRemoteIdByLocal = {};
   final Map<String, String> _courseRemoteIdByLocal = {};
   final Map<String, String> _cardRemoteIdByLocal = {};
@@ -36,7 +56,8 @@ class SupabaseSyncService {
   String _localDeviceId = '';
   _SyncOperation _operation = _SyncOperation.pullReplace;
   String? _sessionOwnerId;
-  String? _sessionStartedAt;
+  String? _livePushCursorAt;
+  String? _livePushCutoffAt;
   String? _identityOwnerId;
   RealtimeChannel? _realtimeChannel;
   Timer? _realtimeMergeDebounce;
@@ -50,6 +71,7 @@ class SupabaseSyncService {
   Future<SyncResult>? get activeSync => _activeSync;
   Stream<SyncResult> get syncCompleted => _syncCompletedController.stream;
   Stream<void> get remoteDataChanged => _remoteDataChangedController.stream;
+  RealtimeDataChange? get lastRealtimeDataChange => _lastRealtimeDataChange;
 
   /// Pull-only replacement. No local rows are uploaded by this action.
   Future<SyncResult> syncAll() =>
@@ -575,7 +597,7 @@ $targetWhere
     if (user == null) return;
     if (!newLogin &&
         _sessionOwnerId == user.id &&
-        _sessionStartedAt?.isNotEmpty == true) {
+        _livePushCursorAt?.isNotEmpty == true) {
       startRealtimeSync();
       return;
     }
@@ -584,7 +606,7 @@ $targetWhere
     }
 
     final db = await AppDatabase.instance.database;
-    final key = 'sync.sessionStartedAt.${user.id}';
+    final key = 'sync.livePushCursor.v2.${user.id}';
     String? startedAt;
     if (!newLogin) {
       final rows = await db.query(
@@ -598,7 +620,7 @@ $targetWhere
     }
     startedAt ??= DateTime.now().toIso8601String();
     _sessionOwnerId = user.id;
-    _sessionStartedAt = startedAt;
+    _livePushCursorAt = startedAt;
     await _setLocalSetting(db, key, startedAt);
     await _setLocalSetting(db, 'sync.localBoundOwnerId', user.id);
     startRealtimeSync();
@@ -607,7 +629,7 @@ $targetWhere
   void endAuthenticatedSession() {
     stopRealtimeSync();
     _sessionOwnerId = null;
-    _sessionStartedAt = null;
+    _livePushCursorAt = null;
     _identityOwnerId = null;
   }
 
@@ -641,6 +663,10 @@ $targetWhere
     }
     _realtimeChannel = channel;
     channel.subscribe((status, error) {
+      unawaited(ServerLogService.write('realtime.subscription', details: {
+        'status': status,
+        'error': error,
+      }));
       if (status == RealtimeSubscribeStatus.channelError) {
         print('REALTIME SUBSCRIPTION ERROR: $error');
       }
@@ -654,6 +680,7 @@ $targetWhere
     final channel = _realtimeChannel;
     _realtimeChannel = null;
     if (channel != null) {
+      unawaited(ServerLogService.write('realtime.stopped'));
       unawaited(SupabaseConfig.client.removeChannel(channel));
     }
   }
@@ -661,16 +688,44 @@ $targetWhere
   void _queueRealtimeChange(PostgresChangePayload change) {
     final row = change.newRecord.isNotEmpty ? change.newRecord : change.oldRecord;
     final id = row['id']?.toString() ?? row['key']?.toString() ?? '';
-    if (id.isEmpty) return;
-    _realtimePendingChanges['${change.table}:$id'] = change;
-    _realtimeMergeDebounce?.cancel();
-    _realtimeMergeDebounce = Timer(const Duration(milliseconds: 1200), () async {
+    final queueKey = '${change.table}:$id';
+    unawaited(ServerLogService.write('realtime.received', details: {
+      'table': change.table,
+      'event': change.eventType,
+      'id': id.isEmpty ? '-' : id,
+      'updatedAt': row['updated_at'],
+      'deleted': change.eventType == PostgresChangeEvent.delete ||
+          row['deleted_at'] != null,
+      'duringSync': _isSyncing,
+      'duringStudySync': _isPushingStudyData,
+      'pendingBefore': _realtimePendingChanges.length,
+    }));
+    if (id.isEmpty) {
+      unawaited(ServerLogService.write('realtime.ignored', details: {
+        'table': change.table,
+        'event': change.eventType,
+        'reason': 'missing-id',
+      }));
+      return;
+    }
+    _realtimePendingChanges[queueKey] = change;
+    _scheduleRealtimeApply();
+  }
+
+  void _scheduleRealtimeApply({
+    Duration delay = const Duration(milliseconds: 150),
+  }) {
+    if (_realtimeMergeDebounce?.isActive ?? false) return;
+    _realtimeMergeDebounce = Timer(delay, () async {
+      _realtimeMergeDebounce = null;
       if (!SupabaseConfig.isLoggedIn) return;
       if (_isSyncing || _isPushingStudyData) {
-        _realtimeMergeDebounce = Timer(
-          const Duration(milliseconds: 1200),
-          () => _queueRealtimeChanges(),
-        );
+        await ServerLogService.write('realtime.deferred', details: {
+          'syncing': _isSyncing,
+          'studySyncing': _isPushingStudyData,
+          'pending': _realtimePendingChanges.length,
+        });
+        _scheduleRealtimeApply(delay: const Duration(milliseconds: 250));
         return;
       }
       await _queueRealtimeChanges();
@@ -690,11 +745,7 @@ $targetWhere
       return;
     }
     if (_isSyncing || _isPushingStudyData) {
-      _realtimeMergeDebounce?.cancel();
-      _realtimeMergeDebounce = Timer(
-        const Duration(milliseconds: 1200),
-        _queueRealtimeChanges,
-      );
+      _scheduleRealtimeApply(delay: const Duration(milliseconds: 250));
       return;
     }
     final changes = _realtimePendingChanges.values.toList()
@@ -702,6 +753,10 @@ $targetWhere
     _realtimePendingChanges.clear();
 
     _isSyncing = true;
+    await ServerLogService.write('realtime.batch_start', details: {
+      'events': changes.length,
+      'tables': changes.map((change) => change.table).toSet().join(','),
+    });
     try {
       var changed = false;
       final changesByTable = <String, List<PostgresChangePayload>>{};
@@ -713,15 +768,76 @@ $targetWhere
       for (final table in tables) {
         changed = await _applyRealtimeChanges(changesByTable[table]!) || changed;
       }
-      if (changed) _remoteDataChangedController.add(null);
+      if (changed) {
+        final notification = _describeRealtimeChanges(changes);
+        _lastRealtimeDataChange = notification;
+        _remoteDataChangedController.add(null);
+        await ServerLogService.write('realtime.ui_notified', details: {
+          'tables': notification.tables.join(','),
+          'courseIds': notification.courseIds.length,
+          'cardIds': notification.cardIds.length,
+        });
+      }
+      await ServerLogService.write('realtime.batch_finish', details: {
+        'events': changes.length,
+        'tables': tables.join(','),
+        'changed': changed,
+        'pendingAfter': _realtimePendingChanges.length,
+      });
     } catch (error) {
       print('REALTIME APPLY ERROR: $error');
+      await ServerLogService.write('realtime.batch_error', details: {
+        'events': changes.length,
+        'error': error,
+        'pendingAfter': _realtimePendingChanges.length,
+      });
     } finally {
       _isSyncing = false;
       if (_realtimePendingChanges.isNotEmpty) {
-        _queueRealtimeChange(_realtimePendingChanges.values.first);
+        _scheduleRealtimeApply();
       }
     }
+  }
+
+  RealtimeDataChange _describeRealtimeChanges(
+    Iterable<PostgresChangePayload> changes,
+  ) {
+    final tables = <String>{};
+    final courseIds = <int>{};
+    final cardIds = <int>{};
+    for (final change in changes) {
+      tables.add(change.table);
+      final row = change.newRecord.isNotEmpty
+          ? change.newRecord
+          : change.oldRecord;
+      final remoteId = row['id']?.toString();
+      final remoteCourseId = row['course_id']?.toString();
+      final remoteCardId = row['card_id']?.toString();
+      if (change.table == 'courses' && remoteId != null) {
+        courseIds.add(
+          _courseLocalIdByRemote[remoteId] ?? _stableLocalId(remoteId),
+        );
+      }
+      if (change.table == 'cards' && remoteId != null) {
+        cardIds.add(_cardLocalIdByRemote[remoteId] ?? _stableLocalId(remoteId));
+      }
+      if (remoteCourseId != null && remoteCourseId.isNotEmpty) {
+        courseIds.add(
+          _courseLocalIdByRemote[remoteCourseId] ??
+              _stableLocalId(remoteCourseId),
+        );
+      }
+      if (remoteCardId != null && remoteCardId.isNotEmpty) {
+        cardIds.add(
+          _cardLocalIdByRemote[remoteCardId] ?? _stableLocalId(remoteCardId),
+        );
+      }
+    }
+    return RealtimeDataChange(
+      tables: tables,
+      courseIds: courseIds,
+      cardIds: cardIds,
+    );
   }
 
   int _realtimeTableOrder(String table) => switch (table) {
@@ -747,28 +863,153 @@ $targetWhere
       'card_examples',
       'review_states',
     };
-    if (!supportedTables.contains(table)) return false;
+    if (!supportedTables.contains(table)) {
+      await ServerLogService.write('realtime.ignored', details: {
+        'table': table,
+        'events': changes.length,
+        'reason': 'unsupported-table',
+      });
+      return false;
+    }
+    await ServerLogService.write('realtime.apply_start', details: {
+      'table': table,
+      'events': changes.length,
+    });
     final db = await AppDatabase.instance.database;
     final rows = <Map<String, dynamic>>[];
     var changed = false;
+    var deleted = 0;
+    var skipped = 0;
+    final replacedRemoteIds = <String>{};
+
+    // Some server editors save a card edit as INSERT(new id) + soft-delete
+    // (old id). Reuse the old local card ID when both rows occupy the same
+    // course/position so review states and study history keep their FK target.
+    if (table == 'cards') {
+      final insertedChanges = changes.where(
+        (change) => change.eventType == PostgresChangeEvent.insert &&
+            change.newRecord['deleted_at'] == null,
+      ).toList(growable: false);
+      final usedInsertedRemoteIds = <String>{};
+      for (final deletedChange in changes.where((change) {
+        final source = change.newRecord.isNotEmpty
+            ? change.newRecord
+            : change.oldRecord;
+        return change.eventType == PostgresChangeEvent.delete ||
+            source['deleted_at'] != null;
+      })) {
+        final deletedSource = deletedChange.newRecord.isNotEmpty
+            ? deletedChange.newRecord
+            : deletedChange.oldRecord;
+        final oldRemoteId = deletedSource['id']?.toString() ?? '';
+        if (oldRemoteId.isEmpty) continue;
+        final oldLocalId = _cardLocalIdByRemote[oldRemoteId] ??
+            _stableLocalId(oldRemoteId);
+        final oldLocalRows = await db.query(
+          'cards',
+          columns: ['id', 'courseId', 'position'],
+          where: 'id = ?',
+          whereArgs: [oldLocalId],
+          limit: 1,
+        );
+        if (oldLocalRows.isEmpty) continue;
+        final oldLocal = oldLocalRows.first;
+
+        for (final insertedChange in insertedChanges) {
+          final inserted = insertedChange.newRecord;
+          final newRemoteId = inserted['id']?.toString() ?? '';
+          if (newRemoteId.isEmpty ||
+              usedInsertedRemoteIds.contains(newRemoteId)) {
+            continue;
+          }
+          final insertedCourseId =
+              _courseLocalIdByRemote[inserted['course_id']?.toString()] ??
+              _stableLocalId(inserted['course_id']);
+          final sameCourse = insertedCourseId ==
+              _localInt(oldLocal['courseId']);
+          final samePosition = _localInt(inserted['position']) ==
+              _localInt(oldLocal['position']);
+          if (!sameCourse || !samePosition) continue;
+
+          _cardLocalIdByRemote.remove(oldRemoteId);
+          _cardLocalIdByRemote[newRemoteId] = oldLocalId;
+          _cardRemoteIdByLocal['$oldLocalId'] = newRemoteId;
+          replacedRemoteIds.add(oldRemoteId);
+          usedInsertedRemoteIds.add(newRemoteId);
+          await ServerLogService.write('realtime.replaced', details: {
+            'table': table,
+            'oldRemoteId': oldRemoteId,
+            'newRemoteId': newRemoteId,
+            'localId': oldLocalId,
+            'position': oldLocal['position'],
+          });
+          break;
+        }
+      }
+    }
+
     for (final change in changes) {
       final source = change.newRecord.isNotEmpty
           ? change.newRecord
           : change.oldRecord;
       final remote = Map<String, dynamic>.from(source);
       final remoteId = remote['id']?.toString();
-      if (remoteId == null || remoteId.isEmpty) continue;
+      if (remoteId == null || remoteId.isEmpty) {
+        skipped++;
+        continue;
+      }
 
       if (change.eventType == PostgresChangeEvent.delete ||
           remote['deleted_at'] != null) {
+        if (replacedRemoteIds.contains(remoteId)) {
+          changed = true;
+          continue;
+        }
         final localId = switch (table) {
           'topics' => _topicLocalIdByRemote[remoteId] ?? _stableLocalId(remoteId),
           'courses' => _courseLocalIdByRemote[remoteId] ?? _stableLocalId(remoteId),
           'cards' => _cardLocalIdByRemote[remoteId] ?? _stableLocalId(remoteId),
           _ => _stableLocalId(remoteId),
         };
-        await db.delete(table, where: 'id = ?', whereArgs: [localId]);
+        if (table == 'review_states') {
+          final remoteCardId = remote['card_id']?.toString();
+          final localCardId = remoteCardId == null
+              ? null
+              : (_cardLocalIdByRemote[remoteCardId] ??
+                  _stableLocalId(remoteCardId));
+          if (localCardId != null) {
+            await db.delete(
+              table,
+              where: 'cardId = ?',
+              whereArgs: [localCardId],
+            );
+          }
+        } else {
+          await db.delete(table, where: 'id = ?', whereArgs: [localId]);
+        }
+        if (table == 'topics') {
+          _topicLocalIdByRemote.remove(remoteId);
+          if (_topicRemoteIdByLocal['$localId'] == remoteId) {
+            _topicRemoteIdByLocal.remove('$localId');
+          }
+        } else if (table == 'courses') {
+          _courseLocalIdByRemote.remove(remoteId);
+          if (_courseRemoteIdByLocal['$localId'] == remoteId) {
+            _courseRemoteIdByLocal.remove('$localId');
+          }
+        } else if (table == 'cards') {
+          _cardLocalIdByRemote.remove(remoteId);
+          if (_cardRemoteIdByLocal['$localId'] == remoteId) {
+            _cardRemoteIdByLocal.remove('$localId');
+          }
+        }
+        deleted++;
         changed = true;
+        await ServerLogService.write('realtime.deleted', details: {
+          'table': table,
+          'remoteId': remoteId,
+          'localId': localId,
+        });
         continue;
       }
 
@@ -781,16 +1022,30 @@ $targetWhere
       }
       rows.add(remote);
     }
-    if (rows.isEmpty) return changed;
+    if (rows.isEmpty) {
+      await ServerLogService.write('realtime.apply_finish', details: {
+        'table': table,
+        'events': changes.length,
+        'rows': 0,
+        'deleted': deleted,
+        'replaced': replacedRemoteIds.length,
+        'skipped': skipped,
+        'pulled': 0,
+        'changed': changed,
+        'error': null,
+      });
+      return changed;
+    }
 
     final previousOperation = _operation;
     _operation = _SyncOperation.merge;
     try {
       final ownerId = SupabaseConfig.currentUser!.id;
       final client = SupabaseConfig.client;
+      SyncResult? result;
       switch (table) {
         case 'topics':
-          await _syncTable(
+          result = await _syncTable(
             db: db, client: client, ownerId: ownerId, localTable: 'topics',
             remoteTable: 'topics', idColumn: 'id',
             localToRemote: _topicLocalToRemote, remoteToLocal: _topicRemoteToLocal,
@@ -798,7 +1053,7 @@ $targetWhere
           );
           break;
         case 'courses':
-          await _syncTable(
+          result = await _syncTable(
             db: db, client: client, ownerId: ownerId, localTable: 'courses',
             remoteTable: 'courses', idColumn: 'id',
             localToRemote: _courseLocalToRemote, remoteToLocal: _courseRemoteToLocal,
@@ -806,7 +1061,7 @@ $targetWhere
           );
           break;
         case 'cards':
-          await _syncTable(
+          result = await _syncTable(
             db: db, client: client, ownerId: ownerId, localTable: 'cards',
             remoteTable: 'cards', idColumn: 'id',
             localToRemote: _cardLocalToRemote, remoteToLocal: _cardRemoteToLocal,
@@ -814,7 +1069,7 @@ $targetWhere
           );
           break;
         case 'card_examples':
-          await _syncTable(
+          result = await _syncTable(
             db: db, client: client, ownerId: ownerId, localTable: 'card_examples',
             remoteTable: 'card_examples', idColumn: 'id',
             localToRemote: _cardExampleLocalToRemote,
@@ -823,7 +1078,7 @@ $targetWhere
           );
           break;
         case 'review_states':
-          await _syncTable(
+          result = await _syncTable(
             db: db, client: client, ownerId: ownerId, localTable: 'review_states',
             remoteTable: 'review_states', idColumn: 'id',
             remoteConflictColumns: 'owner_id,card_id',
@@ -834,6 +1089,18 @@ $targetWhere
           );
           break;
       }
+      await ServerLogService.write('realtime.apply_finish', details: {
+        'table': table,
+        'events': changes.length,
+        'rows': rows.length,
+        'deleted': deleted,
+        'replaced': replacedRemoteIds.length,
+        'skipped': skipped,
+        'pushed': result?.pushed ?? 0,
+        'pulled': result?.pulled ?? 0,
+        'changed': true,
+        'error': result?.error,
+      });
       return true;
     } finally {
       _operation = previousOperation;
@@ -888,10 +1155,14 @@ $targetWhere
       await _prepareIdentityMaps(db, client, ownerId);
       _identityOwnerId = ownerId;
 
-      // Only rows changed after this authenticated session began may upload.
-      // Pull/merge never uploads anything.
+      // A live push uses a bounded window. Advancing the lower cursor only
+      // after a fully successful pass prevents old sessions/results from being
+      // uploaded again while preserving changes made during an active sync.
+      _livePushCutoffAt = _operation == _SyncOperation.livePush
+          ? DateTime.now().toIso8601String()
+          : null;
       final lastSyncAt = _operation == _SyncOperation.livePush
-          ? _sessionStartedAt
+          ? _livePushCursorAt
           : null;
 
       void collectError(String table, SyncResult result) {
@@ -1067,6 +1338,17 @@ $targetWhere
       if (_operation != _SyncOperation.livePush) {
         final now = DateTime.now().toIso8601String();
         await _setLocalSetting(db, 'sync.lastSyncAt', now);
+      } else if (syncErrors.isEmpty && _livePushCutoffAt != null) {
+        _livePushCursorAt = _livePushCutoffAt;
+        await _setLocalSetting(
+          db,
+          'sync.livePushCursor.v2.$ownerId',
+          _livePushCutoffAt!,
+        );
+        await ServerLogService.write('sync.cursor', details: {
+          'operation': _operation.name,
+          'lastPushAt': _livePushCutoffAt,
+        });
       }
 
       await ServerLogService.write('sync.finish', details: {
@@ -1101,6 +1383,7 @@ $targetWhere
       return SyncResult(pushed: 0, pulled: 0, error: e.toString());
     } finally {
       _prefetchedRemoteRows.clear();
+      _livePushCutoffAt = null;
       _isSyncing = false;
       _activeSync = null;
     }
@@ -1179,10 +1462,17 @@ $targetWhere
           final safetyTime = _operation == _SyncOperation.livePush
               ? parsed.toIso8601String()
               : parsed.subtract(const Duration(minutes: 5)).toIso8601String();
+          final upperTime = _operation == _SyncOperation.livePush
+              ? _livePushCutoffAt
+              : null;
           queriedLocalRows = await db.query(
             localTable,
-            where: '$timeCol > ?',
-            whereArgs: [safetyTime],
+            where: upperTime == null
+                ? '$timeCol > ?'
+                : '$timeCol > ? AND $timeCol <= ?',
+            whereArgs: upperTime == null
+                ? [safetyTime]
+                : [safetyTime, upperTime],
           );
         } else {
           queriedLocalRows = await db.query(localTable);
@@ -2017,6 +2307,25 @@ $targetWhere
     if (rows.isEmpty || localTable == 'topics' || localTable == 'app_settings') {
       return rows;
     }
+    var eligibleRows = rows;
+    if (localTable == 'study_sessions') {
+      final sessionsWithResults = (await db.query(
+        'study_results',
+        distinct: true,
+        columns: ['sessionId'],
+      ))
+          .map((row) => _localInt(row['sessionId']))
+          .whereType<int>()
+          .toSet();
+      eligibleRows = rows.where((row) {
+        final correct = _localInt(row['correctCount']) ?? 0;
+        final wrong = _localInt(row['wrongCount']) ?? 0;
+        return correct + wrong > 0 ||
+            sessionsWithResults.contains(_localInt(row['id']));
+      }).toList(growable: false);
+    }
+    if (eligibleRows.isEmpty) return eligibleRows;
+
     final conflictCourses = (await db.query(
       'courses',
       columns: ['id'],
@@ -2025,7 +2334,7 @@ $targetWhere
         .map((row) => row['id'] as int?)
         .whereType<int>()
         .toSet();
-    if (conflictCourses.isEmpty) return rows;
+    if (conflictCourses.isEmpty) return eligibleRows;
 
     final placeholders = List.filled(conflictCourses.length, '?').join(',');
     final conflictCards = (await db.query(
@@ -2068,7 +2377,7 @@ $targetWhere
       }
     }
 
-    return rows.where(pushable).toList(growable: false);
+    return eligibleRows.where(pushable).toList(growable: false);
   }
 
   Future<List<Map<String, dynamic>>> _fetchAllRemoteRows({
@@ -2167,6 +2476,7 @@ $targetWhere
         key == 'sync.lastSyncAt' ||
         key == 'gemini.apiKey' ||
         key.startsWith('sync.sessionStartedAt.') ||
+        key.startsWith('sync.livePushCursor.') ||
         key.startsWith('sync.migration.') ||
         key.startsWith('sync.offlineDeleteRecovery');
   }

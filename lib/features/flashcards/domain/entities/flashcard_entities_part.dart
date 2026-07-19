@@ -3,6 +3,7 @@ part of flutterflashcard_main;
 class StudyCardItem {
   final int id;
   final int courseId;
+  final int position;
   final String term;
   final String definition;
   final String pronunciation;
@@ -11,6 +12,7 @@ class StudyCardItem {
   StudyCardItem({
     required this.id,
     required this.courseId,
+    required this.position,
     required this.term,
     required this.definition,
     required this.pronunciation,
@@ -21,6 +23,7 @@ class StudyCardItem {
     return StudyCardItem(
       id: map['id'] as int,
       courseId: map['courseId'] as int,
+      position: _dbInt(map['position']),
       term: map['term']?.toString() ?? '',
       definition: map['definition']?.toString() ?? '',
       pronunciation: map['pronunciation']?.toString() ?? '',
@@ -37,6 +40,7 @@ class StudyCardItem {
     return StudyCardItem(
       id: id,
       courseId: courseId,
+      position: position,
       term: term ?? this.term,
       definition: definition ?? this.definition,
       pronunciation: pronunciation ?? this.pronunciation,

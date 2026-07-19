@@ -4,9 +4,26 @@ extension ReviewPracticePageStatePart01Split02 on _ReviewPracticePageState {
   Future<void> _finishStudySession() async {
     final sessionId = _studySessionId;
     if (sessionId == null || _studySessionFinished) return;
+    _studySessionFinished = true;
 
     try {
       final db = await AppDatabase.instance.database;
+      final resultCount = Sqflite.firstIntValue(
+            await db.rawQuery(
+              'SELECT COUNT(*) FROM study_results WHERE sessionId = ?',
+              [sessionId],
+            ),
+          ) ??
+          0;
+      if (resultCount == 0) {
+        await db.delete(
+          'study_sessions',
+          where: 'id = ?',
+          whereArgs: [sessionId],
+        );
+        _studySessionId = null;
+        return;
+      }
       await db.update(
         'study_sessions',
         {
@@ -17,13 +34,13 @@ extension ReviewPracticePageStatePart01Split02 on _ReviewPracticePageState {
         where: 'id = ?',
         whereArgs: [sessionId],
       );
-      _studySessionFinished = true;
       if (SupabaseConfig.isLoggedIn) {
         await SupabaseSyncService.instance.syncReviewStatesAfterStudy(
           sessionId: sessionId,
         );
       }
     } catch (e) {
+      _studySessionFinished = false;
       debugPrint('FINISH REVIEW SESSION ERROR: $e');
     }
   }
