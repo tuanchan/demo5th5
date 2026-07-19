@@ -615,7 +615,9 @@ extension StatisticsPageStatePart07 on _StatisticsPageState {
     });
     SyncResult? syncResult;
     if (SupabaseConfig.isLoggedIn) {
-      syncResult = await SupabaseSyncService.instance.syncReviewStatesAfterStudy();
+      syncResult = await SupabaseSyncService.instance.syncReviewStatesAfterStudy(
+        cardIds: items.map((item) => item.cardId),
+      );
     }
     if (!mounted) return;
     if (syncResult?.hasError == true) {
@@ -706,6 +708,8 @@ extension StatisticsPageStatePart07 on _StatisticsPageState {
   void _refreshSrsManager() {
     if (!mounted) return;
     setState(() {
+      _courseSrsLevelDraft.clear();
+      _courseSrsDateDraft.clear();
       _future = this.loadStatistics();
       _srsManagerFuture = this._loadSrsEditorItems();
     });
@@ -872,22 +876,38 @@ extension StatisticsPageStatePart07 on _StatisticsPageState {
       limit: 1,
     );
     final nextLevel = level.clamp(0, 8).toInt();
-    final interval = dueDate == null 
-        ? 0 
-        : math.max(0, dueDate.difference(DateTime.now()).inDays);
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final normalizedDueDate = dueDate == null
+        ? null
+        : DateTime(dueDate.year, dueDate.month, dueDate.day);
+    final effectiveDueDate = normalizedDueDate ??
+        (nextLevel > 0
+            ? today.add(
+                Duration(
+                  days: ReviewScheduler.intervalDaysForLevel(nextLevel),
+                ),
+              )
+            : null);
+    final interval = effectiveDueDate == null
+        ? 0
+        : math.max(0, effectiveDueDate.difference(today).inDays);
+    final effectiveReviews = nextLevel > 0
+        ? math.max(1, reviews)
+        : math.max(0, reviews);
         
     final values = <String, Object?>{
       'cardId': cardId,
       'level': nextLevel,
       'easeFactor': rows.isEmpty ? 2.5 : _dbDouble(rows.first['easeFactor'], 2.5),
       'intervalDays': interval,
-      'repetitionCount': reviews,
+      'repetitionCount': effectiveReviews,
       'correctCount': rows.isEmpty ? 0 : _dbInt(rows.first['correctCount']),
-      'wrongCount': lapses,
-      'lastReviewedAt': reviews > 0 
+      'wrongCount': math.max(0, lapses),
+      'lastReviewedAt': effectiveReviews > 0
           ? (rows.isEmpty || rows.first['lastReviewedAt'] == null ? nowIso : rows.first['lastReviewedAt']?.toString())
           : null,
-      'nextReviewAt': dueDate?.toIso8601String(),
+      'nextReviewAt': effectiveDueDate?.toIso8601String(),
       'updatedAt': nowIso,
     };
     
@@ -905,7 +925,9 @@ extension StatisticsPageStatePart07 on _StatisticsPageState {
     
     if (SupabaseConfig.isLoggedIn) {
       unawaited(
-        SupabaseSyncService.instance.syncReviewStatesAfterStudy().then((syncResult) {
+        SupabaseSyncService.instance
+            .syncReviewStatesAfterStudy(cardIds: [cardId])
+            .then((syncResult) {
           if (syncResult.hasError) {
             debugPrint('SAVE CARD SRS SYNC ERROR: ${syncResult.error}');
           }
@@ -1032,6 +1054,9 @@ class _InlineSrsCardWidgetState extends State<_InlineSrsCardWidget> {
         oldWidget.item.repetitionCount != widget.item.repetitionCount ||
         oldWidget.item.wrongCount != widget.item.wrongCount ||
         oldWidget.item.nextReviewAt != widget.item.nextReviewAt) {
+      _levelController.dispose();
+      _reviewsController.dispose();
+      _lapsesController.dispose();
       _initFields();
     }
   }

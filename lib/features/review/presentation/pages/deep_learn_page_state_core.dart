@@ -646,7 +646,11 @@ class _DeepLearnPageState extends State<DeepLearnPage> {
   void _syncSrsAfterCompletion() {
     if (_didRequestSrsSync || !SupabaseConfig.isLoggedIn) return;
     _didRequestSrsSync = true;
-    unawaited(SupabaseSyncService.instance.syncReviewStatesAfterStudy());
+    unawaited(
+      SupabaseSyncService.instance.syncReviewStatesAfterStudy(
+        cardIds: _mastered,
+      ),
+    );
   }
 
   Future<void> _toggleStar() async {

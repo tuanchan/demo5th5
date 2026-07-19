@@ -334,8 +334,8 @@ extension StatisticsPageStatePart06Split03 on _StatisticsPageState {
       nextReviewAt: nextReviewAt,
     );
     if (SupabaseConfig.isLoggedIn) {
-      final syncResult =
-          await SupabaseSyncService.instance.syncReviewStatesAfterStudy();
+      final syncResult = await SupabaseSyncService.instance
+          .syncReviewStatesAfterStudy(cardIds: [cardId]);
       if (syncResult.hasError) {
         debugPrint('UPDATE SRS SYNC ERROR: ${syncResult.error}');
       }

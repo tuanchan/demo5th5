@@ -356,6 +356,8 @@ extension StatisticsPageStatePart02 on _StatisticsPageState {
 
   void reloadStatistics() {
     setState(() {
+      _courseSrsLevelDraft.clear();
+      _courseSrsDateDraft.clear();
       _future = this.loadStatistics();
       _srsManagerFuture = this._loadSrsEditorItems();
     });
@@ -363,7 +365,11 @@ extension StatisticsPageStatePart02 on _StatisticsPageState {
 
   Future<void> _refreshDashboard() async {
     if (!mounted || _isDashboardRefreshing) return;
-    setState(() => _isDashboardRefreshing = true);
+    setState(() {
+      _isDashboardRefreshing = true;
+      _courseSrsLevelDraft.clear();
+      _courseSrsDateDraft.clear();
+    });
 
     final statisticsFuture = this.loadStatistics();
     final srsManagerFuture = this._loadSrsEditorItems();
@@ -373,6 +379,8 @@ extension StatisticsPageStatePart02 on _StatisticsPageState {
       setState(() {
         // Both futures are already complete, so the current dashboard remains
         // visible during refresh and is replaced without a full-page spinner.
+        _courseSrsLevelDraft.clear();
+        _courseSrsDateDraft.clear();
         _future = statisticsFuture;
         _srsManagerFuture = srsManagerFuture;
       });

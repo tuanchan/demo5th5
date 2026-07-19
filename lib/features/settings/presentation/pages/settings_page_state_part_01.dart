@@ -166,6 +166,10 @@ extension SettingsPageStatePart01 on _SettingsPageState {
               ),
               SizedBox(height: 14),
               this._buildAccountSection(),
+              if (ServerLogService.isAvailable) ...[
+                SizedBox(height: 14),
+                this._buildServerLogSection(),
+              ],
             ],
           ),
         ),

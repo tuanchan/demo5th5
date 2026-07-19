@@ -352,37 +352,12 @@ extension FlashCardsPageStatePart01 on _FlashCardsPageState {
       );
       _studySessionFinished = true;
       if (SupabaseConfig.isLoggedIn) {
-        await SupabaseSyncService.instance.syncReviewStatesAfterStudy();
+        await SupabaseSyncService.instance.syncReviewStatesAfterStudy(
+          sessionId: sessionId,
+        );
       }
     } catch (e) {
       debugPrint('FINISH FLASH SESSION ERROR: $e');
-    }
-  }
-
-
-
-
-
-  Future<int?> _insertFlashStudyResult({
-    required StudyCardItem card,
-    required bool known,
-  }) async {
-    final sessionId = _studySessionId;
-    if (sessionId == null || _studySessionFinished) return null;
-
-    try {
-      final db = await AppDatabase.instance.database;
-      return await db.insert('study_results', {
-        'sessionId': sessionId,
-        'cardId': card.id,
-        'answerText': known ? 'known' : 'unknown',
-        'isCorrect': known ? 1 : 0,
-        'responseTimeMs': null,
-        'reviewedAt': DateTime.now().toIso8601String(),
-      });
-    } catch (e) {
-      debugPrint('INSERT FLASH RESULT ERROR: $e');
-      return null;
     }
   }
 

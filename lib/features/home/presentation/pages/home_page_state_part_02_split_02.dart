@@ -305,7 +305,7 @@ extension HomePageStatePart02Split02 on _HomePageState {
       WHERE c.deletedAt IS NULL
       GROUP BY c.id, c.topicId, t.name, c.title, c.languageCode,
         c.hasLocalNameConflict
-      ORDER BY COALESCE(c.updatedAt, c.createdAt) DESC
+      ORDER BY lower(trim(c.title)) ASC, c.title ASC, c.id ASC
     ''');
       final topicRows = await db.rawQuery('''
         SELECT

@@ -1,42 +1,60 @@
 part of flutterflashcard_main;
 
 extension FlashCardsPageStatePart02 on _FlashCardsPageState {
-  Future<Map<String, Object?>?> markCurrentCard(bool known) async {
+  Future<({
+    Map<String, Object?>? previousReviewState,
+    int studyResultId,
+  })?> recordCurrentCardProgress(bool known) async {
     final card = currentCard;
-    if (card == null) return null;
+    final sessionId = _studySessionId;
+    if (card == null || sessionId == null || _studySessionFinished) return null;
 
     final db = await AppDatabase.instance.database;
     final now = DateTime.now();
-
-    final rows = await db.query(
-      'review_states',
-      where: 'cardId = ?',
-      whereArgs: [card.id],
-      limit: 1,
-    );
-
-    final previousState = rows.isEmpty
-        ? null
-        : Map<String, Object?>.from(rows.first);
-    final nextState = ReviewScheduler.nextState(
-      cardId: card.id,
-      previous: previousState,
-      isCorrect: known,
-      now: now,
-    );
-
-    if (rows.isEmpty) {
-      await db.insert('review_states', nextState);
-    } else {
-      await db.update(
-        'review_states',
-        nextState,
-        where: 'cardId = ?',
-        whereArgs: [card.id],
-      );
+    try {
+      return await db.transaction((txn) async {
+        final rows = await txn.query(
+          'review_states',
+          where: 'cardId = ?',
+          whereArgs: [card.id],
+          limit: 1,
+        );
+        final previousState = rows.isEmpty
+            ? null
+            : Map<String, Object?>.from(rows.first);
+        final nextState = ReviewScheduler.nextState(
+          cardId: card.id,
+          previous: previousState,
+          isCorrect: known,
+          now: now,
+        );
+        if (rows.isEmpty) {
+          await txn.insert('review_states', nextState);
+        } else {
+          await txn.update(
+            'review_states',
+            nextState,
+            where: 'cardId = ?',
+            whereArgs: [card.id],
+          );
+        }
+        final resultId = await txn.insert('study_results', {
+          'sessionId': sessionId,
+          'cardId': card.id,
+          'answerText': known ? 'known' : 'unknown',
+          'isCorrect': known ? 1 : 0,
+          'responseTimeMs': null,
+          'reviewedAt': now.toIso8601String(),
+        });
+        return (
+          previousReviewState: previousState,
+          studyResultId: resultId,
+        );
+      });
+    } catch (error) {
+      debugPrint('RECORD FLASH PROGRESS ERROR: $error');
+      return null;
     }
-
-    return previousState;
   }
 
 

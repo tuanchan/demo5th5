@@ -12,6 +12,8 @@ class _SettingsPageState extends State<SettingsPage> {
   bool? accountSyncSucceeded;
   String accountSyncMessage = '';
   List<String> accountSyncLogs = const [];
+  String serverLogPath = '';
+  bool serverLogLoading = false;
   
   final List<String> geminiModels = const [
     'gemini-3.1-flash-lite',
@@ -60,6 +62,7 @@ class _SettingsPageState extends State<SettingsPage> {
     super.initState();
     this.loadSettings();
     this._resumeAccountSyncStatus();
+    if (ServerLogService.isAvailable) this._loadServerLogPath();
   }
 
   @override

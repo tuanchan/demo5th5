@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:sqflite/sqflite.dart';
 import '../database/app_database.dart';
+import 'server_log_service.dart';
 import 'supabase_config.dart';
 
 enum _SyncOperation { pullReplace, merge, livePush }
@@ -40,6 +41,8 @@ class SupabaseSyncService {
   RealtimeChannel? _realtimeChannel;
   Timer? _realtimeMergeDebounce;
   final Map<String, PostgresChangePayload> _realtimePendingChanges = {};
+  Future<void> _studySyncTail = Future<void>.value();
+  bool _isPushingStudyData = false;
 
   bool get isSyncing => _isSyncing;
   bool get isSyncCancellationRequested => _cancelSyncRequested;
@@ -63,6 +66,9 @@ class SupabaseSyncService {
   Future<SyncResult> _startSync(_SyncOperation operation) {
     final active = _activeSync;
     if (active != null) return active;
+    if (_isPushingStudyData) {
+      return _studySyncTail.then((_) => _startSync(operation));
+    }
     if (!SupabaseConfig.isLoggedIn) {
       return Future.value(
         SyncResult(pushed: 0, pulled: 0, error: 'Chưa đăng nhập'),
@@ -102,7 +108,31 @@ class SupabaseSyncService {
 
   /// Pushes the complete SRS state after a study session finishes. Card IDs
   /// are resolved against Supabase first, matching the desktop sync flow.
-  Future<SyncResult> syncReviewStatesAfterStudy() async {
+  Future<SyncResult> syncReviewStatesAfterStudy({
+    int? sessionId,
+    Iterable<int>? cardIds,
+  }) {
+    final requestedCardIds = cardIds?.toSet();
+    final completer = Completer<SyncResult>();
+    _studySyncTail = _studySyncTail.then((_) async {
+      try {
+        completer.complete(
+          await _syncReviewStatesAfterStudyOnce(
+            sessionId: sessionId,
+            cardIds: requestedCardIds,
+          ),
+        );
+      } catch (error, stackTrace) {
+        completer.completeError(error, stackTrace);
+      }
+    }).catchError((_) {});
+    return completer.future;
+  }
+
+  Future<SyncResult> _syncReviewStatesAfterStudyOnce({
+    int? sessionId,
+    Set<int>? cardIds,
+  }) async {
     final active = _activeSync;
     if (active != null) await active;
     if (!SupabaseConfig.isLoggedIn) {
@@ -110,11 +140,40 @@ class SupabaseSyncService {
     }
 
     try {
+      await ServerLogService.write('study_sync.start', details: {
+        'sessionId': sessionId,
+        'requestedCards': cardIds?.length ?? 'from-session',
+      });
       // Push newly created topics/courses/cards first. Otherwise an SRS row can
       // be skipped because its card does not exist on Supabase yet.
       final dependencySync = await syncPendingChanges();
+      _isPushingStudyData = true;
+      await ServerLogService.write('study_sync.dependencies', details: {
+        'sessionId': sessionId,
+        'pushed': dependencySync.pushed,
+        'pulled': dependencySync.pulled,
+        'error': dependencySync.error,
+      });
       final db = await AppDatabase.instance.database;
       final ownerId = SupabaseConfig.currentUser!.id;
+      final targetCardIds = <int>{...?cardIds};
+      if (sessionId != null) {
+        final resultCards = await db.query(
+          'study_results',
+          columns: ['cardId'],
+          where: 'sessionId = ?',
+          whereArgs: [sessionId],
+        );
+        targetCardIds.addAll(
+          resultCards
+              .map((row) => _localInt(row['cardId']))
+              .whereType<int>(),
+        );
+      }
+      final hasExplicitTargets = sessionId != null || cardIds != null;
+      final targetWhere = targetCardIds.isEmpty
+          ? (hasExplicitTargets ? ' AND 1 = 0' : '')
+          : ' AND rs.cardId IN (${List.filled(targetCardIds.length, '?').join(',')})';
       // A manually assigned due date is valid even at SRS level 0, so push
       // every local review state instead of filtering only progressed cards.
       final localStates = await db.rawQuery('''
@@ -125,7 +184,13 @@ class SupabaseSyncService {
         WHERE ca.deletedAt IS NULL
           AND c.deletedAt IS NULL
           AND COALESCE(c.hasLocalNameConflict, 0) = 0
-      ''');
+$targetWhere
+      ''', targetCardIds.toList());
+      await ServerLogService.write('study_sync.local_scope', details: {
+        'sessionId': sessionId,
+        'cards': targetCardIds.length,
+        'srsRows': localStates.length,
+      });
       final payload = <Map<String, dynamic>>[];
       final skippedCardIds = <int>[];
       final failedRemoteCardIds = <String>[];
@@ -196,6 +261,12 @@ class SupabaseSyncService {
           }
         }
       }
+      await ServerLogService.write('study_sync.srs_uploaded', details: {
+        'sessionId': sessionId,
+        'payload': payload.length,
+        'skippedCards': skippedCardIds.length,
+        'failedCards': failedRemoteCardIds.length,
+      });
 
       // Some existing server rows can acknowledge the conflict update while
       // still returning an empty schedule. Apply those SRS fields explicitly
@@ -226,7 +297,29 @@ class SupabaseSyncService {
         return nextReviewAt.isNotEmpty;
       }).length;
       var verifiedStateCount = 0;
+      var verifiedMatchingStateCount = 0;
       var verifiedScheduleCount = 0;
+      final expectedStateByCardId = <String, Map<String, dynamic>>{
+        for (final row in payload)
+          if (row['card_id'] != null) row['card_id'].toString(): row,
+      };
+      bool sameTimestamp(Object? left, Object? right) {
+        final leftText = left?.toString() ?? '';
+        final rightText = right?.toString() ?? '';
+        if (leftText.isEmpty || rightText.isEmpty) {
+          return leftText.isEmpty && rightText.isEmpty;
+        }
+        final leftTime = DateTime.tryParse(leftText);
+        final rightTime = DateTime.tryParse(rightText);
+        if (leftTime != null && rightTime != null) {
+          return leftTime.isAtSameMomentAs(rightTime);
+        }
+        return leftText == rightText;
+      }
+      double numberValue(Object? value) {
+        if (value is num) return value.toDouble();
+        return double.tryParse(value?.toString() ?? '') ?? 0;
+      }
       final remoteCardIds = payload
           .map((row) => row['card_id']?.toString())
           .whereType<String>()
@@ -236,15 +329,54 @@ class SupabaseSyncService {
         final end = math.min(start + 200, remoteCardIds.length);
         final rows = await SupabaseConfig.client
             .from('review_states')
-            .select('card_id,next_review_at,interval_days')
+            .select(
+              'card_id,level,ease_factor,interval_days,repetition_count,'
+              'correct_count,wrong_count,last_reviewed_at,next_review_at',
+            )
             .eq('owner_id', ownerId)
             .inFilter('card_id', remoteCardIds.sublist(start, end));
         verifiedStateCount += rows.length;
+        verifiedMatchingStateCount += rows.where((remote) {
+          final expected = expectedStateByCardId[remote['card_id']?.toString()];
+          if (expected == null) return false;
+          return _localInt(remote['level']) == _localInt(expected['level']) &&
+              (numberValue(remote['ease_factor']) -
+                          numberValue(expected['ease_factor']))
+                      .abs() <
+                  0.000001 &&
+              _localInt(remote['interval_days']) ==
+                  _localInt(expected['interval_days']) &&
+              _localInt(remote['repetition_count']) ==
+                  _localInt(expected['repetition_count']) &&
+              _localInt(remote['correct_count']) ==
+                  _localInt(expected['correct_count']) &&
+              _localInt(remote['wrong_count']) ==
+                  _localInt(expected['wrong_count']) &&
+              sameTimestamp(
+                remote['last_reviewed_at'],
+                expected['last_reviewed_at'],
+              ) &&
+              sameTimestamp(remote['next_review_at'], expected['next_review_at']);
+        }).length;
         verifiedScheduleCount += rows.where((row) {
           final nextReviewAt = row['next_review_at']?.toString() ?? '';
           return nextReviewAt.isNotEmpty;
         }).length;
       }
+      var verifiedStudyResultCount = 0;
+      var expectedStudyResultCount = 0;
+      String? studyDataError;
+      if (sessionId != null) {
+        final verification = await _pushAndVerifyStudySession(
+          db: db,
+          ownerId: ownerId,
+          localSessionId: sessionId,
+        );
+        expectedStudyResultCount = verification.expected;
+        verifiedStudyResultCount = verification.verified;
+        studyDataError = verification.error;
+      }
+
       final errors = <String>[
         if (dependencySync.hasError)
           'Lỗi đồng bộ dữ liệu cha: ${dependencySync.error}',
@@ -257,13 +389,35 @@ class SupabaseSyncService {
         if (verifiedScheduleCount != expectedScheduleCount)
           'Server chỉ xác nhận $verifiedScheduleCount/$expectedScheduleCount lịch ôn',
       ];
+      if (verifiedMatchingStateCount != verifiedStateCount) {
+        errors.add(
+          'Server chỉ khớp $verifiedMatchingStateCount/'
+          '$verifiedStateCount giá trị SRS',
+        );
+      }
+      if (studyDataError != null) errors.add(studyDataError);
+      if (verifiedStudyResultCount != expectedStudyResultCount) {
+        errors.add(
+          'Server chỉ xác nhận $verifiedStudyResultCount/'
+          '$expectedStudyResultCount kết quả học',
+        );
+      }
       print(
         'SRS SERVER RESULT: states=$verifiedStateCount/${payload.length}, '
         'scheduled=$verifiedScheduleCount/$expectedScheduleCount, '
         'skippedCards=${skippedCardIds.length}',
       );
+      await ServerLogService.write('study_sync.finish', details: {
+        'sessionId': sessionId,
+        'srs': '$verifiedStateCount/${payload.length}',
+        'srsValues': '$verifiedMatchingStateCount/$verifiedStateCount',
+        'schedules': '$verifiedScheduleCount/$expectedScheduleCount',
+        'studyResults': '$verifiedStudyResultCount/$expectedStudyResultCount',
+        'error': errors.isEmpty ? null : errors.join(' | '),
+      });
+      _isPushingStudyData = false;
       return SyncResult(
-        pushed: verifiedStateCount,
+        pushed: verifiedStateCount + verifiedStudyResultCount,
         pulled: 0,
         error: errors.isEmpty ? null : errors.join(' | '),
         logs: [
@@ -272,8 +426,148 @@ class SupabaseSyncService {
         ],
       );
     } catch (error) {
+      _isPushingStudyData = false;
+      await ServerLogService.write('study_sync.error', details: {
+        'sessionId': sessionId,
+        'error': error,
+      });
       return SyncResult(pushed: 0, pulled: 0, error: error.toString());
     }
+  }
+
+  Future<({int expected, int verified, String? error})>
+      _pushAndVerifyStudySession({
+    required Database db,
+    required String ownerId,
+    required int localSessionId,
+  }) async {
+    final sessions = await db.query(
+      'study_sessions',
+      where: 'id = ?',
+      whereArgs: [localSessionId],
+      limit: 1,
+    );
+    if (sessions.isEmpty) {
+      return (expected: 0, verified: 0, error: 'Không tìm thấy phiên học local');
+    }
+
+    final session = sessions.first;
+    final localCourseId = _localInt(session['courseId']);
+    final mappedRemoteCourseId = localCourseId == null
+        ? null
+        : _courseRemoteIdByLocal['$localCourseId'];
+    final remoteCourseId = mappedRemoteCourseId?.isNotEmpty == true
+        ? mappedRemoteCourseId
+        : (localCourseId == null
+              ? null
+              : await findRemoteCourseId(localCourseId));
+    if (remoteCourseId == null || remoteCourseId.isEmpty) {
+      return (
+        expected: 0,
+        verified: 0,
+        error: 'Không tìm thấy học phần của phiên học trên server',
+      );
+    }
+
+    final remoteSessionId = _uuidFromLocalId(localSessionId, 'study_session');
+    final sessionPayload = _studySessionLocalToRemote(session, ownerId)
+      ..['id'] = remoteSessionId
+      ..['course_id'] = remoteCourseId
+      ..['updated_at'] = DateTime.now().toUtc().toIso8601String();
+    await SupabaseConfig.client
+        .from('study_sessions')
+        .upsert([sessionPayload], onConflict: 'id');
+
+    final localResults = await db.query(
+      'study_results',
+      where: 'sessionId = ?',
+      whereArgs: [localSessionId],
+      orderBy: 'id ASC',
+    );
+    final sessionAnsweredCount =
+        (_localInt(session['correctCount']) ?? 0) +
+        (_localInt(session['wrongCount']) ?? 0);
+    final payload = <Map<String, dynamic>>[];
+    final unmappedCardIds = <int>[];
+    for (final result in localResults) {
+      final localCardId = _localInt(result['cardId']);
+      if (localCardId == null) continue;
+      final mappedRemoteCardId = _cardRemoteIdByLocal['$localCardId'];
+      final remoteCardId = mappedRemoteCardId?.isNotEmpty == true
+          ? mappedRemoteCardId
+          : await findRemoteCardId(localCardId);
+      if (remoteCardId == null || remoteCardId.isEmpty) {
+        unmappedCardIds.add(localCardId);
+        continue;
+      }
+      payload.add(
+        _studyResultLocalToRemote(result, ownerId)
+          ..['session_id'] = remoteSessionId
+          ..['card_id'] = remoteCardId,
+      );
+    }
+    await ServerLogService.write('study_sync.results_prepared', details: {
+      'sessionId': localSessionId,
+      'sessionTotalCards': session['totalCards'],
+      'sessionAnswered': sessionAnsweredCount,
+      'localResults': localResults.length,
+      'payload': payload.length,
+      'unmappedCards': unmappedCardIds.length,
+    });
+
+    for (var start = 0; start < payload.length; start += 200) {
+      final end = math.min(start + 200, payload.length);
+      await SupabaseConfig.client
+          .from('study_results')
+          .upsert(payload.sublist(start, end), onConflict: 'id');
+    }
+    var verifiedRows = await SupabaseConfig.client
+        .from('study_results')
+        .select('id')
+        .eq('owner_id', ownerId)
+        .eq('session_id', remoteSessionId);
+    // Remove only stale extras after every current local result has been
+    // accepted. This keeps an undone answer from inflating the learned count.
+    final expectedRemoteIds = payload
+        .map((row) => row['id']?.toString())
+        .whereType<String>()
+        .toSet();
+    final staleRemoteIds = verifiedRows
+        .map((row) => row['id']?.toString())
+        .whereType<String>()
+        .where((id) => !expectedRemoteIds.contains(id))
+        .toList();
+    if (unmappedCardIds.isEmpty && staleRemoteIds.isNotEmpty) {
+      await SupabaseConfig.client
+          .from('study_results')
+          .delete()
+          .eq('owner_id', ownerId)
+          .eq('session_id', remoteSessionId)
+          .inFilter('id', staleRemoteIds);
+      verifiedRows = await SupabaseConfig.client
+          .from('study_results')
+          .select('id')
+          .eq('owner_id', ownerId)
+          .eq('session_id', remoteSessionId);
+    }
+    await ServerLogService.write('study_sync.results_verified', details: {
+      'sessionId': localSessionId,
+      'expected': localResults.length,
+      'verified': verifiedRows.length,
+      'removedStale': staleRemoteIds.length,
+    });
+    final resultErrors = <String>[
+      if (sessionAnsweredCount != localResults.length)
+        'Phiên ghi nhận $sessionAnsweredCount câu trả lời nhưng local chỉ có '
+            '${localResults.length} kết quả',
+      if (unmappedCardIds.isNotEmpty)
+        'Thiếu ánh xạ server của ${unmappedCardIds.length} thẻ đã học',
+    ];
+    return (
+      expected: localResults.length,
+      verified: verifiedRows.length,
+      error: resultErrors.isEmpty ? null : resultErrors.join(' | '),
+    );
   }
 
   Future<void> beginAuthenticatedSession({bool newLogin = false}) async {
@@ -372,7 +666,7 @@ class SupabaseSyncService {
     _realtimeMergeDebounce?.cancel();
     _realtimeMergeDebounce = Timer(const Duration(milliseconds: 1200), () async {
       if (!SupabaseConfig.isLoggedIn) return;
-      if (_isSyncing) {
+      if (_isSyncing || _isPushingStudyData) {
         _realtimeMergeDebounce = Timer(
           const Duration(milliseconds: 1200),
           () => _queueRealtimeChanges(),
@@ -392,7 +686,15 @@ class SupabaseSyncService {
   }
 
   Future<void> _queueRealtimeChanges() async {
-    if (!SupabaseConfig.isLoggedIn || _isSyncing || _realtimePendingChanges.isEmpty) {
+    if (!SupabaseConfig.isLoggedIn || _realtimePendingChanges.isEmpty) {
+      return;
+    }
+    if (_isSyncing || _isPushingStudyData) {
+      _realtimeMergeDebounce?.cancel();
+      _realtimeMergeDebounce = Timer(
+        const Duration(milliseconds: 1200),
+        _queueRealtimeChanges,
+      );
       return;
     }
     final changes = _realtimePendingChanges.values.toList()
@@ -542,6 +844,9 @@ class SupabaseSyncService {
 
     _isSyncing = true;
     _lastSyncError = null;
+    await ServerLogService.write('sync.start', details: {
+      'operation': _operation.name,
+    });
 
     try {
       _prefetchedRemoteRows.clear();
@@ -595,6 +900,13 @@ class SupabaseSyncService {
           '${result.hasError ? ' — ${result.error}' : ''}',
         );
         if (result.hasError) syncErrors.add('$table: ${result.error}');
+        unawaited(ServerLogService.write('sync.table', details: {
+          'operation': _operation.name,
+          'table': table,
+          'pushed': result.pushed,
+          'pulled': result.pulled,
+          'error': result.error,
+        }));
       }
 
       // 1. Sync topics
@@ -757,6 +1069,12 @@ class SupabaseSyncService {
         await _setLocalSetting(db, 'sync.lastSyncAt', now);
       }
 
+      await ServerLogService.write('sync.finish', details: {
+        'operation': _operation.name,
+        'pushed': pushed,
+        'pulled': pulled,
+        'errors': syncErrors.length,
+      });
       return SyncResult(
         pushed: pushed,
         pulled: pulled,
@@ -766,6 +1084,9 @@ class SupabaseSyncService {
         error: syncErrors.isEmpty ? null : syncErrors.join(' | '),
       );
     } on _SyncCancelled {
+      await ServerLogService.write('sync.cancelled', details: {
+        'operation': _operation.name,
+      });
       return SyncResult(
         pushed: 0,
         pulled: 0,
@@ -773,6 +1094,10 @@ class SupabaseSyncService {
       );
     } catch (e) {
       _lastSyncError = e.toString();
+      await ServerLogService.write('sync.error', details: {
+        'operation': _operation.name,
+        'error': e,
+      });
       return SyncResult(pushed: 0, pulled: 0, error: e.toString());
     } finally {
       _prefetchedRemoteRows.clear();
@@ -1442,10 +1767,12 @@ class SupabaseSyncService {
       'repetition_count': row['repetitionCount'] ?? 0,
       'correct_count': row['correctCount'] ?? 0,
       'wrong_count': row['wrongCount'] ?? 0,
-      'last_reviewed_at': row['lastReviewedAt'],
-      'next_review_at': row['nextReviewAt'],
-      'created_at': row['createdAt'],
-      'updated_at': row['updatedAt'] ?? row['createdAt'],
+      'last_reviewed_at': _localTimestampToRemoteIso(row['lastReviewedAt']),
+      'next_review_at': _localTimestampToRemoteIso(row['nextReviewAt']),
+      'created_at': _localTimestampToRemoteIso(row['createdAt']),
+      'updated_at': _localTimestampToRemoteIso(
+        row['updatedAt'] ?? row['createdAt'],
+      ),
     };
   }
 
@@ -2305,6 +2632,13 @@ class SupabaseSyncService {
     if (text.isEmpty) return null;
     final parsed = DateTime.tryParse(text);
     return parsed?.toLocal().toIso8601String() ?? text;
+  }
+
+  String? _localTimestampToRemoteIso(Object? value) {
+    final text = value?.toString().trim() ?? '';
+    if (text.isEmpty) return null;
+    final parsed = DateTime.tryParse(text);
+    return parsed?.toUtc().toIso8601String() ?? text;
   }
 
   String _normalizeIdentity(Object? value) {

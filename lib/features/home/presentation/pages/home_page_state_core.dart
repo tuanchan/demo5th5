@@ -265,8 +265,18 @@ class _HomePageState extends State<HomePage>
   void initState() {
     super.initState();
     _homeSyncSubscription = SupabaseSyncService.instance.syncCompleted.listen(
-      (_) {
-        if (mounted) this.loadCourses(showLoading: false);
+      (result) {
+        if (!mounted) return;
+        // A downloaded snapshot has server timestamps that are unrelated to
+        // the user's desired visual order. Always present newly pulled
+        // courses in deterministic natural A-Z order (day2 before day10).
+        if (result.pulledCourses > 0 && courseSortType != 'az') {
+          setState(() => courseSortType = 'az');
+          unawaited(
+            AppSettingsStore.setString(_courseSortSettingKey, 'az'),
+          );
+        }
+        this.loadCourses(showLoading: false);
       },
     );
     _homeRealtimeSubscription = SupabaseSyncService.instance.remoteDataChanged

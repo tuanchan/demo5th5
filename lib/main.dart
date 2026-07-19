@@ -25,6 +25,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'core/database/app_database.dart';
 import 'core/network/supabase_config.dart';
 import 'core/network/supabase_sync_service.dart';
+import 'core/network/server_log_service.dart';
 
 part 'core/theme/app_theme_and_settings_part.dart';
 part 'core/utils/app_helpers_part_01.dart';

@@ -243,11 +243,13 @@ extension FlashCardsPageStatePart01Split02 on _FlashCardsPageState {
 
     final previousPos = currentPos;
     final previousCompletion = showCompletion;
-    final previousReviewState = await this.markCurrentCard(known);
-    final studyResultId = await this._insertFlashStudyResult(
-      card: card,
-      known: known,
-    );
+    final recorded = await this.recordCurrentCardProgress(known);
+    if (recorded == null) {
+      this.showFlashMessage('Không lưu được tiến độ của thẻ');
+      return;
+    }
+    final previousReviewState = recorded.previousReviewState;
+    final studyResultId = recorded.studyResultId;
     final nextPos = currentPos + 1;
     final isDone = nextPos >= visibleOrder.length;
 
