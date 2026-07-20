@@ -448,10 +448,18 @@ class _VocabularyReminderDialogState
                         runSpacing: 9,
                         children: [
                           OutlinedButton(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: const Color(0xff3b82f6),
+                              side: const BorderSide(color: Color(0xff3b82f6)),
+                            ),
                             onPressed: _busy ? null : _testNotification,
                             child: const Text('Gửi thử'),
                           ),
                           OutlinedButton(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: const Color(0xff3b82f6),
+                              side: const BorderSide(color: Color(0xff3b82f6)),
+                            ),
                             onPressed: _busy ? null : _resetLearned,
                             child: const Text('Đặt lại từ đã thuộc'),
                           ),
@@ -468,11 +476,19 @@ class _VocabularyReminderDialogState
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
                     TextButton(
+                      style: TextButton.styleFrom(
+                        foregroundColor: const Color(0xff60a5fa),
+                      ),
                       onPressed: _busy ? null : () => Navigator.pop(context),
                       child: const Text('Hủy'),
                     ),
                     const SizedBox(width: 8),
                     FilledButton(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xff2563eb),
+                        foregroundColor: Colors.white,
+                        disabledBackgroundColor: const Color(0xff1e3a8a),
+                      ),
                       onPressed: _busy ? null : _save,
                       child: _busy
                           ? const SizedBox(
@@ -514,6 +530,8 @@ class _VocabularyReminderDialogState
           ),
         ),
         value: value,
+        activeThumbColor: Colors.white,
+        activeTrackColor: const Color(0xff2563eb),
         onChanged: _busy ? null : onChanged,
       ),
     );
