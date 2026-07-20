@@ -277,6 +277,7 @@ class VocabularyReminderService {
 
   Future<void> saveConfig(VocabularyReminderConfig config) async {
     await initialize();
+    await AppDatabase.instance.ensureVocabularyReminderSchema();
     final db = await AppDatabase.instance.database;
     await db.insert(
       'vocabulary_reminder_configs',

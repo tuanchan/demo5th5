@@ -10,7 +10,7 @@ class AppDatabase {
 
   static Database? _database;
   bool _syncOutboxReady = false;
-  bool _vocabularyReminderSchemaReady = false;
+  Future<void>? _vocabularyReminderSchemaCheck;
 
   Future<Database> get database async {
     if (_database != null) return _database!;
@@ -331,10 +331,23 @@ class AppDatabase {
   }
 
   Future<void> ensureVocabularyReminderSchema() async {
-    if (_vocabularyReminderSchemaReady) return;
-    final db = await database;
-    if (_vocabularyReminderSchemaReady) return;
-    await _createVocabularyReminderTables(db);
+    final runningCheck = _vocabularyReminderSchemaCheck;
+    if (runningCheck != null) return runningCheck;
+    // Always verify additive columns. During Flutter hot reload the database
+    // connection and this singleton survive while new code may already write
+    // fields introduced by a newer schema.
+    final check = () async {
+      final db = await database;
+      await _createVocabularyReminderTables(db);
+    }();
+    _vocabularyReminderSchemaCheck = check;
+    try {
+      await check;
+    } finally {
+      if (identical(_vocabularyReminderSchemaCheck, check)) {
+        _vocabularyReminderSchemaCheck = null;
+      }
+    }
   }
 
   Future<void> _createVocabularyReminderTables(Database db) async {
@@ -414,7 +427,6 @@ class AppDatabase {
       'CREATE INDEX IF NOT EXISTS idx_vocab_reminder_states_course '
       'ON vocabulary_reminder_states(courseId, learned)',
     );
-    _vocabularyReminderSchemaReady = true;
   }
 
   Future<void> ensureSyncOutboxTable() async {
