@@ -28,10 +28,12 @@ class VocabularyReminderConfig {
   const VocabularyReminderConfig({
     required this.courseId,
     this.enabled = false,
-    this.intervalMinutes = 60,
+    this.intervalMinutes = 0.5,
     this.notificationsPerDay = 8,
     this.startHour = 8,
+    this.startMinute = 0,
     this.endHour = 22,
+    this.endMinute = 0,
     this.includePronunciation = true,
     this.includeDefinition = true,
     this.skipSrsMastered = true,
@@ -45,7 +47,9 @@ class VocabularyReminderConfig {
   final double intervalMinutes;
   final int notificationsPerDay;
   final int startHour;
+  final int startMinute;
   final int endHour;
+  final int endMinute;
   final bool includePronunciation;
   final bool includeDefinition;
   final bool skipSrsMastered;
@@ -64,14 +68,17 @@ class VocabularyReminderConfig {
         (row[key] as num?)?.toInt() ?? fallback;
     double decimal(String key, double fallback) =>
         (row[key] as num?)?.toDouble() ?? fallback;
+    final storedEndHour = number('endHour', 22);
 
     return VocabularyReminderConfig(
       courseId: number('courseId', 0),
       enabled: flag('enabled', false),
-      intervalMinutes: decimal('intervalMinutes', 60),
+      intervalMinutes: decimal('intervalMinutes', 0.5),
       notificationsPerDay: number('notificationsPerDay', 8),
       startHour: number('startHour', 8),
-      endHour: number('endHour', 22),
+      startMinute: number('startMinute', 0),
+      endHour: storedEndHour >= 24 ? 23 : storedEndHour,
+      endMinute: storedEndHour >= 24 ? 59 : number('endMinute', 0),
       includePronunciation: flag('includePronunciation', true),
       includeDefinition: flag('includeDefinition', true),
       skipSrsMastered: flag('skipSrsMastered', true),
@@ -86,7 +93,9 @@ class VocabularyReminderConfig {
     double? intervalMinutes,
     int? notificationsPerDay,
     int? startHour,
+    int? startMinute,
     int? endHour,
+    int? endMinute,
     bool? includePronunciation,
     bool? includeDefinition,
     bool? skipSrsMastered,
@@ -100,7 +109,9 @@ class VocabularyReminderConfig {
       intervalMinutes: intervalMinutes ?? this.intervalMinutes,
       notificationsPerDay: notificationsPerDay ?? this.notificationsPerDay,
       startHour: startHour ?? this.startHour,
+      startMinute: startMinute ?? this.startMinute,
       endHour: endHour ?? this.endHour,
+      endMinute: endMinute ?? this.endMinute,
       includePronunciation:
           includePronunciation ?? this.includePronunciation,
       includeDefinition: includeDefinition ?? this.includeDefinition,
@@ -115,9 +126,11 @@ class VocabularyReminderConfig {
         'courseId': courseId,
         'enabled': enabled ? 1 : 0,
         'intervalMinutes': intervalMinutes.clamp(0.1, 1440).toDouble(),
-        'notificationsPerDay': notificationsPerDay.clamp(1, 60).toInt(),
+        'notificationsPerDay': notificationsPerDay.clamp(1, 100000).toInt(),
         'startHour': startHour.clamp(0, 23).toInt(),
-        'endHour': endHour.clamp(1, 24).toInt(),
+        'startMinute': startMinute.clamp(0, 59).toInt(),
+        'endHour': endHour.clamp(0, 23).toInt(),
+        'endMinute': endMinute.clamp(0, 59).toInt(),
         'includePronunciation': includePronunciation ? 1 : 0,
         'includeDefinition': includeDefinition ? 1 : 0,
         'skipSrsMastered': skipSrsMastered ? 1 : 0,
@@ -388,6 +401,13 @@ class VocabularyReminderService {
     if (!config.enabled) return 0;
 
     final db = await AppDatabase.instance.database;
+    final totalRows = await db.rawQuery(
+      'SELECT COUNT(*) AS count FROM cards '
+      'WHERE courseId = ? AND deletedAt IS NULL AND isHidden = 0',
+      <Object?>[courseId],
+    );
+    final courseVocabularyCount =
+        (totalRows.first['count'] as num?)?.toInt() ?? 0;
     final cards = await db.rawQuery(
       '''
       SELECT ca.id, ca.term, ca.definition, COALESCE(ca.pronunciation, '') AS pronunciation
@@ -411,7 +431,10 @@ class VocabularyReminderService {
 
     final queue = cards.map(Map<String, Object?>.from).toList();
     if (config.randomOrder) queue.shuffle(Random());
-    final slots = _buildScheduleSlots(config, _rollingQueueSize);
+    final effectiveConfig = config.copyWith(
+      notificationsPerDay: max(1, courseVocabularyCount),
+    );
+    final slots = _buildScheduleSlots(effectiveConfig, _rollingQueueSize);
     final usedIds = <int>{};
     final batch = db.batch();
     for (var index = 0; index < slots.length; index++) {
@@ -551,10 +574,9 @@ class VocabularyReminderService {
   ) {
     final result = <DateTime>[];
     final startHour = config.startHour.clamp(0, 23).toInt();
-    final requestedEndHour = config.endHour.clamp(1, 24).toInt();
-    final endHour = requestedEndHour <= startHour
-        ? (startHour + 1).clamp(1, 24).toInt()
-        : requestedEndHour;
+    final startMinute = config.startMinute.clamp(0, 59).toInt();
+    final endHour = config.endHour.clamp(0, 23).toInt();
+    final endMinute = config.endMinute.clamp(0, 59).toInt();
     final interval = Duration(
       milliseconds: (config.intervalMinutes.clamp(0.1, 1440) *
               Duration.millisecondsPerMinute)
@@ -574,23 +596,24 @@ class VocabularyReminderService {
         cursor.month,
         cursor.day,
         startHour,
+        startMinute,
       );
-      final end = endHour >= 24
-          ? DateTime(cursor.year, cursor.month, cursor.day + 1)
-          : DateTime(
-              cursor.year,
-              cursor.month,
-              cursor.day,
-              endHour,
-            );
+      final end = DateTime(
+        cursor.year,
+        cursor.month,
+        cursor.day,
+        endHour,
+        endMinute,
+      );
       if (cursor.isBefore(start)) cursor = start;
       if (!cursor.isBefore(end) ||
-          countForDay >= config.notificationsPerDay.clamp(1, 60)) {
+          countForDay >= config.notificationsPerDay.clamp(1, 100000)) {
         cursor = DateTime(
           cursor.year,
           cursor.month,
           cursor.day + 1,
           startHour,
+          startMinute,
         );
         continue;
       }

@@ -93,7 +93,7 @@ class AppDatabase {
 
     return await openDatabase(
       path,
-      version: 6,
+      version: 7,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
@@ -325,6 +325,9 @@ class AppDatabase {
     if (oldVersion < 6) {
       await _createVocabularyReminderTables(db);
     }
+    if (oldVersion < 7) {
+      await _createVocabularyReminderTables(db);
+    }
   }
 
   Future<void> ensureVocabularyReminderSchema() async {
@@ -339,10 +342,12 @@ class AppDatabase {
       CREATE TABLE IF NOT EXISTS vocabulary_reminder_configs (
         courseId INTEGER PRIMARY KEY,
         enabled INTEGER NOT NULL DEFAULT 0,
-        intervalMinutes REAL NOT NULL DEFAULT 60,
+        intervalMinutes REAL NOT NULL DEFAULT 0.5,
         notificationsPerDay INTEGER NOT NULL DEFAULT 8,
         startHour INTEGER NOT NULL DEFAULT 8,
+        startMinute INTEGER NOT NULL DEFAULT 0,
         endHour INTEGER NOT NULL DEFAULT 22,
+        endMinute INTEGER NOT NULL DEFAULT 0,
         includePronunciation INTEGER NOT NULL DEFAULT 1,
         includeDefinition INTEGER NOT NULL DEFAULT 1,
         skipSrsMastered INTEGER NOT NULL DEFAULT 1,
@@ -364,6 +369,18 @@ class AppDatabase {
       await db.execute(
         'ALTER TABLE vocabulary_reminder_configs '
         'ADD COLUMN showInForeground INTEGER NOT NULL DEFAULT 0',
+      );
+    }
+    if (!configColumnNames.contains('startMinute')) {
+      await db.execute(
+        'ALTER TABLE vocabulary_reminder_configs '
+        'ADD COLUMN startMinute INTEGER NOT NULL DEFAULT 0',
+      );
+    }
+    if (!configColumnNames.contains('endMinute')) {
+      await db.execute(
+        'ALTER TABLE vocabulary_reminder_configs '
+        'ADD COLUMN endMinute INTEGER NOT NULL DEFAULT 0',
       );
     }
     await db.execute('''

@@ -5,6 +5,9 @@ extension HomeVocabularyReminderPart on _HomePageState {
     final config = await VocabularyReminderService.instance.loadConfig(
       course.id,
     );
+    final status = await VocabularyReminderService.instance.loadStatus(
+      course.id,
+    );
     if (!mounted) return;
     final saved = await showDialog<bool>(
       context: context,
@@ -12,6 +15,7 @@ extension HomeVocabularyReminderPart on _HomePageState {
       builder: (_) => _VocabularyReminderDialog(
         course: course,
         initialConfig: config,
+        initialStatus: status,
       ),
     );
     if (saved == true && mounted) {
@@ -24,10 +28,12 @@ class _VocabularyReminderDialog extends StatefulWidget {
   const _VocabularyReminderDialog({
     required this.course,
     required this.initialConfig,
+    required this.initialStatus,
   });
 
   final CourseListItem course;
   final VocabularyReminderConfig initialConfig;
+  final VocabularyReminderStatus initialStatus;
 
   @override
   State<_VocabularyReminderDialog> createState() =>
@@ -42,7 +48,9 @@ class _VocabularyReminderDialogState
   late final TextEditingController _intervalController;
   late final TextEditingController _quantityController;
   late int _startHour;
+  late int _startMinute;
   late int _endHour;
+  late int _endMinute;
   late bool _includePronunciation;
   late bool _includeDefinition;
   late bool _skipSrsMastered;
@@ -58,8 +66,8 @@ class _VocabularyReminderDialogState
     super.initState();
     final config = widget.initialConfig;
     _enabled = config.enabled;
-    _intervalMinutes = config.intervalMinutes;
-    _notificationsPerDay = config.notificationsPerDay;
+    _intervalMinutes = config.enabled ? config.intervalMinutes : 0.5;
+    _notificationsPerDay = math.max(1, widget.initialStatus.totalCards);
     _intervalController = TextEditingController(
       text: _formatDecimal(_intervalMinutes),
     );
@@ -67,15 +75,17 @@ class _VocabularyReminderDialogState
       text: _notificationsPerDay.toString(),
     );
     _startHour = config.startHour;
+    _startMinute = config.startMinute;
     _endHour = config.endHour;
+    _endMinute = config.endMinute;
     _includePronunciation = config.includePronunciation;
     _includeDefinition = config.includeDefinition;
     _skipSrsMastered = config.skipSrsMastered;
     _randomOrder = config.randomOrder;
     _soundEnabled = config.soundEnabled;
     _showInForeground = config.showInForeground;
-    _statusFuture = VocabularyReminderService.instance.loadStatus(
-      widget.course.id,
+    _statusFuture = Future<VocabularyReminderStatus>.value(
+      widget.initialStatus,
     );
   }
 
@@ -90,21 +100,13 @@ class _VocabularyReminderDialogState
     final interval = double.tryParse(
       _intervalController.text.trim().replaceAll(',', '.'),
     );
-    final quantity = int.tryParse(_quantityController.text.trim());
     if (interval == null || interval < 0.1 || interval > 1440) {
       setState(() {
         _message = 'Khoảng thời gian phải từ 0.1 đến 1440 phút';
       });
       return false;
     }
-    if (quantity == null || quantity < 1 || quantity > 60) {
-      setState(() {
-        _message = 'Số lượng từ phải từ 1 đến 60 từ mỗi ngày';
-      });
-      return false;
-    }
     _intervalMinutes = interval;
-    _notificationsPerDay = quantity;
     return true;
   }
 
@@ -114,7 +116,9 @@ class _VocabularyReminderDialogState
         intervalMinutes: _intervalMinutes,
         notificationsPerDay: _notificationsPerDay,
         startHour: _startHour,
+        startMinute: _startMinute,
         endHour: _endHour,
+        endMinute: _endMinute,
         includePronunciation: _includePronunciation,
         includeDefinition: _includeDefinition,
         skipSrsMastered: _skipSrsMastered,
@@ -125,7 +129,9 @@ class _VocabularyReminderDialogState
 
   Future<void> _save() async {
     if (!_readCustomScheduleValues()) return;
-    if (_endHour <= _startHour) {
+    final start = _startHour * 60 + _startMinute;
+    final end = _endHour * 60 + _endMinute;
+    if (end <= start) {
       setState(() => _message = 'Giờ kết thúc phải sau giờ bắt đầu');
       return;
     }
@@ -225,14 +231,49 @@ class _VocabularyReminderDialogState
     }
   }
 
+  Future<void> _pickTime({required bool isStart}) async {
+    final hour = isStart ? _startHour : _endHour;
+    final minute = isStart ? _startMinute : _endMinute;
+    await dt_picker.DatePicker.showTimePicker(
+      context,
+      showTitleActions: true,
+      currentTime: DateTime(2000, 1, 1, hour, minute),
+      locale: dt_picker.LocaleType.vi,
+      theme: const dt_picker.DatePickerTheme(
+        backgroundColor: Color(0xff192131),
+        itemStyle: TextStyle(
+          color: Colors.white,
+          fontSize: 18,
+          fontWeight: FontWeight.w700,
+        ),
+        cancelStyle: TextStyle(color: Color(0xffaeb8ca), fontSize: 14),
+        doneStyle: TextStyle(
+          color: Color(0xff8fb5ff),
+          fontSize: 14,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+      onConfirm: (time) {
+        if (!mounted) return;
+        setState(() {
+          if (isStart) {
+            _startHour = time.hour;
+            _startMinute = time.minute;
+          } else {
+            _endHour = time.hour;
+            _endMinute = time.minute;
+          }
+        });
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     const panel = Color(0xff111722);
     const panel2 = Color(0xff192131);
     const border = Color(0xff31405a);
     const text = Color(0xfff4f7fb);
-    const muted = Color(0xffaeb8ca);
-    const blue = Color(0xff3b82f6);
 
     return Dialog(
       backgroundColor: Colors.transparent,
@@ -251,54 +292,15 @@ class _VocabularyReminderDialogState
                 padding: const EdgeInsets.fromLTRB(20, 18, 12, 14),
                 child: Row(
                   children: [
-                    Container(
-                      width: 42,
-                      height: 42,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: blue.withOpacity(0.16),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: SvgPicture.asset(
-                        'assets/icon/bell-solid-full.svg',
-                        width: 19,
-                        height: 19,
-                        colorFilter: const ColorFilter.mode(
-                          blue,
-                          BlendMode.srcIn,
+                    Expanded(
+                      child: const Text(
+                        'THIẾT LẬP TOAST TỪ VỰNG',
+                        style: TextStyle(
+                          color: text,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w900,
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'THIẾT LẬP TOAST TỪ VỰNG',
-                            style: TextStyle(
-                              color: text,
-                              fontSize: 15,
-                              fontWeight: FontWeight.w900,
-                            ),
-                          ),
-                          const SizedBox(height: 3),
-                          Text(
-                            widget.course.title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: muted,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    IconButton(
-                      onPressed: _busy ? null : () => Navigator.pop(context),
-                      icon: const Icon(Icons.close_rounded, color: muted),
                     ),
                   ],
                 ),
@@ -312,8 +314,6 @@ class _VocabularyReminderDialogState
                     children: [
                       _switchTile(
                         title: 'Bật Toast cho học phần này',
-                        subtitle:
-                            'Thông báo vẫn xuất hiện khi app đang nền hoặc đã đóng.',
                         value: _enabled,
                         onChanged: (value) => setState(() => _enabled = value),
                       ),
@@ -355,16 +355,17 @@ class _VocabularyReminderDialogState
                               label: 'Khoảng thời gian',
                               controller: _intervalController,
                               suffixText: 'phút',
-                              hintText: 'VD: 15',
+                              hintText: '0.5',
                             ),
                           ),
                           const SizedBox(width: 10),
                           Expanded(
                             child: _numberField(
-                              label: 'Số lượng mỗi ngày',
+                              label: 'Số lượng từ',
                               controller: _quantityController,
                               suffixText: 'từ',
-                              hintText: 'VD: 8',
+                              hintText: '',
+                              readOnly: true,
                             ),
                           ),
                         ],
@@ -373,24 +374,20 @@ class _VocabularyReminderDialogState
                       Row(
                         children: [
                           Expanded(
-                            child: _dropdown(
+                            child: _timePickerField(
                               label: 'Bắt đầu',
-                              value: _startHour,
-                              items: List<int>.generate(18, (i) => i + 5),
-                              textFor: _hourLabel,
-                              onChanged: (value) =>
-                                  setState(() => _startHour = value),
+                              hour: _startHour,
+                              minute: _startMinute,
+                              onTap: () => _pickTime(isStart: true),
                             ),
                           ),
                           const SizedBox(width: 10),
                           Expanded(
-                            child: _dropdown(
+                            child: _timePickerField(
                               label: 'Kết thúc',
-                              value: _endHour,
-                              items: List<int>.generate(18, (i) => i + 7),
-                              textFor: _hourLabel,
-                              onChanged: (value) =>
-                                  setState(() => _endHour = value),
+                              hour: _endHour,
+                              minute: _endMinute,
+                              onTap: () => _pickTime(isStart: false),
                             ),
                           ),
                         ],
@@ -400,68 +397,39 @@ class _VocabularyReminderDialogState
                       const SizedBox(height: 8),
                       _switchTile(
                         title: 'Hiện phiên âm',
-                        subtitle: 'Ẩn tự động nếu từ không có phiên âm.',
                         value: _includePronunciation,
                         onChanged: (value) =>
                             setState(() => _includePronunciation = value),
                       ),
                       _switchTile(
                         title: 'Hiện nghĩa',
-                        subtitle: 'Tên thông báo luôn là từ vựng.',
                         value: _includeDefinition,
                         onChanged: (value) =>
                             setState(() => _includeDefinition = value),
                       ),
                       _switchTile(
                         title: 'Bỏ qua thẻ đã thành thạo SRS',
-                        subtitle: 'Không nhắc thẻ SRS cấp 5 trở lên.',
                         value: _skipSrsMastered,
                         onChanged: (value) =>
                             setState(() => _skipSrsMastered = value),
                       ),
                       _switchTile(
                         title: 'Thứ tự ngẫu nhiên',
-                        subtitle: 'Trộn lại sau mỗi vòng học phần.',
                         value: _randomOrder,
                         onChanged: (value) =>
                             setState(() => _randomOrder = value),
                       ),
                       _switchTile(
                         title: 'Âm thanh thông báo',
-                        subtitle: 'Vẫn tuân theo chế độ im lặng của thiết bị.',
                         value: _soundEnabled,
                         onChanged: (value) =>
                             setState(() => _soundEnabled = value),
                       ),
                       _switchTile(
                         title: 'Hiện cả khi đang mở app',
-                        subtitle:
-                            'Trên iOS, mặc định tắt để chỉ nhắc khi bạn rời app.',
                         value: _showInForeground,
                         onChanged: (value) =>
                             setState(() => _showInForeground = value),
-                      ),
-                      const SizedBox(height: 12),
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: const Color(0xff172033),
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: border),
-                        ),
-                        child: const Text(
-                          'Cách hoạt động: “Đã thuộc” loại từ khỏi Toast; '
-                          '“Chưa thuộc” giữ từ trong vòng ngẫu nhiên. Mỗi câu trả '
-                          'lời đặt lại vòng và bù thêm lịch mới. iOS giữ tối đa 64 '
-                          'thông báo, app dùng 60 vị trí an toàn và chỉ bật một '
-                          'học phần Toast tại một thời điểm.',
-                          style: TextStyle(
-                            color: muted,
-                            fontSize: 11,
-                            height: 1.45,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
                       ),
                       if (_message != null) ...[
                         const SizedBox(height: 12),
@@ -479,15 +447,13 @@ class _VocabularyReminderDialogState
                         spacing: 9,
                         runSpacing: 9,
                         children: [
-                          OutlinedButton.icon(
+                          OutlinedButton(
                             onPressed: _busy ? null : _testNotification,
-                            icon: const Icon(Icons.notifications_active_rounded),
-                            label: const Text('Gửi thử'),
+                            child: const Text('Gửi thử'),
                           ),
-                          OutlinedButton.icon(
+                          OutlinedButton(
                             onPressed: _busy ? null : _resetLearned,
-                            icon: const Icon(Icons.restart_alt_rounded),
-                            label: const Text('Đặt lại từ đã thuộc'),
+                            child: const Text('Đặt lại từ đã thuộc'),
                           ),
                         ],
                       ),
@@ -506,9 +472,9 @@ class _VocabularyReminderDialogState
                       child: const Text('Hủy'),
                     ),
                     const SizedBox(width: 8),
-                    FilledButton.icon(
+                    FilledButton(
                       onPressed: _busy ? null : _save,
-                      icon: _busy
+                      child: _busy
                           ? const SizedBox(
                               width: 15,
                               height: 15,
@@ -517,8 +483,7 @@ class _VocabularyReminderDialogState
                                 color: Colors.white,
                               ),
                             )
-                          : const Icon(Icons.save_rounded, size: 18),
-                      label: const Text('Lưu thiết lập'),
+                          : const Text('Lưu thiết lập'),
                     ),
                   ],
                 ),
@@ -532,7 +497,6 @@ class _VocabularyReminderDialogState
 
   Widget _switchTile({
     required String title,
-    required String subtitle,
     required bool value,
     required ValueChanged<bool> onChanged,
   }) {
@@ -549,62 +513,9 @@ class _VocabularyReminderDialogState
             fontWeight: FontWeight.w900,
           ),
         ),
-        subtitle: Text(
-          subtitle,
-          style: const TextStyle(
-            color: Color(0xffaeb8ca),
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
         value: value,
         onChanged: _busy ? null : onChanged,
       ),
-    );
-  }
-
-  Widget _dropdown({
-    required String label,
-    required int value,
-    required List<int> items,
-    required String Function(int) textFor,
-    required ValueChanged<int> onChanged,
-  }) {
-    return DropdownButtonFormField<int>(
-      value: items.contains(value) ? value : items.first,
-      dropdownColor: const Color(0xff192131),
-      decoration: InputDecoration(
-        labelText: label,
-        labelStyle: const TextStyle(color: Color(0xffaeb8ca)),
-        filled: true,
-        fillColor: const Color(0xff192131),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: Color(0xff31405a)),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: Color(0xff3b82f6)),
-        ),
-      ),
-      style: const TextStyle(
-        color: Colors.white,
-        fontSize: 12,
-        fontWeight: FontWeight.w800,
-      ),
-      items: items
-          .map(
-            (item) => DropdownMenuItem<int>(
-              value: item,
-              child: Text(textFor(item)),
-            ),
-          )
-          .toList(),
-      onChanged: _busy
-          ? null
-          : (next) {
-              if (next != null) onChanged(next);
-            },
     );
   }
 
@@ -613,10 +524,12 @@ class _VocabularyReminderDialogState
     required TextEditingController controller,
     required String suffixText,
     required String hintText,
+    bool readOnly = false,
   }) {
     return TextField(
       controller: controller,
       enabled: !_busy,
+      readOnly: readOnly,
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
       textInputAction: TextInputAction.done,
       style: const TextStyle(
@@ -648,7 +561,44 @@ class _VocabularyReminderDialogState
     );
   }
 
-  String _hourLabel(int hour) => '${hour.toString().padLeft(2, '0')}:00';
+  Widget _timePickerField({
+    required String label,
+    required int hour,
+    required int minute,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: const Color(0xff192131),
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: _busy ? null : onTap,
+        child: InputDecorator(
+          decoration: InputDecoration(
+            labelText: label,
+            labelStyle: const TextStyle(color: Color(0xffaeb8ca)),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: const BorderSide(color: Color(0xff31405a)),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: const BorderSide(color: Color(0xff31405a)),
+            ),
+          ),
+          child: Text(
+            '${hour.toString().padLeft(2, '0')}:'
+            '${minute.toString().padLeft(2, '0')}',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 
   String _formatDecimal(double value) {
     return value == value.roundToDouble()
