@@ -37,7 +37,7 @@ class _VocabularyReminderDialog extends StatefulWidget {
 class _VocabularyReminderDialogState
     extends State<_VocabularyReminderDialog> {
   late bool _enabled;
-  late int _intervalMinutes;
+  late double _intervalMinutes;
   late int _notificationsPerDay;
   late final TextEditingController _intervalController;
   late final TextEditingController _quantityController;
@@ -61,7 +61,7 @@ class _VocabularyReminderDialogState
     _intervalMinutes = config.intervalMinutes;
     _notificationsPerDay = config.notificationsPerDay;
     _intervalController = TextEditingController(
-      text: _intervalMinutes.toString(),
+      text: _formatDecimal(_intervalMinutes),
     );
     _quantityController = TextEditingController(
       text: _notificationsPerDay.toString(),
@@ -87,11 +87,13 @@ class _VocabularyReminderDialogState
   }
 
   bool _readCustomScheduleValues() {
-    final interval = int.tryParse(_intervalController.text.trim());
+    final interval = double.tryParse(
+      _intervalController.text.trim().replaceAll(',', '.'),
+    );
     final quantity = int.tryParse(_quantityController.text.trim());
-    if (interval == null || interval < 1 || interval > 1440) {
+    if (interval == null || interval < 0.1 || interval > 1440) {
       setState(() {
-        _message = 'Khoảng thời gian phải từ 1 đến 1440 phút';
+        _message = 'Khoảng thời gian phải từ 0.1 đến 1440 phút';
       });
       return false;
     }
@@ -534,27 +536,30 @@ class _VocabularyReminderDialogState
     required bool value,
     required ValueChanged<bool> onChanged,
   }) {
-    return SwitchListTile.adaptive(
-      contentPadding: EdgeInsets.zero,
-      dense: true,
-      title: Text(
-        title,
-        style: const TextStyle(
-          color: Color(0xfff4f7fb),
-          fontSize: 13,
-          fontWeight: FontWeight.w900,
+    return Material(
+      type: MaterialType.transparency,
+      child: SwitchListTile.adaptive(
+        contentPadding: EdgeInsets.zero,
+        dense: true,
+        title: Text(
+          title,
+          style: const TextStyle(
+            color: Color(0xfff4f7fb),
+            fontSize: 13,
+            fontWeight: FontWeight.w900,
+          ),
         ),
-      ),
-      subtitle: Text(
-        subtitle,
-        style: const TextStyle(
-          color: Color(0xffaeb8ca),
-          fontSize: 11,
-          fontWeight: FontWeight.w600,
+        subtitle: Text(
+          subtitle,
+          style: const TextStyle(
+            color: Color(0xffaeb8ca),
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+          ),
         ),
+        value: value,
+        onChanged: _busy ? null : onChanged,
       ),
-      value: value,
-      onChanged: _busy ? null : onChanged,
     );
   }
 
@@ -612,7 +617,7 @@ class _VocabularyReminderDialogState
     return TextField(
       controller: controller,
       enabled: !_busy,
-      keyboardType: TextInputType.number,
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
       textInputAction: TextInputAction.done,
       style: const TextStyle(
         color: Colors.white,
@@ -644,6 +649,12 @@ class _VocabularyReminderDialogState
   }
 
   String _hourLabel(int hour) => '${hour.toString().padLeft(2, '0')}:00';
+
+  String _formatDecimal(double value) {
+    return value == value.roundToDouble()
+        ? value.toInt().toString()
+        : value.toString();
+  }
 }
 
 class _ReminderSectionTitle extends StatelessWidget {

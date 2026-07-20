@@ -42,7 +42,7 @@ class VocabularyReminderConfig {
 
   final int courseId;
   final bool enabled;
-  final int intervalMinutes;
+  final double intervalMinutes;
   final int notificationsPerDay;
   final int startHour;
   final int endHour;
@@ -62,11 +62,13 @@ class VocabularyReminderConfig {
 
     int number(String key, int fallback) =>
         (row[key] as num?)?.toInt() ?? fallback;
+    double decimal(String key, double fallback) =>
+        (row[key] as num?)?.toDouble() ?? fallback;
 
     return VocabularyReminderConfig(
       courseId: number('courseId', 0),
       enabled: flag('enabled', false),
-      intervalMinutes: number('intervalMinutes', 60),
+      intervalMinutes: decimal('intervalMinutes', 60),
       notificationsPerDay: number('notificationsPerDay', 8),
       startHour: number('startHour', 8),
       endHour: number('endHour', 22),
@@ -81,7 +83,7 @@ class VocabularyReminderConfig {
 
   VocabularyReminderConfig copyWith({
     bool? enabled,
-    int? intervalMinutes,
+    double? intervalMinutes,
     int? notificationsPerDay,
     int? startHour,
     int? endHour,
@@ -112,7 +114,7 @@ class VocabularyReminderConfig {
   Map<String, Object?> toMap() => <String, Object?>{
         'courseId': courseId,
         'enabled': enabled ? 1 : 0,
-        'intervalMinutes': intervalMinutes.clamp(1, 1440).toInt(),
+        'intervalMinutes': intervalMinutes.clamp(0.1, 1440).toDouble(),
         'notificationsPerDay': notificationsPerDay.clamp(1, 60).toInt(),
         'startHour': startHour.clamp(0, 23).toInt(),
         'endHour': endHour.clamp(1, 24).toInt(),
@@ -207,6 +209,13 @@ class VocabularyReminderService {
       );
       await AppDatabase.instance.ensureVocabularyReminderSchema();
       _initialized = true;
+      final launchDetails =
+          await _notifications.getNotificationAppLaunchDetails();
+      final launchResponse = launchDetails?.notificationResponse;
+      if (launchDetails?.didNotificationLaunchApp == true &&
+          launchResponse != null) {
+        await handleNotificationResponse(launchResponse);
+      }
     } finally {
       _initializing = false;
     }
@@ -429,7 +438,11 @@ class VocabularyReminderService {
         title: card['term']?.toString() ?? 'Từ vựng',
         body: _notificationBody(card, config),
         scheduledDate: tz.TZDateTime.from(scheduledAt, tz.local),
-        notificationDetails: _notificationDetails(config),
+        notificationDetails: _notificationDetails(
+          config,
+          courseId: courseId,
+          cardId: cardId,
+        ),
         androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
         payload: jsonEncode(<String, Object?>{
           'type': 'vocabularyReminder',
@@ -465,7 +478,12 @@ class VocabularyReminderService {
       id: _notificationId(courseId, (card['id'] as num).toInt(), DateTime.now()),
       title: card['term']?.toString() ?? 'Từ vựng',
       body: _notificationBody(card, config),
-      notificationDetails: _notificationDetails(config, preview: true),
+      notificationDetails: _notificationDetails(
+        config,
+        preview: true,
+        courseId: courseId,
+        cardId: (card['id'] as num).toInt(),
+      ),
       payload: jsonEncode(<String, Object?>{
         'type': 'vocabularyReminder',
         'courseId': courseId,
@@ -486,21 +504,25 @@ class VocabularyReminderService {
   }
 
   Future<void> handleNotificationResponse(NotificationResponse response) async {
-    if (response.actionId != vocabularyReminderKnownAction &&
-        response.actionId != vocabularyReminderUnknownAction) {
-      return;
-    }
+    var actionId = response.actionId;
     final payload = response.payload;
     if (payload == null || payload.isEmpty) return;
     try {
       final decoded = jsonDecode(payload);
       if (decoded is! Map || decoded['type'] != 'vocabularyReminder') return;
+      // Windows returns the button's `arguments` as both actionId and payload,
+      // so its action identifier is embedded in the JSON arguments.
+      actionId = decoded['actionId']?.toString() ?? actionId;
+      if (actionId != vocabularyReminderKnownAction &&
+          actionId != vocabularyReminderUnknownAction) {
+        return;
+      }
       final courseId = (decoded['courseId'] as num?)?.toInt();
       final cardId = (decoded['cardId'] as num?)?.toInt();
       if (courseId == null || cardId == null) return;
       await initialize();
       final db = await AppDatabase.instance.database;
-      final known = response.actionId == vocabularyReminderKnownAction;
+      final known = actionId == vocabularyReminderKnownAction;
       final now = DateTime.now().toIso8601String();
       await db.insert(
         'vocabulary_reminder_states',
@@ -533,11 +555,12 @@ class VocabularyReminderService {
     final endHour = requestedEndHour <= startHour
         ? (startHour + 1).clamp(1, 24).toInt()
         : requestedEndHour;
-    var cursor = DateTime.now().add(
-      Duration(
-        minutes: config.intervalMinutes.clamp(1, 1440).toInt(),
-      ),
+    final interval = Duration(
+      milliseconds: (config.intervalMinutes.clamp(0.1, 1440) *
+              Duration.millisecondsPerMinute)
+          .round(),
     );
+    var cursor = DateTime.now().add(interval);
     var dayKey = '';
     var countForDay = 0;
     while (result.length < maximum) {
@@ -573,11 +596,7 @@ class VocabularyReminderService {
       }
       result.add(cursor);
       countForDay++;
-      cursor = cursor.add(
-        Duration(
-          minutes: config.intervalMinutes.clamp(1, 1440).toInt(),
-        ),
-      );
+      cursor = cursor.add(interval);
     }
     return result;
   }
@@ -606,6 +625,8 @@ class VocabularyReminderService {
   NotificationDetails _notificationDetails(
     VocabularyReminderConfig config, {
     bool preview = false,
+    required int courseId,
+    required int cardId,
   }) {
     final presentInForeground = preview || config.showInForeground;
     return NotificationDetails(
@@ -643,7 +664,36 @@ class VocabularyReminderService {
         presentAlert: presentInForeground,
         presentSound: config.soundEnabled,
       ),
-      windows: WindowsNotificationDetails(),
+      windows: WindowsNotificationDetails(
+        actions: <WindowsAction>[
+          WindowsAction(
+            content: 'Đã thuộc',
+            arguments: _windowsActionPayload(
+              vocabularyReminderKnownAction,
+              courseId,
+              cardId,
+            ),
+            buttonStyle: WindowsButtonStyle.success,
+          ),
+          WindowsAction(
+            content: 'Chưa thuộc',
+            arguments: _windowsActionPayload(
+              vocabularyReminderUnknownAction,
+              courseId,
+              cardId,
+            ),
+          ),
+        ],
+      ),
     );
+  }
+
+  String _windowsActionPayload(String actionId, int courseId, int cardId) {
+    return jsonEncode(<String, Object?>{
+      'type': 'vocabularyReminder',
+      'actionId': actionId,
+      'courseId': courseId,
+      'cardId': cardId,
+    });
   }
 }

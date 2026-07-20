@@ -339,7 +339,7 @@ class AppDatabase {
       CREATE TABLE IF NOT EXISTS vocabulary_reminder_configs (
         courseId INTEGER PRIMARY KEY,
         enabled INTEGER NOT NULL DEFAULT 0,
-        intervalMinutes INTEGER NOT NULL DEFAULT 60,
+        intervalMinutes REAL NOT NULL DEFAULT 60,
         notificationsPerDay INTEGER NOT NULL DEFAULT 8,
         startHour INTEGER NOT NULL DEFAULT 8,
         endHour INTEGER NOT NULL DEFAULT 22,
