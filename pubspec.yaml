@@ -48,6 +48,9 @@ dependencies:
   file_picker: ^11.0.2
   supabase_flutter: ^2.16.0
   flutter_login: ^7.0.0
+  flutter_local_notifications: ^22.1.0
+  flutter_timezone: ^5.1.0
+  timezone: ^0.11.1
 
 dev_dependencies:
   flutter_test:
@@ -79,6 +82,9 @@ flutter:
     - assets/icon/arrow-up-solid-full.svg
     - assets/icon/brain-solid-full.svg
     - assets/icon/lightbulb-solid-full.svg
+    - assets/icon/bell-solid-full.svg
+    - assets/icon/star-solid-full.svg
+    - assets/icon/triangle-exclamation-solid-full.svg
     - assets/icon/google-icon-logo-svgrepo-com.svg
     - assets/icon/facebook-svgrepo-com.svg
     - assets/icon/app_icon.png

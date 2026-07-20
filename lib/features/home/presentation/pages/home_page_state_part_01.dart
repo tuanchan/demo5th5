@@ -1188,39 +1188,57 @@ extension HomePageStatePart01 on _HomePageState {
 
   Widget _buildWebCourseTile(CourseListItem course, {Key? key}) {
     final selected = selectedHomeCourse?.id == course.id;
+    final srsStars = course.srsLevel.clamp(0, 8).toInt();
+    final displayedSrsStars = srsStars == 0 ? 1 : srsStars;
     final isMobile = MediaQuery.of(context).size.width < 580;
     final cardHeight = isMobile ? 140.0 : 200.0;
     return InkWell(
       key: key,
-      onTap: () => setState(() => selectedHomeCourse = course),
-      onDoubleTap: () {
-        setState(() => selectedHomeCourse = course);
-        this.openFlashCards(course);
+      onTap: () {
+        if (selectedHomeCourse?.id != course.id) {
+          setState(() => selectedHomeCourse = course);
+        }
       },
       borderRadius: BorderRadius.circular(12),
       child: Container(
         height: cardHeight,
         decoration: BoxDecoration(
-          color: selected ? Color(0xff101b35) : _homePanel,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: selected ? Color(0xff2563eb) : _homeBorder,
           ),
-          image: DecorationImage(
-            image: AssetImage('assets/icon/app_icon.png'),
-            fit: BoxFit.cover,
-            colorFilter: ColorFilter.mode(
-              Colors.black.withOpacity(0.52),
-              BlendMode.darken,
-            ),
-          ),
         ),
         child: Stack(
           children: [
-            Padding(
-              padding: EdgeInsets.all(isMobile ? 12 : 20),
-              child: Stack(
-                children: [
+            Positioned.fill(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(11),
+                child: ImageFiltered(
+                  enabled: selected,
+                  imageFilter: ImageFilter.blur(sigmaX: 4, sigmaY: 4),
+                  child: Stack(
+                    children: [
+                      Positioned.fill(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: selected
+                                ? Color(0xff101b35)
+                                : _homePanel,
+                            image: DecorationImage(
+                              image: AssetImage('assets/icon/app_icon.png'),
+                              fit: BoxFit.cover,
+                              colorFilter: ColorFilter.mode(
+                                Colors.black.withOpacity(0.52),
+                                BlendMode.darken,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      Padding(
+                        padding: EdgeInsets.all(isMobile ? 12 : 20),
+                child: Stack(
+                  children: [
             Align(
               alignment: Alignment.topRight,
               child: PopupMenuButton<String>(
@@ -1277,26 +1295,64 @@ extension HomePageStatePart01 on _HomePageState {
             ),
             Align(
               alignment: Alignment.bottomLeft,
-              child: AutoShrinkText(
-                '${course.cardCount} thẻ · ${course.languageCode}',
-                maxLines: 1,
-                style: TextStyle(
-                  color: _homeText,
-                  fontSize: isMobile ? 12 : 15,
-                  fontWeight: FontWeight.w800,
-                ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Tooltip(
+                    message: 'SRS cấp $srsStars',
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: List.generate(
+                        displayedSrsStars,
+                        (index) => Padding(
+                          padding: EdgeInsets.only(
+                            right: index == displayedSrsStars - 1 ? 0 : 3,
+                          ),
+                          child: SvgPicture.asset(
+                            'assets/icon/star-solid-full.svg',
+                            width: isMobile ? 11 : 13,
+                            height: isMobile ? 11 : 13,
+                            colorFilter: ColorFilter.mode(
+                              srsStars == 0
+                                  ? _homeMuted.withOpacity(0.65)
+                                  : Color(0xffffc107),
+                              BlendMode.srcIn,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  SizedBox(height: isMobile ? 4 : 6),
+                  AutoShrinkText(
+                    '${course.cardCount} thẻ · ${course.languageCode}',
+                    maxLines: 1,
+                    style: TextStyle(
+                      color: _homeText,
+                      fontSize: isMobile ? 12 : 15,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
               ),
             ),
-                ],
+                  ],
+                ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ),
             if (selected)
               Positioned.fill(
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(11),
-                  child: BackdropFilter(
-                    filter: ImageFilter.blur(sigmaX: 5.5, sigmaY: 5.5),
-                    child: ColoredBox(color: Color(0x78000000)),
+                child: IgnorePointer(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Color(0x78000000),
+                      borderRadius: BorderRadius.circular(11),
+                    ),
                   ),
                 ),
               ),
@@ -1343,6 +1399,38 @@ extension HomePageStatePart01 on _HomePageState {
                           ),
                         ),
                         label: Text('Kiểm tra'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.white,
+                          backgroundColor: Color(0xd90b0d12),
+                          side: BorderSide(color: Color(0xff4f7ee8)),
+                          padding: EdgeInsets.symmetric(horizontal: 10),
+                          textStyle: TextStyle(
+                            fontSize: isMobile ? 12 : 13,
+                            fontWeight: FontWeight.w800,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(9),
+                          ),
+                        ),
+                      ),
+                    ),
+                    SizedBox(height: isMobile ? 7 : 9),
+                    SizedBox(
+                      width: isMobile ? 112 : 132,
+                      height: isMobile ? 36 : 40,
+                      child: OutlinedButton.icon(
+                        onPressed: () =>
+                            this.openVocabularyReminderSettings(course),
+                        icon: SvgPicture.asset(
+                          'assets/icon/bell-solid-full.svg',
+                          width: 16,
+                          height: 16,
+                          colorFilter: const ColorFilter.mode(
+                            Colors.white,
+                            BlendMode.srcIn,
+                          ),
+                        ),
+                        label: Text('Toast'),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: Colors.white,
                           backgroundColor: Color(0xd90b0d12),

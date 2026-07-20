@@ -460,6 +460,7 @@ Schema: {"keyIdeas":["ý chính"],"wordHints":["từ/cụm từ"],"structureHint
   Future<void> _gradeWriting() async {
     final script = _script;
     if (_busy || script == null) return;
+    FocusManager.instance.primaryFocus?.unfocus();
     final userText = _submissionText();
     if (userText == null || userText.trim().isEmpty) {
       _showMessage(
@@ -713,64 +714,101 @@ Cách trả lời:
     final imported = await showDialog<_WritingScript>(
       context: context,
       barrierColor: Colors.black87,
-      builder: (dialogContext) => Dialog(
-        backgroundColor: _surface,
-        insetPadding: EdgeInsets.all(18),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-          side: BorderSide(color: _border),
-        ),
-        child: ConstrainedBox(
-          constraints: BoxConstraints(maxWidth: 680),
-          child: Padding(
-            padding: EdgeInsets.all(18),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Import JSON', style: _titleStyle(21)),
-                SizedBox(height: 12),
-                TextField(
-                  controller: controller,
-                  minLines: 8,
-                  maxLines: 14,
-                  style: TextStyle(color: Colors.white),
-                  decoration: _inputDecoration('Dán JSON bài luyện viết'),
+      builder: (dialogContext) {
+        final media = MediaQuery.of(dialogContext);
+        final keyboardHeight = media.viewInsets.bottom;
+        final availableHeight = math.max(
+          260.0,
+          media.size.height -
+              keyboardHeight -
+              media.padding.top -
+              media.padding.bottom -
+              36,
+        );
+        return MediaQuery.removeViewInsets(
+          context: dialogContext,
+          removeBottom: true,
+          child: AnimatedPadding(
+            padding: EdgeInsets.only(bottom: keyboardHeight),
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOutCubic,
+            child: Dialog(
+              backgroundColor: _surface,
+              insetPadding: EdgeInsets.all(18),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+                side: BorderSide(color: _border),
+              ),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: 680,
+                  maxHeight: availableHeight,
                 ),
-                SizedBox(height: 14),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    _actionButton(
-                      'Đóng',
-                      Icons.close,
-                      () => Navigator.pop(dialogContext),
-                      primary: false,
-                    ),
-                    SizedBox(width: 10),
-                    _actionButton('Áp dụng', Icons.check, () {
-                      try {
-                        final value = _WritingScript.fromJson(
-                          _decodeJsonObject(controller.text),
-                        );
-                        if (value.vietnameseText.isEmpty ||
-                            value.targetText.isEmpty) {
-                          throw FormatException('JSON thiếu nội dung bài viết');
-                        }
-                        Navigator.pop(dialogContext, value);
-                      } catch (error) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('JSON không hợp lệ: $error')),
-                        );
-                      }
-                    }),
-                  ],
+                child: Padding(
+                  padding: EdgeInsets.all(18),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Import JSON', style: _titleStyle(21)),
+                      SizedBox(height: 12),
+                      Flexible(
+                        child: SingleChildScrollView(
+                          keyboardDismissBehavior:
+                              ScrollViewKeyboardDismissBehavior.onDrag,
+                          child: TextField(
+                            controller: controller,
+                            minLines: 8,
+                            maxLines: 14,
+                            style: TextStyle(color: Colors.white),
+                            decoration: _inputDecoration(
+                              'Dán JSON bài luyện viết',
+                            ),
+                          ),
+                        ),
+                      ),
+                      SizedBox(height: 14),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          _actionButton(
+                            'Đóng',
+                            Icons.close,
+                            () => Navigator.pop(dialogContext),
+                            primary: false,
+                          ),
+                          SizedBox(width: 10),
+                          _actionButton('Áp dụng', Icons.check, () {
+                            FocusScope.of(dialogContext).unfocus();
+                            try {
+                              final value = _WritingScript.fromJson(
+                                _decodeJsonObject(controller.text),
+                              );
+                              if (value.vietnameseText.isEmpty ||
+                                  value.targetText.isEmpty) {
+                                throw FormatException(
+                                  'JSON thiếu nội dung bài viết',
+                                );
+                              }
+                              Navigator.pop(dialogContext, value);
+                            } catch (error) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('JSON không hợp lệ: $error'),
+                                ),
+                              );
+                            }
+                          }),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
-              ],
+              ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
     controller.dispose();
     if (imported == null || !mounted) return;
@@ -906,6 +944,7 @@ Cách trả lời:
     required ValueChanged<T?> onChanged,
   }) => DropdownButtonFormField<T>(
     value: value,
+    isExpanded: true,
     dropdownColor: _surface2,
     iconEnabledColor: Colors.white,
     style: TextStyle(color: Colors.white, fontWeight: FontWeight.w400),

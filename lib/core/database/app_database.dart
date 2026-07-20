@@ -9,6 +9,8 @@ class AppDatabase {
   static final AppDatabase instance = AppDatabase._();
 
   static Database? _database;
+  bool _syncOutboxReady = false;
+  bool _vocabularyReminderSchemaReady = false;
 
   Future<Database> get database async {
     if (_database != null) return _database!;
@@ -91,7 +93,7 @@ class AppDatabase {
 
     return await openDatabase(
       path,
-      version: 4,
+      version: 6,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
@@ -299,6 +301,9 @@ class AppDatabase {
       )
     ''');
 
+    await _createSyncOutboxTable(db);
+    await _createVocabularyReminderTables(db);
+
     await _createIndexes(db);
     await _insertDefaultLanguages(db);
     await _insertDefaultSettings(db);
@@ -314,6 +319,111 @@ class AppDatabase {
     if (oldVersion < 4) {
       await _ensureCourseSyncMetadata(db);
     }
+    if (oldVersion < 5) {
+      await _createSyncOutboxTable(db);
+    }
+    if (oldVersion < 6) {
+      await _createVocabularyReminderTables(db);
+    }
+  }
+
+  Future<void> ensureVocabularyReminderSchema() async {
+    if (_vocabularyReminderSchemaReady) return;
+    final db = await database;
+    if (_vocabularyReminderSchemaReady) return;
+    await _createVocabularyReminderTables(db);
+  }
+
+  Future<void> _createVocabularyReminderTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS vocabulary_reminder_configs (
+        courseId INTEGER PRIMARY KEY,
+        enabled INTEGER NOT NULL DEFAULT 0,
+        intervalMinutes INTEGER NOT NULL DEFAULT 60,
+        notificationsPerDay INTEGER NOT NULL DEFAULT 8,
+        startHour INTEGER NOT NULL DEFAULT 8,
+        endHour INTEGER NOT NULL DEFAULT 22,
+        includePronunciation INTEGER NOT NULL DEFAULT 1,
+        includeDefinition INTEGER NOT NULL DEFAULT 1,
+        skipSrsMastered INTEGER NOT NULL DEFAULT 1,
+        randomOrder INTEGER NOT NULL DEFAULT 1,
+        soundEnabled INTEGER NOT NULL DEFAULT 1,
+        showInForeground INTEGER NOT NULL DEFAULT 0,
+        updatedAt TEXT NOT NULL,
+        FOREIGN KEY (courseId) REFERENCES courses(id) ON DELETE CASCADE
+      )
+    ''');
+    final configColumns = await db.rawQuery(
+      'PRAGMA table_info(vocabulary_reminder_configs)',
+    );
+    final configColumnNames = configColumns
+        .map((row) => row['name']?.toString())
+        .whereType<String>()
+        .toSet();
+    if (!configColumnNames.contains('showInForeground')) {
+      await db.execute(
+        'ALTER TABLE vocabulary_reminder_configs '
+        'ADD COLUMN showInForeground INTEGER NOT NULL DEFAULT 0',
+      );
+    }
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS vocabulary_reminder_states (
+        cardId INTEGER PRIMARY KEY,
+        courseId INTEGER NOT NULL,
+        learned INTEGER NOT NULL DEFAULT 0,
+        timesShown INTEGER NOT NULL DEFAULT 0,
+        lastResponse TEXT,
+        lastNotifiedAt TEXT,
+        updatedAt TEXT NOT NULL,
+        FOREIGN KEY (courseId) REFERENCES courses(id) ON DELETE CASCADE,
+        FOREIGN KEY (cardId) REFERENCES cards(id) ON DELETE CASCADE
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS vocabulary_reminder_schedule (
+        notificationId INTEGER PRIMARY KEY,
+        courseId INTEGER NOT NULL,
+        cardId INTEGER NOT NULL,
+        scheduledAt TEXT NOT NULL,
+        FOREIGN KEY (courseId) REFERENCES courses(id) ON DELETE CASCADE,
+        FOREIGN KEY (cardId) REFERENCES cards(id) ON DELETE CASCADE
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_vocab_reminder_schedule_course '
+      'ON vocabulary_reminder_schedule(courseId)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_vocab_reminder_states_course '
+      'ON vocabulary_reminder_states(courseId, learned)',
+    );
+    _vocabularyReminderSchemaReady = true;
+  }
+
+  Future<void> ensureSyncOutboxTable() async {
+    if (_syncOutboxReady) return;
+    final db = await database;
+    if (_syncOutboxReady) return;
+    await _createSyncOutboxTable(db);
+  }
+
+  Future<void> _createSyncOutboxTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS sync_outbox (
+        kind TEXT NOT NULL,
+        entityId TEXT NOT NULL DEFAULT '',
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        lastError TEXT,
+        PRIMARY KEY (kind, entityId)
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_sync_outbox_updatedAt '
+      'ON sync_outbox(updatedAt)',
+    );
+    _syncOutboxReady = true;
   }
 
   Future<void> ensureTopicSchema() async {

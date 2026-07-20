@@ -258,7 +258,9 @@ extension StatisticsPageStatePart03 on _StatisticsPageState {
           final columns = constraints.maxWidth < 440 ? 1 : 2;
           return GridView.count(
             crossAxisCount: columns,
-            childAspectRatio: columns == 1 ? 2.6 : 2.08,
+            // Two-column cards need enough vertical room for the label,
+            // value and a two-line note at Windows text scale factors.
+            childAspectRatio: columns == 1 ? 2.6 : 1.65,
             crossAxisSpacing: 14,
             mainAxisSpacing: 14,
             shrinkWrap: true,

@@ -146,6 +146,7 @@ extension HomePageStatePart02Split02 on _HomePageState {
       context,
       MaterialPageRoute(builder: (_) => StatisticsPage()),
     );
+    if (mounted) await this.loadCourses(showLoading: false);
   }
 
   Future<void> openWritingPractice() async {
@@ -293,7 +294,8 @@ extension HomePageStatePart02Split02 on _HomePageState {
         c.title,
         c.languageCode,
         COALESCE(c.hasLocalNameConflict, 0) AS hasLocalNameConflict,
-        COUNT(cards.id) AS cardCount
+        COUNT(cards.id) AS cardCount,
+        MAX(COALESCE(rs.level, 0)) AS srsLevel
       FROM courses c
       LEFT JOIN topics t
         ON t.id = c.topicId
@@ -302,6 +304,8 @@ extension HomePageStatePart02Split02 on _HomePageState {
         ON cards.courseId = c.id 
         AND cards.deletedAt IS NULL
         AND cards.isHidden = 0
+      LEFT JOIN review_states rs
+        ON rs.cardId = cards.id
       WHERE c.deletedAt IS NULL
       GROUP BY c.id, c.topicId, t.name, c.title, c.languageCode,
         c.hasLocalNameConflict

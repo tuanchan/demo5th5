@@ -344,6 +344,16 @@ class _HomePageState extends State<HomePage>
   }
 
   @override
+  void reassemble() {
+    super.reassemble();
+    // Hot reload preserves the old CourseListItem instances. Reload them so
+    // newly added aggregate fields such as srsLevel are visible immediately.
+    Future.microtask(() {
+      if (mounted) loadCourses(showLoading: false);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     return this._buildHomePagePage(context);
   }

@@ -11,6 +11,14 @@ enum _SyncOperation { pullReplace, merge, livePush }
 
 class _SyncCancelled implements Exception {}
 
+class _OutboxTicket {
+  const _OutboxTicket(this.kind, this.entityId, this.token);
+
+  final String kind;
+  final String entityId;
+  final String token;
+}
+
 /// Describes only the rows touched by one realtime batch. UI pages can use
 /// these IDs to refresh their current view from SQLite without starting a
 /// full account sync.
@@ -64,6 +72,8 @@ class SupabaseSyncService {
   final Map<String, PostgresChangePayload> _realtimePendingChanges = {};
   Future<void> _studySyncTail = Future<void>.value();
   bool _isPushingStudyData = false;
+  bool _outboxRetryInFlight = false;
+  int _generalPushRequestsInFlight = 0;
 
   bool get isSyncing => _isSyncing;
   bool get isSyncCancellationRequested => _cancelSyncRequested;
@@ -72,6 +82,69 @@ class SupabaseSyncService {
   Stream<SyncResult> get syncCompleted => _syncCompletedController.stream;
   Stream<void> get remoteDataChanged => _remoteDataChangedController.stream;
   RealtimeDataChange? get lastRealtimeDataChange => _lastRealtimeDataChange;
+
+  Future<_OutboxTicket> _enqueueOutbox(String kind, String entityId) async {
+    await AppDatabase.instance.ensureSyncOutboxTable();
+    final db = await AppDatabase.instance.database;
+    final now = DateTime.now().toIso8601String();
+    await db.insert(
+      'sync_outbox',
+      {
+        'kind': kind,
+        'entityId': entityId,
+        'createdAt': now,
+        'updatedAt': now,
+        'attempts': 0,
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    await db.update(
+      'sync_outbox',
+      {'updatedAt': now},
+      where: 'kind = ? AND entityId = ?',
+      whereArgs: [kind, entityId],
+    );
+    return _OutboxTicket(kind, entityId, now);
+  }
+
+  Future<void> _completeOutbox(
+    Iterable<_OutboxTicket> entries,
+  ) async {
+    final db = await AppDatabase.instance.database;
+    await db.transaction((txn) async {
+      for (final entry in entries) {
+        await txn.delete(
+          'sync_outbox',
+          where: 'kind = ? AND entityId = ? AND updatedAt = ?',
+          whereArgs: [entry.kind, entry.entityId, entry.token],
+        );
+      }
+    });
+  }
+
+  Future<void> _failOutbox(
+    Iterable<_OutboxTicket> entries,
+    Object error,
+  ) async {
+    final db = await AppDatabase.instance.database;
+    final now = DateTime.now().toIso8601String();
+    await db.transaction((txn) async {
+      for (final entry in entries) {
+        await txn.rawUpdate(
+          'UPDATE sync_outbox '
+          'SET attempts = attempts + 1, updatedAt = ?, lastError = ? '
+          'WHERE kind = ? AND entityId = ? AND updatedAt = ?',
+          [
+            now,
+            error.toString(),
+            entry.kind,
+            entry.entityId,
+            entry.token,
+          ],
+        );
+      }
+    });
+  }
 
   /// Pull-only replacement. No local rows are uploaded by this action.
   Future<SyncResult> syncAll() =>
@@ -119,13 +192,45 @@ class SupabaseSyncService {
   /// Wait for an in-flight sync, then start a fresh pass that includes local
   /// mutations made while that earlier pass was running.
   Future<SyncResult> syncPendingChanges() async {
-    final active = _activeSync;
-    if (active != null) await active;
     if (!SupabaseConfig.isLoggedIn) {
       return SyncResult(pushed: 0, pulled: 0, error: 'Chưa đăng nhập');
     }
-    await beginAuthenticatedSession();
-    return _startSync(_SyncOperation.livePush);
+    // Mark the request before enqueueing. A realtime callback or the periodic
+    // retry timer must not mistake this newly-created marker for stale work.
+    _generalPushRequestsInFlight++;
+    try {
+      final entry = await _enqueueOutbox('general', '');
+      return await _pushGeneralOutboxEntries([entry]);
+    } finally {
+      _generalPushRequestsInFlight--;
+    }
+  }
+
+  Future<SyncResult> _pushGeneralOutboxEntries(
+    List<_OutboxTicket> entries,
+  ) async {
+    try {
+      final active = _activeSync;
+      if (active != null) await active;
+      if (!SupabaseConfig.isLoggedIn) {
+        return SyncResult(
+          pushed: 0,
+          pulled: 0,
+          error: 'Đã đăng xuất trước khi đồng bộ',
+        );
+      }
+      await beginAuthenticatedSession();
+      final result = await _startSync(_SyncOperation.livePush);
+      if (result.hasError) {
+        await _failOutbox(entries, result.error!);
+      } else {
+        await _completeOutbox(entries);
+      }
+      return result;
+    } catch (error) {
+      await _failOutbox(entries, error);
+      rethrow;
+    }
   }
 
   /// Pushes the complete SRS state after a study session finishes. Card IDs
@@ -133,22 +238,153 @@ class SupabaseSyncService {
   Future<SyncResult> syncReviewStatesAfterStudy({
     int? sessionId,
     Iterable<int>? cardIds,
-  }) {
+  }) async {
+    if (!SupabaseConfig.isLoggedIn) {
+      return SyncResult(pushed: 0, pulled: 0, error: 'Chưa đăng nhập');
+    }
     final requestedCardIds = cardIds?.toSet();
+    final outboxKeys = <MapEntry<String, String>>[
+      if (requestedCardIds != null && requestedCardIds.isNotEmpty)
+        ...requestedCardIds.map(
+          (cardId) => MapEntry('review_card', '$cardId'),
+        )
+      else if (sessionId != null)
+        MapEntry('review_session', '$sessionId')
+      else
+        const MapEntry('review_all', ''),
+    ];
+    final outboxEntries = <_OutboxTicket>[];
+    for (final entry in outboxKeys) {
+      outboxEntries.add(await _enqueueOutbox(entry.key, entry.value));
+    }
     final completer = Completer<SyncResult>();
     _studySyncTail = _studySyncTail.then((_) async {
       try {
-        completer.complete(
-          await _syncReviewStatesAfterStudyOnce(
-            sessionId: sessionId,
-            cardIds: requestedCardIds,
-          ),
+        final result = await _syncReviewStatesAfterStudyOnce(
+          sessionId: sessionId,
+          cardIds: requestedCardIds,
         );
+        if (result.hasError) {
+          await _failOutbox(outboxEntries, result.error!);
+        } else {
+          await _completeOutbox(outboxEntries);
+        }
+        completer.complete(result);
       } catch (error, stackTrace) {
+        await _failOutbox(outboxEntries, error);
         completer.completeError(error, stackTrace);
       }
     }).catchError((_) {});
     return completer.future;
+  }
+
+  /// Retries durable local mutations without changing merge/LWW behavior.
+  Future<SyncResult?> retryPendingOutbox() async {
+    if (_outboxRetryInFlight ||
+        _generalPushRequestsInFlight > 0 ||
+        _activeSync != null ||
+        _isPushingStudyData ||
+        !SupabaseConfig.isLoggedIn) {
+      return null;
+    }
+    // Set this before the first await. Realtime subscription and the periodic
+    // timer can otherwise both enter and replay the same outbox snapshot.
+    _outboxRetryInFlight = true;
+    SyncResult? lastResult;
+    try {
+      await AppDatabase.instance.ensureSyncOutboxTable();
+      final db = await AppDatabase.instance.database;
+      final rows = await db.query('sync_outbox', orderBy: 'createdAt ASC');
+      if (rows.isEmpty) return null;
+
+      List<_OutboxTicket> ticketsFor(String kind) => rows
+          .where((row) => row['kind'] == kind)
+          .map(
+            (row) => _OutboxTicket(
+              kind,
+              row['entityId']?.toString() ?? '',
+              row['updatedAt']?.toString() ?? '',
+            ),
+          )
+          .toList();
+
+      final generalTickets = ticketsFor('general');
+      if (generalTickets.isNotEmpty) {
+        // Replay the existing marker directly. Calling syncPendingChanges()
+        // here would touch the marker's token and schedule another livePush.
+        lastResult = await _pushGeneralOutboxEntries(generalTickets);
+      }
+
+      final cardIds = rows
+          .where((row) => row['kind'] == 'review_card')
+          .map((row) => int.tryParse(row['entityId']?.toString() ?? ''))
+          .whereType<int>()
+          .toSet();
+      if (cardIds.isNotEmpty) {
+        final tickets = ticketsFor('review_card');
+        try {
+          lastResult = await _syncReviewStatesAfterStudyOnce(cardIds: cardIds);
+          if (lastResult.hasError) {
+            await _failOutbox(tickets, lastResult.error!);
+          } else {
+            await _completeOutbox(tickets);
+          }
+        } catch (error) {
+          await _failOutbox(tickets, error);
+          rethrow;
+        }
+      }
+
+      final sessionIds = rows
+          .where((row) => row['kind'] == 'review_session')
+          .map((row) => int.tryParse(row['entityId']?.toString() ?? ''))
+          .whereType<int>();
+      for (final sessionId in sessionIds) {
+        final tickets = ticketsFor('review_session')
+            .where((ticket) => ticket.entityId == '$sessionId')
+            .toList();
+        try {
+          lastResult = await _syncReviewStatesAfterStudyOnce(
+            sessionId: sessionId,
+          );
+          if (lastResult.hasError) {
+            await _failOutbox(tickets, lastResult.error!);
+          } else {
+            await _completeOutbox(tickets);
+          }
+        } catch (error) {
+          await _failOutbox(tickets, error);
+          rethrow;
+        }
+      }
+
+      if (rows.any((row) => row['kind'] == 'review_all')) {
+        final tickets = ticketsFor('review_all');
+        try {
+          lastResult = await _syncReviewStatesAfterStudyOnce();
+          if (lastResult.hasError) {
+            await _failOutbox(tickets, lastResult.error!);
+          } else {
+            await _completeOutbox(tickets);
+          }
+        } catch (error) {
+          await _failOutbox(tickets, error);
+          rethrow;
+        }
+      }
+
+      final deletedReviewCardIds = rows
+          .where((row) => row['kind'] == 'delete_review_card')
+          .map((row) => int.tryParse(row['entityId']?.toString() ?? ''))
+          .whereType<int>()
+          .toSet();
+      if (deletedReviewCardIds.isNotEmpty) {
+        await deleteRemoteReviewStatesForCards(deletedReviewCardIds);
+      }
+      return lastResult;
+    } finally {
+      _outboxRetryInFlight = false;
+    }
   }
 
   Future<SyncResult> _syncReviewStatesAfterStudyOnce({
@@ -606,6 +842,22 @@ $targetWhere
     }
 
     final db = await AppDatabase.instance.database;
+    await AppDatabase.instance.ensureSyncOutboxTable();
+    final boundOwnerRows = await db.query(
+      'app_settings',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: ['sync.localBoundOwnerId'],
+      limit: 1,
+    );
+    final previousOwner = boundOwnerRows.isEmpty
+        ? ''
+        : boundOwnerRows.first['value']?.toString() ?? '';
+    if (previousOwner.isNotEmpty && previousOwner != user.id) {
+      // Pending mutations belong to the previous account and must never be
+      // replayed into a newly authenticated account.
+      await db.delete('sync_outbox');
+    }
     final key = 'sync.livePushCursor.v2.${user.id}';
     String? startedAt;
     if (!newLogin) {
@@ -669,6 +921,10 @@ $targetWhere
       }));
       if (status == RealtimeSubscribeStatus.channelError) {
         print('REALTIME SUBSCRIPTION ERROR: $error');
+      } else if (status == RealtimeSubscribeStatus.subscribed) {
+        // A successful subscription also means the network is reachable
+        // again. Retry durable local mutations that previously failed.
+        unawaited(retryPendingOutbox());
       }
     });
   }
@@ -2996,17 +3252,33 @@ $targetWhere
     Iterable<int> localCardIds,
   ) async {
     if (!SupabaseConfig.isLoggedIn) return;
-    final remoteIds = <String>[];
-    for (final localId in localCardIds.toSet()) {
-      final remoteId = await findRemoteCardId(localId);
-      if (remoteId != null && remoteId.isNotEmpty) remoteIds.add(remoteId);
+    final ids = localCardIds.toSet();
+    if (ids.isEmpty) return;
+    final tickets = <_OutboxTicket>[];
+    for (final id in ids) {
+      tickets.add(await _enqueueOutbox('delete_review_card', '$id'));
     }
-    if (remoteIds.isEmpty) return;
-    await SupabaseConfig.client
-        .from('review_states')
-        .delete()
-        .eq('owner_id', SupabaseConfig.currentUser!.id)
-        .inFilter('card_id', remoteIds);
+    try {
+      final active = _activeSync;
+      if (active != null) await active;
+      await beginAuthenticatedSession();
+      final remoteIds = <String>[];
+      for (final localId in ids) {
+        final remoteId = await findRemoteCardId(localId);
+        if (remoteId != null && remoteId.isNotEmpty) remoteIds.add(remoteId);
+      }
+      if (remoteIds.isNotEmpty) {
+        await SupabaseConfig.client
+            .from('review_states')
+            .delete()
+            .eq('owner_id', SupabaseConfig.currentUser!.id)
+            .inFilter('card_id', remoteIds);
+      }
+      await _completeOutbox(tickets);
+    } catch (error) {
+      await _failOutbox(tickets, error);
+      rethrow;
+    }
   }
 
   Future<void> deleteRemoteCourseChildren(int localCourseId) async {

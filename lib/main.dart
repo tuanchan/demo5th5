@@ -26,6 +26,7 @@ import 'core/database/app_database.dart';
 import 'core/network/supabase_config.dart';
 import 'core/network/supabase_sync_service.dart';
 import 'core/network/server_log_service.dart';
+import 'core/notifications/vocabulary_reminder_service.dart';
 
 part 'core/theme/app_theme_and_settings_part.dart';
 part 'core/utils/app_helpers_part_01.dart';
@@ -49,6 +50,7 @@ part 'features/home/presentation/pages/home_page_state_part_01.dart';
 part 'features/home/presentation/pages/home_page_state_part_02.dart';
 part 'features/home/presentation/pages/home_page_state_part_02_split_02.dart';
 part 'features/home/presentation/pages/home_page_state_part_03.dart';
+part 'features/home/presentation/pages/vocabulary_reminder_dialog.dart';
 part 'features/home/presentation/widgets/home_page_state_drawer.dart';
 part 'features/pronunciation/presentation/widgets/pronunciation_overlay_state_core.dart';
 part 'features/pronunciation/presentation/widgets/pronunciation_overlay_state_part_01.dart';
@@ -98,6 +100,8 @@ Future<void> main() async {
 
   // Initialize Supabase
   await SupabaseConfig.initialize();
+  await VocabularyReminderService.instance.initialize();
+  await VocabularyReminderService.instance.refreshEnabledSchedule();
 
   runApp(MyApp());
 }

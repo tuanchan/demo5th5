@@ -648,26 +648,8 @@ extension StatisticsPageStatePart07 on _StatisticsPageState {
 
     if (SupabaseConfig.isLoggedIn) {
       try {
-        final ownerId = SupabaseConfig.currentUser!.id;
-        final remoteCourseId =
-            await SupabaseSyncService.instance.findRemoteCourseId(course.id);
-        if (remoteCourseId != null) {
-          final cardsResponse = await SupabaseConfig.client
-              .from('cards')
-              .select('id')
-              .eq('course_id', remoteCourseId);
-          final remoteCardIds = cardsResponse
-              .map((r) => r['id']?.toString())
-              .whereType<String>()
-              .toList();
-          if (remoteCardIds.isNotEmpty) {
-            await SupabaseConfig.client
-                .from('review_states')
-                .delete()
-                .eq('owner_id', ownerId)
-                .inFilter('card_id', remoteCardIds);
-          }
-        }
+        await SupabaseSyncService.instance
+            .deleteRemoteReviewStatesForCards(ids);
       } catch (e) {
         debugPrint('DELETE REMOTE COURSE SRS ERROR: $e');
       }
@@ -946,16 +928,8 @@ extension StatisticsPageStatePart07 on _StatisticsPageState {
     
     if (SupabaseConfig.isLoggedIn) {
       try {
-        final remoteCardId =
-            await SupabaseSyncService.instance.findRemoteCardId(cardId);
-        if (remoteCardId != null) {
-          final ownerId = SupabaseConfig.currentUser!.id;
-          await SupabaseConfig.client
-              .from('review_states')
-              .delete()
-              .eq('owner_id', ownerId)
-              .eq('card_id', remoteCardId);
-        }
+        await SupabaseSyncService.instance
+            .deleteRemoteReviewStatesForCards([cardId]);
       } catch (e) {
         debugPrint('DELETE REMOTE SRS ERROR: $e');
       }

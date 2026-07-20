@@ -195,24 +195,77 @@ class AppThemeLoader extends StatefulWidget {
 }
 
 
-class _AppThemeLoaderState extends State<AppThemeLoader> {
+class _AppThemeLoaderState extends State<AppThemeLoader>
+    with WidgetsBindingObserver {
   bool loaded = false;
+  bool _catchUpInFlight = false;
+  DateTime? _lastCatchUpAt;
+  String? _lastCatchUpOwnerId;
+  DateTime? _backgroundedAt;
+  Timer? _outboxRetryTimer;
   late final _authSubscription;
+
+  Future<void> _retryOutboxSafely() async {
+    if (!SupabaseConfig.isLoggedIn) return;
+    try {
+      await SupabaseSyncService.instance.retryPendingOutbox();
+    } catch (error) {
+      debugPrint('SYNC OUTBOX RETRY ERROR: $error');
+    }
+  }
+
+  Future<void> _startSessionAndCatchUp({bool newLogin = false}) async {
+    if (_catchUpInFlight || !SupabaseConfig.isLoggedIn) return;
+    _catchUpInFlight = true;
+    try {
+      await SupabaseSyncService.instance.beginAuthenticatedSession(
+        newLogin: newLogin,
+      );
+      if (!SupabaseConfig.isLoggedIn) return;
+      final ownerId = SupabaseConfig.currentUser?.id;
+      final now = DateTime.now();
+      final recentlyCaughtUp = ownerId != null &&
+          ownerId == _lastCatchUpOwnerId &&
+          _lastCatchUpAt != null &&
+          now.difference(_lastCatchUpAt!) < const Duration(minutes: 5);
+      if (recentlyCaughtUp) {
+        await _retryOutboxSafely();
+        return;
+      }
+      // Realtime only delivers events while this process is connected. A
+      // merge on startup/real resume reconciles the Supabase snapshot with SQLite,
+      // including changes made by the WinForms app while Flutter was offline.
+      final result = await SupabaseSyncService.instance.mergeAll();
+      if (!result.hasError) {
+        _lastCatchUpAt = DateTime.now();
+        _lastCatchUpOwnerId = ownerId;
+      }
+      // Only replay work that was actually queued by a local mutation. Merely
+      // opening/resuming the app must not manufacture an empty livePush.
+      await _retryOutboxSafely();
+    } catch (error) {
+      debugPrint('STARTUP SYNC ERROR: $error');
+    } finally {
+      _catchUpInFlight = false;
+    }
+  }
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _outboxRetryTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => unawaited(_retryOutboxSafely()),
+    );
     if (SupabaseConfig.isLoggedIn) {
-      unawaited(SupabaseSyncService.instance.beginAuthenticatedSession());
+      unawaited(_startSessionAndCatchUp());
     }
     // Listen for auth state changes (e.g., Google OAuth redirect callback)
     _authSubscription = SupabaseConfig.onAuthStateChange.listen((data) {
       final event = data.event;
       if (event == AuthChangeEvent.signedIn) {
-        // Start mutation tracking only. Download remains an explicit action.
-        unawaited(
-          SupabaseSyncService.instance.beginAuthenticatedSession(newLogin: true),
-        );
+        unawaited(_startSessionAndCatchUp(newLogin: true));
       } else if (event == AuthChangeEvent.signedOut) {
         SupabaseSyncService.instance.endAuthenticatedSession();
       } else if (event == AuthChangeEvent.passwordRecovery) {
@@ -221,6 +274,30 @@ class _AppThemeLoaderState extends State<AppThemeLoader> {
         });
       }
     });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.paused) {
+      _backgroundedAt ??= DateTime.now();
+      return;
+    }
+    if (state == AppLifecycleState.resumed) {
+      final backgroundedAt = _backgroundedAt;
+      _backgroundedAt = null;
+      // Windows can emit inactive/resumed while focus moves between windows.
+      // Only a genuine background interval is eligible for catch-up; the
+      // five-minute guard above still prevents repeated full snapshots.
+      if (backgroundedAt != null &&
+          DateTime.now().difference(backgroundedAt) >=
+              const Duration(seconds: 30)) {
+        unawaited(_startSessionAndCatchUp());
+      } else {
+        unawaited(SupabaseSyncService.instance.beginAuthenticatedSession());
+        unawaited(_retryOutboxSafely());
+      }
+    }
   }
 
   @override
@@ -236,6 +313,8 @@ class _AppThemeLoaderState extends State<AppThemeLoader> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _outboxRetryTimer?.cancel();
     _authSubscription.cancel();
     super.dispose();
   }
