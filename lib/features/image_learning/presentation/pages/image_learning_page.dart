@@ -64,7 +64,6 @@ class ImageVocabularyDetection {
       labelX = number(labelPoint['x'] ?? labelPoint['left'], labelX);
       labelY = number(labelPoint['y'] ?? labelPoint['top'], labelY);
     }
-
     xMin = xMin.clamp(0.0, 0.98).toDouble();
     yMin = yMin.clamp(0.0, 0.98).toDouble();
     xMax = xMax.clamp(xMin + 0.01, 1.0).toDouble();
@@ -126,6 +125,18 @@ class ImageVocabularyDetection {
         'labelX': labelX,
         'labelY': labelY,
       };
+}
+
+class _ImageAnnotationPlacement {
+  final ImageVocabularyDetection item;
+  final Rect target;
+  final Rect panel;
+
+  const _ImageAnnotationPlacement({
+    required this.item,
+    required this.target,
+    required this.panel,
+  });
 }
 
 class ImageLearningEntry {
@@ -233,6 +244,24 @@ class _ImageLanguageOption {
   final String instruction;
 
   const _ImageLanguageOption(this.code, this.name, this.instruction);
+}
+
+class _ImageVisionModelOption {
+  final String id;
+  final String name;
+  final String description;
+
+  const _ImageVisionModelOption(this.id, this.name, this.description);
+}
+
+class _ImageLearningSettingsChoice {
+  final String languageCode;
+  final String visionModel;
+
+  const _ImageLearningSettingsChoice({
+    required this.languageCode,
+    required this.visionModel,
+  });
 }
 
 class ImageLearningRepository {
@@ -357,8 +386,9 @@ class _ImageLearningPageState extends State<ImageLearningPage>
   static const Color _muted = Color(0xff93a0b5);
   static const Color _blue = Color(0xff4f6dff);
   static const Color _yellow = Color(0xffffcf33);
-  static const String _preferredVisionModel = 'gemini-3.1-flash-lite';
+  static const String _defaultVisionModel = 'gemini-3.1-flash-lite';
   static const String _languageSettingKey = 'imageLearning.languageCode';
+  static const String _visionModelSettingKey = 'imageLearning.visionModel';
   static const List<String> _annotationFontFallback = [
     'Segoe UI',
     'Microsoft YaHei',
@@ -420,6 +450,33 @@ class _ImageLearningPageState extends State<ImageLearningPage>
       'Dùng chữ Thái và romanization.',
     ),
   ];
+  static const List<_ImageVisionModelOption> _visionModels = [
+    _ImageVisionModelOption(
+      'gemini-3.1-flash-lite',
+      'Gemini 3.1 Flash Lite',
+      'Model cũ ổn định, dùng được với quota hiện tại của app.',
+    ),
+    _ImageVisionModelOption(
+      'gemini-3.1-flash-lite-image',
+      'Nano Banana 2 Lite',
+      'Nhanh và tiết kiệm nhất, phù hợp nhận diện ảnh số lượng lớn.',
+    ),
+    _ImageVisionModelOption(
+      'gemini-3.1-flash-image',
+      'Nano Banana 2',
+      'Cân bằng tốc độ và chất lượng, linh hoạt cho hầu hết tác vụ.',
+    ),
+    _ImageVisionModelOption(
+      'gemini-3-pro-image',
+      'Nano Banana Pro',
+      'Chất lượng cao cho ảnh và yêu cầu nhận diện phức tạp.',
+    ),
+    _ImageVisionModelOption(
+      'gemini-2.5-flash-image',
+      'Nano Banana',
+      'Model hình ảnh thế hệ 2.5, nhanh và ổn định.',
+    ),
+  ];
 
   final PageController _pageController =
       PageController(viewportFraction: 0.91);
@@ -440,6 +497,7 @@ class _ImageLearningPageState extends State<ImageLearningPage>
   String _status = '';
   String _cameraError = '';
   String _selectedLanguageCode = 'zh-CN';
+  String _selectedVisionModel = _defaultVisionModel;
 
   ImageLearningEntry? get _currentEntry {
     if (_entries.isEmpty) return null;
@@ -450,6 +508,15 @@ class _ImageLearningPageState extends State<ImageLearningPage>
     return _languages.firstWhere(
       (item) => item.code == _selectedLanguageCode,
       orElse: () => _languages.first,
+    );
+  }
+
+  _ImageVisionModelOption get _selectedVisionModelOption {
+    return _visionModels.firstWhere(
+      (item) => item.id == _selectedVisionModel,
+      orElse: () => _visionModels.firstWhere(
+        (item) => item.id == _defaultVisionModel,
+      ),
     );
   }
 
@@ -485,11 +552,19 @@ class _ImageLearningPageState extends State<ImageLearningPage>
   }
 
   Future<void> _loadPreferences() async {
-    final saved = await AppSettingsStore.getString(_languageSettingKey);
-    if (!mounted || saved == null) return;
-    if (_languages.any((item) => item.code == saved)) {
-      setState(() => _selectedLanguageCode = saved);
-    }
+    final savedLanguage =
+        await AppSettingsStore.getString(_languageSettingKey);
+    final savedVisionModel =
+        await AppSettingsStore.getString(_visionModelSettingKey);
+    if (!mounted) return;
+    setState(() {
+      if (_languages.any((item) => item.code == savedLanguage)) {
+        _selectedLanguageCode = savedLanguage!;
+      }
+      if (_visionModels.any((item) => item.id == savedVisionModel)) {
+        _selectedVisionModel = savedVisionModel!;
+      }
+    });
   }
 
   Future<void> _initializeCamera() async {
@@ -619,27 +694,25 @@ theo phong cách scrapbook dễ thương.
 Ngôn ngữ người dùng đã chọn: ${language.name} (${language.code}).
 ${language.instruction}
 
-Mỗi đồ vật có nhãn nền đen bo góc viền trắng, chữ gồm đúng 3 dòng:
+Mỗi đồ vật sẽ có nhãn nền than đậm mờ, không bo góc, chữ gồm đúng 3 dòng:
 1. từ bằng ${language.name};
 2. cách đọc chuẩn của từ đó;
 3. nghĩa tiếng Việt ngắn, đúng chính tả.
-Nghĩa tiếng Việt sẽ được hiển thị màu vàng. Thêm mũi tên viết tay trắng chỉ
+Nghĩa tiếng Việt sẽ được hiển thị màu vàng. App sẽ tự vẽ mũi tên trắng chỉ
 đúng vật thể.
 
-Góc trên trái sẽ có bảng từ vựng dạng sổ tay nền đen, liệt kê toàn bộ từ đã
-gắn nhãn. Bố cục cần có khoảng trống để trang trí sticker pastel như balo,
-xe buýt, thỏ, ngôi sao, tim và nốt nhạc. Giữ ảnh gốc rõ nét, không che vật
-thể quan trọng, chữ đúng chính tả, bố cục cân đối. Các đồ vật nhỏ cần box sát
-vật thể để app vẽ border trắng tách biệt và dễ nhận diện.
+Góc dưới phải sẽ có bảng từ vựng dạng sổ tay nền đen, liệt kê toàn bộ từ đã
+gắn nhãn. App sẽ tự rải các nhãn và mũi tên. Chỉ tập trung nhận diện đúng vật
+thể, chữ đúng chính tả và trả box sát vật thể.
 
-Hãy chọn 8-16 vật thể rõ ràng, hữu ích nhất:
+Hãy chọn 8-12 vật thể rõ ràng, hữu ích nhất:
 - term bắt buộc là tên vật thể bằng ${language.name}, không sao chép ngôn ngữ
   ngẫu nhiên đang xuất hiện trên ảnh;
 - pronunciation là cách đọc chuẩn phù hợp với ${language.code};
 - meaningVi luôn là nghĩa tiếng Việt tự nhiên;
 - box là vùng sát vật thể theo [yMin, xMin, yMax, xMax];
-- labelPoint là vị trí bảng ghi chú theo [y, x], ưu tiên khoảng trống gần vật;
-- các labelPoint không chồng lên nhau, không đặt trên bảng từ vựng góc trái.
+- không cần quyết định vị trí nhãn hoặc vẽ mũi tên; app sẽ tự bố trí để tránh
+  chồng lấn;
 
 Tọa độ đều là số nguyên từ 0 đến 1000.
 Chỉ trả JSON đúng cấu trúc:
@@ -651,8 +724,7 @@ Chỉ trả JSON đúng cấu trúc:
       "term": "từ trong ngôn ngữ đích",
       "pronunciation": "cách đọc",
       "meaningVi": "nghĩa tiếng Việt",
-      "box": [0, 0, 1000, 1000],
-      "labelPoint": [0, 0]
+      "box": [0, 0, 1000, 1000]
     }
   ]
 }
@@ -704,86 +776,87 @@ Không thêm markdown, không giải thích ngoài JSON, không bịa vật th�
     final linePaint = Paint()
       ..color = Colors.white.withOpacity(0.96)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = math.max(2.2, width / 440).toDouble()
+      ..strokeWidth = math.max(2.6, width / 390).toDouble()
       ..strokeCap = StrokeCap.round;
-    final targetPaint = Paint()..color = _yellow.withOpacity(0.98);
-    final bubblePaint = Paint()..color = const Color(0xe81b1e24);
+    final lineShadowPaint = Paint()
+      ..color = Colors.black.withOpacity(0.56)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = linePaint.strokeWidth + math.max(2.0, width / 700)
+      ..strokeCap = StrokeCap.round;
+    final bubblePaint = Paint()..color = const Color(0xb824272d);
     final bubbleBorder = Paint()
       ..color = Colors.white.withOpacity(0.96)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = math.max(1.8, width / 650).toDouble();
-    final smallObjectBorder = Paint()
-      ..color = Colors.white.withOpacity(0.94)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = math.max(2.0, width / 520).toDouble();
+      ..strokeWidth = math.max(2.2, width / 560).toDouble();
 
     final summaryWidth = math
-        .min(width * 0.5, math.max(width * 0.34, 300.0))
+        .min(width * 0.46, math.max(width * 0.34, baseFont * 15.0))
         .toDouble();
     final summaryHeight = math
         .min(
-          height * 0.45,
-          math.max(baseFont * 5.2, baseFont * (items.length * 0.78 + 2.2)),
+          height * 0.34,
+          math.max(baseFont * 5.0, baseFont * (items.length * 0.82 + 2.3)),
         )
         .toDouble();
-    final summaryRect = Rect.fromLTWH(
-      baseFont * 0.45,
-      baseFont * 0.45,
-      summaryWidth,
-      summaryHeight,
-    );
-    final summaryRRect = RRect.fromRectAndRadius(
-      summaryRect,
-      Radius.circular(baseFont * 0.65),
-    );
-    canvas.drawRRect(summaryRRect, bubblePaint);
-    canvas.drawRRect(summaryRRect, bubbleBorder);
-    final summaryTitle = TextPainter(
-      text: TextSpan(
-        text: 'TỪ VỰNG HÔM NAY · ${_selectedLanguage.name}',
-        style: TextStyle(
-          color: _yellow,
-          fontSize: baseFont * 0.68,
-          fontWeight: FontWeight.w900,
-          fontFamilyFallback: _annotationFontFallback,
-        ),
+    final outerMargin = baseFont * 0.55;
+    final summaryCandidates = <Rect>[
+      Rect.fromLTWH(
+        width - summaryWidth - outerMargin,
+        height - summaryHeight - outerMargin,
+        summaryWidth,
+        summaryHeight,
       ),
-      maxLines: 1,
-      ellipsis: '…',
-      textDirection: TextDirection.ltr,
-    )..layout(maxWidth: summaryWidth - baseFont);
-    summaryTitle.paint(
-      canvas,
-      Offset(summaryRect.left + baseFont * 0.5, summaryRect.top + baseFont * 0.5),
-    );
-    final rowsTop = summaryRect.top + baseFont * 1.45;
-    final availableRowsHeight =
-        summaryRect.bottom - rowsTop - baseFont * 0.35;
-    final rowHeight = availableRowsHeight / math.max(1, items.length);
-    final summaryFont =
-        math.min(baseFont * 0.58, rowHeight * 0.7).clamp(8.0, 19.0).toDouble();
-    for (var index = 0; index < items.length; index++) {
-      final item = items[index];
-      final row = TextPainter(
+      Rect.fromLTWH(
+        outerMargin,
+        height - summaryHeight - outerMargin,
+        summaryWidth,
+        summaryHeight,
+      ),
+      Rect.fromLTWH(
+        width - summaryWidth - outerMargin,
+        outerMargin,
+        summaryWidth,
+        summaryHeight,
+      ),
+      Rect.fromLTWH(
+        outerMargin,
+        outerMargin,
+        summaryWidth,
+        summaryHeight,
+      ),
+    ];
+    var summaryRect = summaryCandidates.first;
+    var bestSummaryScore = double.infinity;
+    for (var index = 0; index < summaryCandidates.length; index++) {
+      final candidate = summaryCandidates[index];
+      var score = index * width * height * 0.0015;
+      for (final item in items) {
+        final target = Rect.fromLTRB(
+          item.xMin * width,
+          item.yMin * height,
+          item.xMax * width,
+          item.yMax * height,
+        );
+        if (candidate.overlaps(target)) {
+          final overlap = candidate.intersect(target);
+          score += overlap.width * overlap.height * 8;
+        }
+      }
+      if (score < bestSummaryScore) {
+        bestSummaryScore = score;
+        summaryRect = candidate;
+      }
+    }
+    void drawSummary() {
+      canvas.drawRect(summaryRect, bubblePaint);
+      canvas.drawRect(summaryRect, bubbleBorder);
+      final summaryTitle = TextPainter(
         text: TextSpan(
-          children: [
-            TextSpan(
-              text: '${index + 1}. ${item.term}',
-              style: const TextStyle(color: Colors.white),
-            ),
-            if (item.pronunciation.isNotEmpty)
-              TextSpan(
-                text: '  ${item.pronunciation}',
-                style: const TextStyle(color: Color(0xffd7deeb)),
-              ),
-            TextSpan(
-              text: '  ${item.meaningVi}',
-              style: const TextStyle(color: Color(0xffffdf54)),
-            ),
-          ],
+          text: 'TỪ VỰNG HÔM NAY · ${_selectedLanguage.name}',
           style: TextStyle(
-            fontSize: summaryFont,
-            fontWeight: FontWeight.w700,
+            color: _yellow,
+            fontSize: baseFont * 0.68,
+            fontWeight: FontWeight.w900,
             fontFamilyFallback: _annotationFontFallback,
           ),
         ),
@@ -791,20 +864,63 @@ Không thêm markdown, không giải thích ngoài JSON, không bịa vật th�
         ellipsis: '…',
         textDirection: TextDirection.ltr,
       )..layout(maxWidth: summaryWidth - baseFont);
-      row.paint(
+      summaryTitle.paint(
         canvas,
         Offset(
           summaryRect.left + baseFont * 0.5,
-          rowsTop + index * rowHeight,
+          summaryRect.top + baseFont * 0.5,
         ),
       );
-    }
-    for (var ring = 0; ring < 6; ring++) {
-      final center = Offset(
-        summaryRect.left + baseFont * (0.8 + ring * 1.05),
-        summaryRect.top,
-      );
-      canvas.drawCircle(center, baseFont * 0.17, bubbleBorder);
+      final rowsTop = summaryRect.top + baseFont * 1.45;
+      final availableRowsHeight =
+          summaryRect.bottom - rowsTop - baseFont * 0.35;
+      final rowHeight = availableRowsHeight / math.max(1, items.length);
+      final summaryFont =
+          math.min(baseFont * 0.58, rowHeight * 0.7).clamp(8.0, 19.0).toDouble();
+      for (var index = 0; index < items.length; index++) {
+        final item = items[index];
+        final row = TextPainter(
+          text: TextSpan(
+            children: [
+              TextSpan(
+                text: '${index + 1}. ${item.term}',
+                style: const TextStyle(color: Colors.white),
+              ),
+              if (item.pronunciation.isNotEmpty)
+                TextSpan(
+                  text: '  ${item.pronunciation}',
+                  style: const TextStyle(color: Color(0xffd7deeb)),
+                ),
+              TextSpan(
+                text: '  ${item.meaningVi}',
+                style: const TextStyle(color: Color(0xffffdf54)),
+              ),
+            ],
+            style: TextStyle(
+              fontSize: summaryFont,
+              fontWeight: FontWeight.w700,
+              fontFamilyFallback: _annotationFontFallback,
+            ),
+          ),
+          maxLines: 1,
+          ellipsis: '…',
+          textDirection: TextDirection.ltr,
+        )..layout(maxWidth: summaryWidth - baseFont);
+        row.paint(
+          canvas,
+          Offset(
+            summaryRect.left + baseFont * 0.5,
+            rowsTop + index * rowHeight,
+          ),
+        );
+      }
+      for (var ring = 0; ring < 6; ring++) {
+        final center = Offset(
+          summaryRect.left + baseFont * (0.8 + ring * 1.05),
+          summaryRect.top,
+        );
+        canvas.drawCircle(center, baseFont * 0.17, bubbleBorder);
+      }
     }
 
     void drawStar(Offset center, double radius, Color color) {
@@ -888,131 +1004,291 @@ Không thêm markdown, không giải thích ngoài JSON, không bịa vật th�
       baseFont * 0.68,
     );
 
-    final placedBubbles = <Rect>[summaryRect];
-
-    for (var index = 0; index < items.length; index++) {
-      final item = items[index];
+    final imageBounds = Rect.fromLTWH(0, 0, width, height);
+    final targets = <MapEntry<ImageVocabularyDetection, Rect>>[];
+    for (final item in items) {
       final target = Rect.fromLTRB(
         item.xMin * width,
         item.yMin * height,
         item.xMax * width,
         item.yMax * height,
+      ).intersect(imageBounds);
+      if (target.width > 0 && target.height > 0) {
+        targets.add(MapEntry(item, target));
+      }
+    }
+    targets.sort(
+      (a, b) => a.value.center.dy.compareTo(b.value.center.dy),
+    );
+
+    // Gemini chỉ nhận diện vật thể. App tự rải panel bằng một seed ổn định,
+    // sau đó loại mọi vị trí va vào panel, vật thể, bảng tổng hợp hoặc mũi tên.
+    final panelWidth = math
+        .min(width * 0.33, math.max(width * 0.22, baseFont * 9.8))
+        .toDouble();
+    final preferredPanelHeight = baseFont * 3.35;
+    final panelGap = baseFont * 0.62;
+    Offset pointOnEdge(Rect rect, Offset towards) {
+      final delta = towards - rect.center;
+      if (delta.distanceSquared < 0.001) return rect.center;
+      final halfWidth = math.max(0.5, rect.width / 2);
+      final halfHeight = math.max(0.5, rect.height / 2);
+      final scale = 1 /
+          math.max(
+            delta.dx.abs() / halfWidth,
+            delta.dy.abs() / halfHeight,
+          );
+      return rect.center + delta * scale;
+    }
+
+    bool segmentTouchesRect(Offset start, Offset end, Rect rect) {
+      final steps =
+          math.max(8, ((end - start).distance / baseFont).ceil()).toInt();
+      for (var step = 1; step < steps; step++) {
+        final progress = step / steps;
+        final point = Offset(
+          start.dx + (end.dx - start.dx) * progress,
+          start.dy + (end.dy - start.dy) * progress,
+        );
+        if (rect.contains(point)) return true;
+      }
+      return false;
+    }
+
+    double cross(Offset a, Offset b, Offset c) =>
+        (b.dx - a.dx) * (c.dy - a.dy) -
+        (b.dy - a.dy) * (c.dx - a.dx);
+    bool segmentsCross(Offset a, Offset b, Offset c, Offset d) {
+      final abC = cross(a, b, c);
+      final abD = cross(a, b, d);
+      final cdA = cross(c, d, a);
+      final cdB = cross(c, d, b);
+      return abC * abD < 0 && cdA * cdB < 0;
+    }
+
+    var seed = 17;
+    for (final target in targets) {
+      for (final unit in target.key.term.codeUnits) {
+        seed = ((seed * 31) + unit) & 0x7fffffff;
+      }
+      seed = ((seed * 31) + (target.value.center.dx * 10).round()) &
+          0x7fffffff;
+      seed = ((seed * 31) + (target.value.center.dy * 10).round()) &
+          0x7fffffff;
+    }
+    final random = math.Random(seed);
+    final shuffledTargets =
+        List<MapEntry<ImageVocabularyDetection, Rect>>.from(targets)
+          ..shuffle(random);
+    final placements = <_ImageAnnotationPlacement>[];
+    final leaderSegments = <List<Offset>>[];
+    final safeLeft = outerMargin;
+    final safeTop = outerMargin;
+    final safeRight = width - outerMargin - panelWidth;
+    final safeBottom = height - outerMargin - preferredPanelHeight;
+    final localGap = baseFont * 1.1;
+
+    Rect clampedPanel(double left, double top) {
+      return Rect.fromLTWH(
+        left.clamp(safeLeft, safeRight).toDouble(),
+        top.clamp(safeTop, safeBottom).toDouble(),
+        panelWidth,
+        preferredPanelHeight,
       );
-      final safeTarget = target.intersect(Rect.fromLTWH(0, 0, width, height));
-      final targetAreaRatio =
-          safeTarget.width * safeTarget.height / (width * height);
-      if (targetAreaRatio < 0.055) {
-        canvas.drawRRect(
-          RRect.fromRectAndRadius(
-            safeTarget.inflate(baseFont * 0.12),
-            Radius.circular(baseFont * 0.32),
+    }
+
+    for (final targetEntry in shuffledTargets) {
+      final target = targetEntry.value;
+      final candidates = <Rect>[
+        clampedPanel(
+          target.left - panelWidth - localGap,
+          target.center.dy - preferredPanelHeight / 2,
+        ),
+        clampedPanel(
+          target.right + localGap,
+          target.center.dy - preferredPanelHeight / 2,
+        ),
+        clampedPanel(
+          target.center.dx - panelWidth / 2,
+          target.top - preferredPanelHeight - localGap,
+        ),
+        clampedPanel(
+          target.center.dx - panelWidth / 2,
+          target.bottom + localGap,
+        ),
+        clampedPanel(
+          target.left - panelWidth - localGap,
+          target.top - preferredPanelHeight - localGap,
+        ),
+        clampedPanel(
+          target.right + localGap,
+          target.top - preferredPanelHeight - localGap,
+        ),
+        clampedPanel(
+          target.left - panelWidth - localGap,
+          target.bottom + localGap,
+        ),
+        clampedPanel(
+          target.right + localGap,
+          target.bottom + localGap,
+        ),
+      ];
+      for (var attempt = 0; attempt < 120; attempt++) {
+        candidates.add(
+          clampedPanel(
+            safeLeft + random.nextDouble() * math.max(0.0, safeRight - safeLeft),
+            safeTop + random.nextDouble() * math.max(0.0, safeBottom - safeTop),
           ),
-          smallObjectBorder,
         );
       }
-
-      final bubbleWidth = math
-          .min(width * 0.39, math.max(width * 0.26, 230.0))
-          .toDouble();
-      final bubbleHeight = baseFont * 3.5;
-      final fallbackLabelX =
-          safeTarget.center.dx < width * 0.5 ? 0.03 : 0.97;
-      final labelX = item.labelX > 0 ? item.labelX : fallbackLabelX;
-      final labelY =
-          item.labelY > 0 ? item.labelY : safeTarget.center.dy / height;
-      var bubbleLeft = (labelX * width - bubbleWidth / 2)
-          .clamp(10.0, width - bubbleWidth - 10.0)
-          .toDouble();
-      var bubbleTop = (labelY * height - bubbleHeight / 2)
-          .clamp(10.0, height - bubbleHeight - 10.0)
-          .toDouble();
-      var bubbleRect =
-          Rect.fromLTWH(bubbleLeft, bubbleTop, bubbleWidth, bubbleHeight);
-      for (var attempt = 0; attempt < 14; attempt++) {
-        final overlaps = placedBubbles.any(
-          (placed) => placed.inflate(baseFont * 0.18).overlaps(bubbleRect),
-        );
-        if (!overlaps) break;
-        final row = (attempt ~/ 2) + 1;
-        final direction = attempt.isEven ? 1.0 : -1.0;
-        bubbleTop = (labelY * height -
-                bubbleHeight / 2 +
-                direction * row * (bubbleHeight + baseFont * 0.28))
-            .clamp(10.0, height - bubbleHeight - 10.0)
-            .toDouble();
-        if (attempt >= 8) {
-          bubbleLeft = (bubbleLeft +
-                  (attempt.isEven ? bubbleWidth * 0.52 : -bubbleWidth * 0.52))
-              .clamp(10.0, width - bubbleWidth - 10.0)
-              .toDouble();
+      const gridColumns = 8;
+      const gridRows = 14;
+      for (var row = 0; row <= gridRows; row++) {
+        for (var column = 0; column <= gridColumns; column++) {
+          candidates.add(
+            clampedPanel(
+              safeLeft +
+                  (safeRight - safeLeft) * column / gridColumns,
+              safeTop + (safeBottom - safeTop) * row / gridRows,
+            ),
+          );
         }
-        bubbleRect =
-            Rect.fromLTWH(bubbleLeft, bubbleTop, bubbleWidth, bubbleHeight);
       }
-      placedBubbles.add(bubbleRect);
-      final bubble = RRect.fromRectAndRadius(
-        bubbleRect,
-        Radius.circular(baseFont * 0.62),
-      );
 
-      final targetPoint = safeTarget.center;
-      final startPoint = Offset(
-        targetPoint.dx < bubbleRect.left
-            ? bubbleRect.left
-            : targetPoint.dx > bubbleRect.right
-                ? bubbleRect.right
-                : bubbleRect.center.dx,
-        targetPoint.dy < bubbleRect.top
-            ? bubbleRect.top
-            : targetPoint.dy > bubbleRect.bottom
-                ? bubbleRect.bottom
-                : bubbleRect.center.dy,
+      Rect? bestPanel;
+      var bestScore = double.infinity;
+      for (final candidate in candidates) {
+        var score =
+            (candidate.center - target.center).distance * 0.03 +
+            random.nextDouble() * baseFont * 0.9;
+        if (candidate.inflate(panelGap).overlaps(summaryRect)) {
+          score += 1000000000;
+        }
+        for (final placed in placements) {
+          if (candidate.inflate(panelGap).overlaps(placed.panel)) {
+            score += 1000000000;
+          } else {
+            final distance = (candidate.center - placed.panel.center).distance;
+            if (distance < panelWidth * 1.35) {
+              score += (panelWidth * 1.35 - distance) * 8;
+            }
+          }
+        }
+        for (final otherTarget in targets) {
+          final paddedTarget = otherTarget.value.inflate(baseFont * 0.08);
+          if (candidate.overlaps(paddedTarget)) {
+            final overlap = candidate.intersect(paddedTarget);
+            final overlapRatio =
+                overlap.width * overlap.height /
+                (candidate.width * candidate.height);
+            score += 16000 + overlapRatio * 90000;
+          }
+        }
+
+        final leaderStart = pointOnEdge(candidate, target.center);
+        final leaderEnd = pointOnEdge(target, candidate.center);
+        if (segmentTouchesRect(
+          leaderStart,
+          leaderEnd,
+          summaryRect.inflate(panelGap * 0.2),
+        )) {
+          score += 500000000;
+        }
+        for (final placed in placements) {
+          if (segmentTouchesRect(
+            leaderStart,
+            leaderEnd,
+            placed.panel.inflate(panelGap * 0.25),
+          )) {
+            score += 400000000;
+          }
+        }
+        for (final segment in leaderSegments) {
+          if (segmentTouchesRect(
+            segment[0],
+            segment[1],
+            candidate.inflate(panelGap * 0.25),
+          )) {
+            score += 400000000;
+          }
+          if (segmentsCross(
+            leaderStart,
+            leaderEnd,
+            segment[0],
+            segment[1],
+          )) {
+            score += 18000;
+          }
+        }
+        for (final otherTarget in targets) {
+          if (identical(otherTarget, targetEntry)) continue;
+          if (segmentTouchesRect(
+            leaderStart,
+            leaderEnd,
+            otherTarget.value.inflate(baseFont * 0.1),
+          )) {
+            score += 26000;
+          }
+        }
+        if (score < bestScore) {
+          bestScore = score;
+          bestPanel = candidate;
+        }
+      }
+      if (bestPanel == null || bestScore >= 400000000) continue;
+      final placement = _ImageAnnotationPlacement(
+        item: targetEntry.key,
+        target: target,
+        panel: bestPanel,
       );
-      final controlPoint = Offset(
-        startPoint.dx + (targetPoint.dx - startPoint.dx) * 0.52,
-        startPoint.dy,
-      );
-      final leader = Path()
-        ..moveTo(startPoint.dx, startPoint.dy)
-        ..quadraticBezierTo(
-          controlPoint.dx,
-          controlPoint.dy,
-          targetPoint.dx,
-          targetPoint.dy,
-        );
-      canvas.drawPath(leader, linePaint);
+      placements.add(placement);
+      leaderSegments.add([
+        pointOnEdge(bestPanel, target.center),
+        pointOnEdge(target, bestPanel.center),
+      ]);
+    }
+
+    // Dùng đường thẳng đã được kiểm tra va chạm ở bước đặt panel. Nhờ vậy
+    // đường thực tế trùng với đường đã giữ chỗ và không chui qua panel khác.
+    for (final placement in placements) {
+      final startPoint =
+          pointOnEdge(placement.panel, placement.target.center);
+      final targetPoint =
+          pointOnEdge(placement.target, placement.panel.center);
+      canvas.drawLine(startPoint, targetPoint, lineShadowPaint);
+      canvas.drawLine(startPoint, targetPoint, linePaint);
+
       final arrowAngle = math.atan2(
-        targetPoint.dy - controlPoint.dy,
-        targetPoint.dx - controlPoint.dx,
+        targetPoint.dy - startPoint.dy,
+        targetPoint.dx - startPoint.dx,
       );
-      final arrowSize = baseFont * 0.48;
-      canvas.drawLine(
-        targetPoint,
-        Offset(
-          targetPoint.dx -
-              arrowSize * math.cos(arrowAngle - math.pi / 5),
-          targetPoint.dy -
-              arrowSize * math.sin(arrowAngle - math.pi / 5),
-        ),
-        linePaint,
+      final arrowSize = baseFont * 0.5;
+      final arrowLeft = Offset(
+        targetPoint.dx -
+            arrowSize * math.cos(arrowAngle - math.pi / 5),
+        targetPoint.dy -
+            arrowSize * math.sin(arrowAngle - math.pi / 5),
       );
-      canvas.drawLine(
-        targetPoint,
-        Offset(
-          targetPoint.dx -
-              arrowSize * math.cos(arrowAngle + math.pi / 5),
-          targetPoint.dy -
-              arrowSize * math.sin(arrowAngle + math.pi / 5),
-        ),
-        linePaint,
+      final arrowRight = Offset(
+        targetPoint.dx -
+            arrowSize * math.cos(arrowAngle + math.pi / 5),
+        targetPoint.dy -
+            arrowSize * math.sin(arrowAngle + math.pi / 5),
       );
-      canvas.drawCircle(
-        targetPoint,
-        math.max(3.0, baseFont * 0.15).toDouble(),
-        targetPaint,
-      );
-      canvas.drawRRect(bubble, bubblePaint);
-      canvas.drawRRect(bubble, bubbleBorder);
+      canvas.drawLine(targetPoint, arrowLeft, lineShadowPaint);
+      canvas.drawLine(targetPoint, arrowRight, lineShadowPaint);
+      canvas.drawLine(targetPoint, arrowLeft, linePaint);
+      canvas.drawLine(targetPoint, arrowRight, linePaint);
+    }
+
+    for (final placement in placements) {
+      final panel = placement.panel;
+      canvas.drawRect(panel, bubblePaint);
+      canvas.drawRect(panel, bubbleBorder);
+      canvas.save();
+      canvas.clipRect(panel);
+      final contentScale =
+          (panel.height / preferredPanelHeight).clamp(0.55, 1.0).toDouble();
 
       void drawText(
         String text,
@@ -1027,7 +1303,7 @@ Không thêm markdown, không giải thích ngoài JSON, không bịa vật th�
             text: text,
             style: TextStyle(
               color: color,
-              fontSize: fontSize,
+              fontSize: fontSize * contentScale,
               fontWeight: weight,
               height: 1.05,
               fontFamilyFallback: _annotationFontFallback,
@@ -1036,35 +1312,40 @@ Không thêm markdown, không giải thích ngoài JSON, không bịa vật th�
           maxLines: 1,
           ellipsis: '…',
           textDirection: TextDirection.ltr,
-        )..layout(maxWidth: bubbleWidth - baseFont);
+        )..layout(maxWidth: panel.width - baseFont);
         painter.paint(
           canvas,
-          Offset(bubbleLeft + baseFont * 0.5, bubbleTop + top),
+          Offset(
+            panel.left + baseFont * 0.5,
+            panel.top + top * contentScale,
+          ),
         );
       }
 
       drawText(
-        item.term,
+        placement.item.term,
         baseFont * 0.34,
         Colors.white,
         baseFont,
         FontWeight.w800,
       );
       drawText(
-        item.pronunciation,
+        placement.item.pronunciation,
         baseFont * 1.35,
         const Color(0xffd7deeb),
         baseFont * 0.72,
         FontWeight.w600,
       );
       drawText(
-        item.meaningVi,
+        placement.item.meaningVi,
         baseFont * 2.18,
         const Color(0xffffdf54),
         baseFont * 0.78,
         FontWeight.w700,
       );
+      canvas.restore();
     }
+    drawSummary();
 
     final picture = recorder.endRecording();
     final output = await picture.toImage(outputWidth, outputHeight);
@@ -1119,7 +1400,7 @@ Không thêm markdown, không giải thích ngoài JSON, không bịa vật th�
     if (picked != null) await _analyzePicked(picked);
   }
 
-  Future<String> _analyzeWithPreferredModel(
+  Future<String> _analyzeWithSelectedModel(
     Uint8List bytes,
     String mimeType,
   ) async {
@@ -1128,24 +1409,75 @@ Không thêm markdown, không giải thích ngoài JSON, không bịa vật th�
         _analysisPrompt(),
         imageBytes: bytes,
         mimeType: mimeType,
-        modelOverride: _preferredVisionModel,
+        modelOverride: _selectedVisionModel,
       );
     } catch (error) {
       final message = error.toString().toLowerCase();
       final modelUnavailable = message.contains('no longer available') ||
           message.contains('not found') ||
           message.contains('model') && message.contains('available');
-      if (!modelUnavailable) rethrow;
+      final quotaExceeded = message.contains('quota') ||
+          message.contains('resource_exhausted') ||
+          message.contains('billing') ||
+          message.contains('429');
+      if (!modelUnavailable && !quotaExceeded) rethrow;
       debugPrint(
-        'PREFERRED IMAGE MODEL UNAVAILABLE, FALL BACK TO LATEST: $error',
+        'SELECTED IMAGE MODEL FAILED, FALL BACK: $error',
       );
-      return GeminiFlashLiteClient.analyzeImage(
+      final fallbackModel = _selectedVisionModel == _defaultVisionModel
+          ? GeminiFlashLiteClient.defaultModel
+          : _defaultVisionModel;
+      if (mounted) {
+        setState(() {
+          _status = quotaExceeded
+              ? 'Model đã chọn hết quota, đang thử model ổn định...'
+              : 'Model đã chọn không khả dụng, đang thử model ổn định...';
+        });
+      }
+      final result = await GeminiFlashLiteClient.analyzeImage(
         _analysisPrompt(),
         imageBytes: bytes,
         mimeType: mimeType,
-        modelOverride: GeminiFlashLiteClient.defaultModel,
+        modelOverride: fallbackModel,
       );
+      if (fallbackModel == _defaultVisionModel &&
+          _selectedVisionModel != _defaultVisionModel) {
+        if (mounted) {
+          setState(() => _selectedVisionModel = _defaultVisionModel);
+        }
+        await AppSettingsStore.setString(
+          _visionModelSettingKey,
+          _defaultVisionModel,
+        );
+      }
+      return result;
     }
+  }
+
+  String _friendlyImageAnalysisError(Object error) {
+    final raw = error.toString().replaceFirst('Exception: ', '').trim();
+    final normalized = raw.toLowerCase();
+    if (normalized.contains('quota') ||
+        normalized.contains('resource_exhausted') ||
+        normalized.contains('billing') ||
+        normalized.contains('429')) {
+      return 'Gemini đã hết quota. Hãy đổi API key trong Cài đặt chung '
+          'hoặc kiểm tra billing/quota của project.';
+    }
+    if (normalized.contains('api key') ||
+        normalized.contains('api_key_invalid') ||
+        normalized.contains('permission denied') ||
+        normalized.contains('permission_denied')) {
+      return 'API key Gemini không hợp lệ hoặc chưa có quyền dùng model này. '
+          'Hãy kiểm tra lại key trong Cài đặt chung.';
+    }
+    if (normalized.contains('not found') ||
+        normalized.contains('no longer available') ||
+        normalized.contains('model') && normalized.contains('available')) {
+      return 'Model Gemini đã chọn hiện không khả dụng. '
+          'Hãy chọn model khác trong Cài đặt học ảnh.';
+    }
+    return 'Phân tích ảnh thất bại: $raw';
   }
 
   Future<void> _analyzePicked(_PickedLearningImage picked) async {
@@ -1158,7 +1490,7 @@ Không thêm markdown, không giải thích ngoài JSON, không bịa vật th�
     });
     try {
       final analysisBytes = await _analysisBytes(picked.bytes);
-      final response = await _analyzeWithPreferredModel(
+      final response = await _analyzeWithSelectedModel(
         analysisBytes,
         analysisBytes.length == picked.bytes.length
             ? picked.mimeType
@@ -1185,7 +1517,7 @@ Không thêm markdown, không giải thích ngoài JSON, không bịa vật th�
           .where(
             (item) => item.term.isNotEmpty && item.meaningVi.isNotEmpty,
           )
-          .take(20)
+          .take(12)
           .toList();
       if (vocabulary.isEmpty) {
         throw const FormatException('Không nhận diện được từ vựng trong ảnh');
@@ -1222,7 +1554,7 @@ Không thêm markdown, không giải thích ngoài JSON, không bịa vật th�
       if (!mounted) return;
       showAppToast(
         context,
-        'Phân tích ảnh thất bại: ${error.toString().replaceFirst('Exception: ', '')}',
+        _friendlyImageAnalysisError(error),
       );
     } finally {
       if (mounted) {
@@ -2042,38 +2374,129 @@ Không thêm markdown, không giải thích ngoài JSON, không bịa vật th�
     );
   }
 
-  Future<void> _showLanguageSettings() async {
-    var selected = _selectedLanguageCode;
-    final result = await showDialog<String>(
+  Future<void> _showImageSettings() async {
+    var selectedLanguage = _selectedLanguageCode;
+    var selectedModel = _selectedVisionModel;
+    final result = await showDialog<_ImageLearningSettingsChoice>(
       context: context,
       builder: (dialogContext) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
+            final selectedModelOption = _visionModels.firstWhere(
+              (item) => item.id == selectedModel,
+              orElse: () => _selectedVisionModelOption,
+            );
             return AlertDialog(
               backgroundColor: _panel,
               title: const Text(
-                'Ngôn ngữ tạo từ vựng',
+                'Cài đặt học ảnh',
                 style: TextStyle(color: _text),
               ),
               content: SizedBox(
                 width: 430,
-                height: 410,
+                height: math.min(
+                  560.0,
+                  MediaQuery.sizeOf(context).height * 0.68,
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
+                      'Model phân tích ảnh',
+                      style: TextStyle(
+                        color: _text,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<String>(
+                      value: selectedModel,
+                      isExpanded: true,
+                      dropdownColor: _panel2,
+                      menuMaxHeight: 310,
+                      borderRadius: BorderRadius.circular(12),
+                      icon: const Icon(
+                        Icons.keyboard_arrow_down_rounded,
+                        color: _muted,
+                      ),
+                      style: const TextStyle(
+                        color: _text,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                      ),
+                      decoration: InputDecoration(
+                        filled: true,
+                        fillColor: _panel2,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 12,
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: const BorderSide(color: _border),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: const BorderSide(
+                            color: _blue,
+                            width: 1.4,
+                          ),
+                        ),
+                      ),
+                      items: _visionModels
+                          .map(
+                            (model) => DropdownMenuItem<String>(
+                              value: model.id,
+                              child: Text(
+                                '${model.name} · ${model.id}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (value) {
+                        if (value != null) {
+                          setDialogState(() => selectedModel = value);
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 7),
+                    Text(
+                      selectedModelOption.description,
+                      style: const TextStyle(
+                        color: _muted,
+                        fontSize: 11.5,
+                        height: 1.25,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    const Divider(color: _border, height: 1),
+                    const SizedBox(height: 14),
+                    const Text(
+                      'Ngôn ngữ tạo từ vựng',
+                      style: TextStyle(
+                        color: _text,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    const Text(
                       'AI sẽ gọi tên mọi vật thể bằng ngôn ngữ bạn chọn.',
                       style: TextStyle(color: _muted, fontSize: 12),
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 6),
                     Expanded(
                       child: ListView(
                         children: _languages.map((language) {
                           return RadioListTile<String>(
                             value: language.code,
-                            groupValue: selected,
+                            groupValue: selectedLanguage,
                             activeColor: _blue,
                             contentPadding: EdgeInsets.zero,
+                            dense: true,
                             title: Text(
                               language.name,
                               style: const TextStyle(
@@ -2087,7 +2510,9 @@ Không thêm markdown, không giải thích ngoài JSON, không bịa vật th�
                             ),
                             onChanged: (value) {
                               if (value != null) {
-                                setDialogState(() => selected = value);
+                                setDialogState(
+                                  () => selectedLanguage = value,
+                                );
                               }
                             },
                           );
@@ -2103,7 +2528,13 @@ Không thêm markdown, không giải thích ngoài JSON, không bịa vật th�
                   child: const Text('Hủy'),
                 ),
                 FilledButton(
-                  onPressed: () => Navigator.pop(dialogContext, selected),
+                  onPressed: () => Navigator.pop(
+                    dialogContext,
+                    _ImageLearningSettingsChoice(
+                      languageCode: selectedLanguage,
+                      visionModel: selectedModel,
+                    ),
+                  ),
                   style: FilledButton.styleFrom(
                     backgroundColor: _blue,
                     foregroundColor: Colors.white,
@@ -2117,8 +2548,20 @@ Không thêm markdown, không giải thích ngoài JSON, không bịa vật th�
       },
     );
     if (result == null || !mounted) return;
-    setState(() => _selectedLanguageCode = result);
-    await AppSettingsStore.setString(_languageSettingKey, result);
+    setState(() {
+      _selectedLanguageCode = result.languageCode;
+      _selectedVisionModel = result.visionModel;
+    });
+    await Future.wait([
+      AppSettingsStore.setString(
+        _languageSettingKey,
+        result.languageCode,
+      ),
+      AppSettingsStore.setString(
+        _visionModelSettingKey,
+        result.visionModel,
+      ),
+    ]);
   }
 
   Widget _buildCameraView() {
@@ -2683,8 +3126,8 @@ Không thêm markdown, không giải thích ngoài JSON, không bịa vật th�
                     ),
                   ),
                   IconButton(
-                    tooltip: 'Ngôn ngữ tạo từ vựng',
-                    onPressed: _processing ? null : _showLanguageSettings,
+                    tooltip: 'Cài đặt học ảnh',
+                    onPressed: _processing ? null : _showImageSettings,
                     icon: const Icon(Icons.settings_rounded, color: _text),
                   ),
                 ],
