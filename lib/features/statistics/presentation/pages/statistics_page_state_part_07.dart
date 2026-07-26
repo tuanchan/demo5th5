@@ -592,6 +592,7 @@ extension StatisticsPageStatePart07 on _StatisticsPageState {
       confirmText: 'Áp dụng',
     );
     if (confirmed != true) return;
+    await AppDatabase.instance.ensureSyncOutboxTable();
     final db = await AppDatabase.instance.database;
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
@@ -849,6 +850,7 @@ extension StatisticsPageStatePart07 on _StatisticsPageState {
     required int reviews,
     required int lapses,
   }) async {
+    await AppDatabase.instance.ensureSyncOutboxTable();
     final db = await AppDatabase.instance.database;
     final nowIso = DateTime.now().toIso8601String();
     final rows = await db.query(
@@ -893,17 +895,24 @@ extension StatisticsPageStatePart07 on _StatisticsPageState {
       'updatedAt': nowIso,
     };
     
-    if (rows.isEmpty) {
-      values['createdAt'] = nowIso;
-      await db.insert('review_states', values);
-    } else {
-      await db.update(
-        'review_states',
-        values,
-        where: 'cardId = ?',
-        whereArgs: [cardId],
+    await db.transaction((txn) async {
+      if (rows.isEmpty) {
+        values['createdAt'] = nowIso;
+        await txn.insert('review_states', values);
+      } else {
+        await txn.update(
+          'review_states',
+          values,
+          where: 'cardId = ?',
+          whereArgs: [cardId],
+        );
+      }
+      await AppDatabase.instance.enqueueSyncOutbox(
+        txn,
+        kind: 'review_card',
+        entityId: cardId,
       );
-    }
+    });
     
     if (SupabaseConfig.isLoggedIn) {
       unawaited(

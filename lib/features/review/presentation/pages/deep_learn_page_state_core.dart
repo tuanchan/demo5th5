@@ -420,7 +420,10 @@ class _DeepLearnPageState extends State<DeepLearnPage> {
       _enqueue(question.card.id, _requeueMinGap + _random.nextInt(2));
     }
     await _applyCorrectReview(question.card.id);
-    unawaited(_saveState());
+    // Do not reveal/advance after an accepted answer until its resumable queue
+    // snapshot is durably stored. dispose() cannot be awaited if the app is
+    // killed immediately afterwards.
+    await _saveState();
     if (_correct >= _total) {
       _renderNextQuestion();
       return;
@@ -624,20 +627,42 @@ class _DeepLearnPageState extends State<DeepLearnPage> {
 
   Future<void> _applyCorrectReview(int cardId) async {
     try {
+      await AppDatabase.instance.ensureSyncOutboxTable();
       final db = await AppDatabase.instance.database;
-      final rows = await db.query('review_states', where: 'cardId = ?', whereArgs: [cardId], limit: 1);
-      final previous = rows.isEmpty ? null : Map<String, Object?>.from(rows.first);
-      final next = ReviewScheduler.nextState(
-        cardId: cardId,
-        previous: previous,
-        isCorrect: true,
-        now: DateTime.now(),
-      );
-      if (rows.isEmpty) {
-        await db.insert('review_states', next);
-      } else {
-        await db.update('review_states', next, where: 'cardId = ?', whereArgs: [cardId]);
-      }
+      final now = DateTime.now();
+      await db.transaction((txn) async {
+        final rows = await txn.query(
+          'review_states',
+          where: 'cardId = ?',
+          whereArgs: [cardId],
+          limit: 1,
+        );
+        final previous = rows.isEmpty
+            ? null
+            : Map<String, Object?>.from(rows.first);
+        final next = ReviewScheduler.nextState(
+          cardId: cardId,
+          previous: previous,
+          isCorrect: true,
+          now: now,
+        );
+        if (rows.isEmpty) {
+          await txn.insert('review_states', next);
+        } else {
+          await txn.update(
+            'review_states',
+            next,
+            where: 'cardId = ?',
+            whereArgs: [cardId],
+          );
+        }
+        await AppDatabase.instance.enqueueSyncOutbox(
+          txn,
+          kind: 'review_card',
+          entityId: cardId,
+          queuedAt: now,
+        );
+      });
     } catch (error) {
       debugPrint('DEEP LEARN REVIEW ERROR: $error');
     }

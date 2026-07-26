@@ -30,8 +30,13 @@ extension FlashCardsPageStatePart01Split02 on _FlashCardsPageState {
     }
 
     final cardRowsChanged = change.tables.contains('cards');
-    final dueStateChanged =
-        widget.dueOnly && change.tables.contains('review_states');
+    // A due-card study session is a snapshot. Applying our own SRS realtime
+    // events would remove answered cards from visibleOrder halfway through the
+    // session, changing the total and making the next vocabulary appear to
+    // jump. Refresh membership only before a tracked session has been created.
+    final dueStateChanged = widget.dueOnly &&
+        _studySessionId == null &&
+        change.tables.contains('review_states');
     if ((!cardRowsChanged && !dueStateChanged) || change.cardIds.isEmpty) {
       return;
     }
@@ -367,9 +372,12 @@ extension FlashCardsPageStatePart01Split02 on _FlashCardsPageState {
     bool playSwipeEffect = true,
     bool resetSwipeState = false,
   }) async {
+    if (_isRecordingProgress) return;
     final card = currentCard;
     if (card == null) return;
+    _isRecordingProgress = true;
 
+    try {
     final previousPos = currentPos;
     final previousCompletion = showCompletion;
     final recorded = await this.recordCurrentCardProgress(known);
@@ -377,6 +385,7 @@ extension FlashCardsPageStatePart01Split02 on _FlashCardsPageState {
       this.showFlashMessage('Không lưu được tiến độ của thẻ');
       return;
     }
+    if (!mounted) return;
     final previousReviewState = recorded.previousReviewState;
     final studyResultId = recorded.studyResultId;
     final nextPos = currentPos + 1;
@@ -421,6 +430,9 @@ extension FlashCardsPageStatePart01Split02 on _FlashCardsPageState {
       await this._finishStudySession();
     } else {
       this._playAutoAudioIfNeeded();
+    }
+    } finally {
+      _isRecordingProgress = false;
     }
   }
 

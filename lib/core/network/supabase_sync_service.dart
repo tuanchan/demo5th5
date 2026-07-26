@@ -146,6 +146,40 @@ class SupabaseSyncService {
     });
   }
 
+  /// Local SRS rows covered by an outbox marker are authoritative until their
+  /// upload is acknowledged. Timestamps alone are not sufficient here because
+  /// a device clock can be behind the server, especially after offline study.
+  Future<Set<int>> _pendingReviewCardIds(Database db) async {
+    await AppDatabase.instance.ensureSyncOutboxTable();
+    final rows = await db.rawQuery('''
+      SELECT CAST(entityId AS INTEGER) AS cardId
+      FROM sync_outbox
+      WHERE kind IN ('review_card', 'delete_review_card')
+        AND TRIM(entityId) <> ''
+
+      UNION
+
+      SELECT DISTINCT sr.cardId AS cardId
+      FROM sync_outbox pending
+      INNER JOIN study_results sr
+        ON sr.sessionId = CAST(pending.entityId AS INTEGER)
+      WHERE pending.kind = 'review_session'
+
+      UNION
+
+      SELECT rs.cardId AS cardId
+      FROM review_states rs
+      WHERE EXISTS (
+        SELECT 1 FROM sync_outbox WHERE kind = 'review_all'
+      )
+    ''');
+    return rows
+        .map((row) => _localInt(row['cardId']))
+        .whereType<int>()
+        .where((id) => id > 0)
+        .toSet();
+  }
+
   /// Pull-only replacement. No local rows are uploaded by this action.
   Future<SyncResult> syncAll() =>
       _startManualSync(_SyncOperation.pullReplace);
@@ -1137,6 +1171,9 @@ $targetWhere
     var deleted = 0;
     var skipped = 0;
     final replacedRemoteIds = <String>{};
+    final pendingReviewCardIds = table == 'review_states'
+        ? await _pendingReviewCardIds(db)
+        : const <int>{};
 
     // Some server editors save a card edit as INSERT(new id) + soft-delete
     // (old id). Reuse the old local card ID when both rows occupy the same
@@ -1234,6 +1271,18 @@ $targetWhere
               : (_cardLocalIdByRemote[remoteCardId] ??
                   _stableLocalId(remoteCardId));
           if (localCardId != null) {
+            if (pendingReviewCardIds.contains(localCardId)) {
+              skipped++;
+              await ServerLogService.write(
+                'realtime.review_delete_deferred',
+                details: {
+                  'remoteId': remoteId,
+                  'cardId': localCardId,
+                  'reason': 'pending-local-review',
+                },
+              );
+              continue;
+            }
             await db.delete(
               table,
               where: 'cardId = ?',
@@ -1893,6 +1942,9 @@ $targetWhere
       }
 
       final remoteIdsToDelete = <String>[];
+      final pendingReviewCardIds = localTable == 'review_states'
+          ? await _pendingReviewCardIds(db)
+          : const <int>{};
 
       // --- Build memory cache of local rows to avoid O(N) database queries ---
       final columnsToFetch = <String>{idColumn};
@@ -1934,6 +1986,14 @@ $targetWhere
           try {
             final localData = remoteToLocal(remote);
             final localId = localData[idColumn];
+            if (localTable == 'review_states') {
+              final cardId = _localInt(localData['cardId']);
+              if (cardId != null && pendingReviewCardIds.contains(cardId)) {
+                // The matching local update has not reached the server yet.
+                // Keep it intact; the durable outbox retry will upload it.
+                continue;
+              }
+            }
 
             // Check for orphaned/deleted parent records to prevent pulling data
             // for soft-deleted/deleted cards or courses.
@@ -3251,13 +3311,13 @@ $targetWhere
   Future<void> deleteRemoteReviewStatesForCards(
     Iterable<int> localCardIds,
   ) async {
-    if (!SupabaseConfig.isLoggedIn) return;
     final ids = localCardIds.toSet();
     if (ids.isEmpty) return;
     final tickets = <_OutboxTicket>[];
     for (final id in ids) {
       tickets.add(await _enqueueOutbox('delete_review_card', '$id'));
     }
+    if (!SupabaseConfig.isLoggedIn) return;
     try {
       final active = _activeSync;
       if (active != null) await active;

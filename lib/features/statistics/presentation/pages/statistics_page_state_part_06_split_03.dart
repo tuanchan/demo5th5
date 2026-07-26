@@ -320,6 +320,7 @@ extension StatisticsPageStatePart06Split03 on _StatisticsPageState {
     required int intervalDays,
     required DateTime nextReviewAt,
   }) async {
+    await AppDatabase.instance.ensureSyncOutboxTable();
     final db = await AppDatabase.instance.database;
     await this._upsertSrsStateOn(
       db,
@@ -388,14 +389,18 @@ extension StatisticsPageStatePart06Split03 on _StatisticsPageState {
     if (rows.isEmpty) {
       values['createdAt'] = nowIso;
       await executor.insert('review_states', values);
-      return;
+    } else {
+      await executor.update(
+        'review_states',
+        values,
+        where: 'cardId = ?',
+        whereArgs: [cardId],
+      );
     }
-
-    await executor.update(
-      'review_states',
-      values,
-      where: 'cardId = ?',
-      whereArgs: [cardId],
+    await AppDatabase.instance.enqueueSyncOutbox(
+      executor,
+      kind: 'review_card',
+      entityId: cardId,
     );
   }
 

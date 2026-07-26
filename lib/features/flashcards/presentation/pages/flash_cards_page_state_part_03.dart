@@ -15,16 +15,26 @@ extension FlashCardsPageStatePart03 on _FlashCardsPageState {
           .whereType<int>()
           .toList(growable: false);
 
-      await db.delete(
-        'review_states',
-        where: '''
-        cardId IN (
-          SELECT id FROM cards
-          WHERE courseId = ? AND deletedAt IS NULL
-        )
-      ''',
-        whereArgs: [selectedCourseId],
-      );
+      await AppDatabase.instance.ensureSyncOutboxTable();
+      await db.transaction((txn) async {
+        await txn.delete(
+          'review_states',
+          where: '''
+          cardId IN (
+            SELECT id FROM cards
+            WHERE courseId = ? AND deletedAt IS NULL
+          )
+        ''',
+          whereArgs: [selectedCourseId],
+        );
+        for (final cardId in cardIds) {
+          await AppDatabase.instance.enqueueSyncOutbox(
+            txn,
+            kind: 'delete_review_card',
+            entityId: cardId,
+          );
+        }
+      });
       if (SupabaseConfig.isLoggedIn) {
         unawaited(
           SupabaseSyncService.instance
@@ -71,11 +81,19 @@ extension FlashCardsPageStatePart03 on _FlashCardsPageState {
       final db = await AppDatabase.instance.database;
 
       if (undoItem.previousReviewState == null) {
-        await db.delete(
-          'review_states',
-          where: 'cardId = ?',
-          whereArgs: [undoItem.cardId],
-        );
+        await AppDatabase.instance.ensureSyncOutboxTable();
+        await db.transaction((txn) async {
+          await txn.delete(
+            'review_states',
+            where: 'cardId = ?',
+            whereArgs: [undoItem.cardId],
+          );
+          await AppDatabase.instance.enqueueSyncOutbox(
+            txn,
+            kind: 'delete_review_card',
+            entityId: undoItem.cardId,
+          );
+        });
         if (SupabaseConfig.isLoggedIn) {
           unawaited(
             SupabaseSyncService.instance.deleteRemoteReviewStatesForCards(
@@ -88,15 +106,29 @@ extension FlashCardsPageStatePart03 on _FlashCardsPageState {
           undoItem.previousReviewState!,
         );
         restored.remove('id');
-        restored['updatedAt'] = DateTime.now().toIso8601String();
-        await db.update(
-          'review_states',
-          restored,
-          where: 'cardId = ?',
-          whereArgs: [undoItem.cardId],
-        );
+        final now = DateTime.now();
+        restored['updatedAt'] = now.toIso8601String();
+        await AppDatabase.instance.ensureSyncOutboxTable();
+        await db.transaction((txn) async {
+          await txn.update(
+            'review_states',
+            restored,
+            where: 'cardId = ?',
+            whereArgs: [undoItem.cardId],
+          );
+          await AppDatabase.instance.enqueueSyncOutbox(
+            txn,
+            kind: 'review_card',
+            entityId: undoItem.cardId,
+            queuedAt: now,
+          );
+        });
         if (SupabaseConfig.isLoggedIn) {
-          unawaited(SupabaseSyncService.instance.syncPendingChanges());
+          unawaited(
+            SupabaseSyncService.instance.syncReviewStatesAfterStudy(
+              cardIds: [undoItem.cardId],
+            ),
+          );
         }
       }
     } catch (e) {

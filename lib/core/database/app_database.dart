@@ -22,10 +22,11 @@ class AppDatabase {
   /// Restores schedules for legacy or merged SRS rows that have a level but
   /// no due date. A positive SRS level must always have a review schedule.
   Future<int> repairIncompleteReviewSchedules() async {
+    await ensureSyncOutboxTable();
     final db = await database;
     final rows = await db.query(
       'review_states',
-      columns: ['id', 'level', 'intervalDays'],
+      columns: ['id', 'cardId', 'level', 'intervalDays'],
       where: 'COALESCE(level, 0) > 0 AND '
           "(nextReviewAt IS NULL OR TRIM(nextReviewAt) = '')",
     );
@@ -59,6 +60,15 @@ class AppDatabase {
           where: 'id = ?',
           whereArgs: [row['id']],
         );
+        final cardId = (row['cardId'] as num?)?.toInt();
+        if (cardId != null) {
+          await enqueueSyncOutbox(
+            txn,
+            kind: 'review_card',
+            entityId: cardId,
+            queuedAt: now,
+          );
+        }
       }
     });
     return rows.length;
@@ -434,6 +444,42 @@ class AppDatabase {
     final db = await database;
     if (_syncOutboxReady) return;
     await _createSyncOutboxTable(db);
+  }
+
+  /// Adds a durable sync marker using the same SQLite transaction that writes
+  /// learning progress. This is intentionally network-independent: closing
+  /// the app or losing connectivity after an answer must not leave an SRS row
+  /// that can be overwritten by an older cloud snapshot.
+  Future<void> enqueueSyncOutbox(
+    DatabaseExecutor executor, {
+    required String kind,
+    required Object entityId,
+    DateTime? queuedAt,
+  }) async {
+    final now = (queuedAt ?? DateTime.now()).toIso8601String();
+    final id = entityId.toString();
+    await executor.insert(
+      'sync_outbox',
+      {
+        'kind': kind,
+        'entityId': id,
+        'createdAt': now,
+        'updatedAt': now,
+        'attempts': 0,
+        'lastError': null,
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    await executor.update(
+      'sync_outbox',
+      {
+        'updatedAt': now,
+        'attempts': 0,
+        'lastError': null,
+      },
+      where: 'kind = ? AND entityId = ?',
+      whereArgs: [kind, id],
+    );
   }
 
   Future<void> _createSyncOutboxTable(Database db) async {

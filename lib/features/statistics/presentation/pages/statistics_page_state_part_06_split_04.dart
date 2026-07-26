@@ -19,6 +19,7 @@ extension StatisticsPageStatePart06Split04 on _StatisticsPageState {
       throw FormatException('Không tìm thấy items SRS');
     }
 
+    await AppDatabase.instance.ensureSyncOutboxTable();
     final db = await AppDatabase.instance.database;
     var imported = 0;
     var skipped = 0;

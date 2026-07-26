@@ -36,6 +36,7 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
   DateTime _essayQuestionStartedAt = DateTime.now();
   final Set<int> _recordedResultCardIds = {};
   final Map<int, DateTime> _cardStartedAtMap = {};
+  Future<void> _studyWriteTail = Future<void>.value();
 
   // ── Matching pairs timer ──────────────────────────────
   final Stopwatch _matchStopwatch = Stopwatch();

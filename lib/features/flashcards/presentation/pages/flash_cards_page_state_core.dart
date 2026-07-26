@@ -33,6 +33,8 @@ class _FlashCardsPageState extends State<FlashCardsPage> {
   String? _selectedListeningAnswer;
   bool _isPlayingListeningAudio = false;
   bool _studySessionFinished = true;
+  bool _isRecordingProgress = false;
+  Future<void> _flashStudyWriteTail = Future<void>.value();
   late final StreamSubscription<void> _flashcardsRealtimeSubscription;
   Future<void> _realtimeRefreshTail = Future<void>.value();
 

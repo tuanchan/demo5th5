@@ -9,52 +9,91 @@ extension FlashCardsPageStatePart02 on _FlashCardsPageState {
     final sessionId = _studySessionId;
     if (card == null || sessionId == null || _studySessionFinished) return null;
 
-    final db = await AppDatabase.instance.database;
     final now = DateTime.now();
-    try {
-      return await db.transaction((txn) async {
-        final rows = await txn.query(
-          'review_states',
-          where: 'cardId = ?',
-          whereArgs: [card.id],
-          limit: 1,
-        );
-        final previousState = rows.isEmpty
-            ? null
-            : Map<String, Object?>.from(rows.first);
-        final nextState = ReviewScheduler.nextState(
-          cardId: card.id,
-          previous: previousState,
-          isCorrect: known,
-          now: now,
-        );
-        if (rows.isEmpty) {
-          await txn.insert('review_states', nextState);
-        } else {
-          await txn.update(
+    final operation = _flashStudyWriteTail.then((_) async {
+      try {
+        await AppDatabase.instance.ensureSyncOutboxTable();
+        final db = await AppDatabase.instance.database;
+        return await db.transaction((txn) async {
+          final rows = await txn.query(
             'review_states',
-            nextState,
             where: 'cardId = ?',
             whereArgs: [card.id],
+            limit: 1,
           );
-        }
-        final resultId = await txn.insert('study_results', {
-          'sessionId': sessionId,
-          'cardId': card.id,
-          'answerText': known ? 'known' : 'unknown',
-          'isCorrect': known ? 1 : 0,
-          'responseTimeMs': null,
-          'reviewedAt': now.toIso8601String(),
+          final previousState = rows.isEmpty
+              ? null
+              : Map<String, Object?>.from(rows.first);
+          final nextState = ReviewScheduler.nextState(
+            cardId: card.id,
+            previous: previousState,
+            isCorrect: known,
+            now: now,
+          );
+          if (rows.isEmpty) {
+            await txn.insert('review_states', nextState);
+          } else {
+            await txn.update(
+              'review_states',
+              nextState,
+              where: 'cardId = ?',
+              whereArgs: [card.id],
+            );
+          }
+          final resultId = await txn.insert('study_results', {
+            'sessionId': sessionId,
+            'cardId': card.id,
+            'answerText': known ? 'known' : 'unknown',
+            'isCorrect': known ? 1 : 0,
+            'responseTimeMs': null,
+            'reviewedAt': now.toIso8601String(),
+          });
+          final sessionSummary = await txn.rawQuery(
+            '''
+            SELECT
+              COUNT(*) AS totalCount,
+              COALESCE(SUM(CASE WHEN isCorrect = 1 THEN 1 ELSE 0 END), 0)
+                AS correctCount
+            FROM study_results
+            WHERE sessionId = ?
+            ''',
+            [sessionId],
+          );
+          final answeredCount = _dbInt(sessionSummary.first['totalCount']);
+          final correctCount = _dbInt(sessionSummary.first['correctCount']);
+          await txn.update(
+            'study_sessions',
+            {
+              'correctCount': correctCount,
+              'wrongCount': answeredCount - correctCount,
+            },
+            where: 'id = ?',
+            whereArgs: [sessionId],
+          );
+          await AppDatabase.instance.enqueueSyncOutbox(
+            txn,
+            kind: 'review_card',
+            entityId: card.id,
+            queuedAt: now,
+          );
+          await AppDatabase.instance.enqueueSyncOutbox(
+            txn,
+            kind: 'review_session',
+            entityId: sessionId,
+            queuedAt: now,
+          );
+          return (
+            previousReviewState: previousState,
+            studyResultId: resultId,
+          );
         });
-        return (
-          previousReviewState: previousState,
-          studyResultId: resultId,
-        );
-      });
-    } catch (error) {
-      debugPrint('RECORD FLASH PROGRESS ERROR: $error');
-      return null;
-    }
+      } catch (error) {
+        debugPrint('RECORD FLASH PROGRESS ERROR: $error');
+        return null;
+      }
+    });
+    _flashStudyWriteTail = operation.then<void>((_) {});
+    return await operation;
   }
 
 

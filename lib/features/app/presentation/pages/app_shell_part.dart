@@ -222,6 +222,10 @@ class _AppThemeLoaderState extends State<AppThemeLoader>
         newLogin: newLogin,
       );
       if (!SupabaseConfig.isLoggedIn) return;
+      // Upload durable offline answers before reading the cloud snapshot.
+      // If the network is still unavailable this safely leaves the markers in
+      // SQLite; merge also knows not to overwrite those pending SRS rows.
+      await _retryOutboxSafely();
       final ownerId = SupabaseConfig.currentUser?.id;
       final now = DateTime.now();
       final recentlyCaughtUp = ownerId != null &&
@@ -240,8 +244,7 @@ class _AppThemeLoaderState extends State<AppThemeLoader>
         _lastCatchUpAt = DateTime.now();
         _lastCatchUpOwnerId = ownerId;
       }
-      // Only replay work that was actually queued by a local mutation. Merely
-      // opening/resuming the app must not manufacture an empty livePush.
+      // Replay once more for mutations created while catch-up was running.
       await _retryOutboxSafely();
     } catch (error) {
       debugPrint('STARTUP SYNC ERROR: $error');

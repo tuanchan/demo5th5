@@ -7,33 +7,59 @@ extension ReviewPracticePageStatePart01Split02 on _ReviewPracticePageState {
     _studySessionFinished = true;
 
     try {
+      // An answer can still be committing while the user closes the screen.
+      // Never count/delete the session until every previously accepted answer
+      // has finished its atomic SQLite write.
+      await _studyWriteTail;
       final db = await AppDatabase.instance.database;
-      final resultCount = Sqflite.firstIntValue(
-            await db.rawQuery(
-              'SELECT COUNT(*) FROM study_results WHERE sessionId = ?',
-              [sessionId],
-            ),
-          ) ??
-          0;
+      final summaryRows = await db.rawQuery(
+        '''
+        SELECT
+          COUNT(*) AS totalCount,
+          COALESCE(SUM(CASE WHEN isCorrect = 1 THEN 1 ELSE 0 END), 0)
+            AS correctCount
+        FROM study_results
+        WHERE sessionId = ?
+        ''',
+        [sessionId],
+      );
+      final resultCount = _dbInt(summaryRows.first['totalCount']);
+      final correctCount = _dbInt(summaryRows.first['correctCount']);
       if (resultCount == 0) {
-        await db.delete(
-          'study_sessions',
-          where: 'id = ?',
-          whereArgs: [sessionId],
-        );
+        await AppDatabase.instance.ensureSyncOutboxTable();
+        await db.transaction((txn) async {
+          await txn.delete(
+            'study_sessions',
+            where: 'id = ?',
+            whereArgs: [sessionId],
+          );
+          await txn.delete(
+            'sync_outbox',
+            where: 'kind = ? AND entityId = ?',
+            whereArgs: ['review_session', '$sessionId'],
+          );
+        });
         _studySessionId = null;
         return;
       }
-      await db.update(
-        'study_sessions',
-        {
-          'correctCount': _correct,
-          'wrongCount': _wrong,
-          'endedAt': DateTime.now().toIso8601String(),
-        },
-        where: 'id = ?',
-        whereArgs: [sessionId],
-      );
+      await AppDatabase.instance.ensureSyncOutboxTable();
+      await db.transaction((txn) async {
+        await txn.update(
+          'study_sessions',
+          {
+            'correctCount': correctCount,
+            'wrongCount': resultCount - correctCount,
+            'endedAt': DateTime.now().toIso8601String(),
+          },
+          where: 'id = ?',
+          whereArgs: [sessionId],
+        );
+        await AppDatabase.instance.enqueueSyncOutbox(
+          txn,
+          kind: 'review_session',
+          entityId: sessionId,
+        );
+      });
       if (SupabaseConfig.isLoggedIn) {
         await SupabaseSyncService.instance.syncReviewStatesAfterStudy(
           sessionId: sessionId,
@@ -49,54 +75,17 @@ extension ReviewPracticePageStatePart01Split02 on _ReviewPracticePageState {
 
 
 
-  Future<void> _markReviewStateForCard({
-    required int cardId,
-    required bool isCorrect,
-  }) async {
-    final db = await AppDatabase.instance.database;
-    final now = DateTime.now();
-
-    final rows = await db.query(
-      'review_states',
-      where: 'cardId = ?',
-      whereArgs: [cardId],
-      limit: 1,
-    );
-    final previousState = rows.isEmpty
-        ? null
-        : Map<String, Object?>.from(rows.first);
-    final nextState = ReviewScheduler.nextState(
-      cardId: cardId,
-      previous: previousState,
-      isCorrect: isCorrect,
-      now: now,
-    );
-
-    if (rows.isEmpty) {
-      await db.insert('review_states', nextState);
-      return;
-    }
-
-    await db.update(
-      'review_states',
-      nextState,
-      where: 'cardId = ?',
-      whereArgs: [cardId],
-    );
-  }
-
-
-
-
-
   Future<void> _recordStudyResult({
     required StudyCardItem card,
     required String answerText,
     required bool isCorrect,
-  }) async {
+  }) {
     final sessionId = _studySessionId;
-    if (sessionId == null || _studySessionFinished) return;
-    if (_recordedResultCardIds.contains(card.id)) return;
+    if (sessionId == null ||
+        _studySessionFinished ||
+        _recordedResultCardIds.contains(card.id)) {
+      return Future<void>.value();
+    }
 
     final now = DateTime.now();
     final startedAt = _cardStartedAtMap[card.id] ?? _essayQuestionStartedAt;
@@ -105,34 +94,91 @@ extension ReviewPracticePageStatePart01Split02 on _ReviewPracticePageState {
         .inMilliseconds
         .clamp(0, 2147483647);
 
-    try {
-      final db = await AppDatabase.instance.database;
-      await db.insert('study_results', {
-        'sessionId': sessionId,
-        'cardId': card.id,
-        'answerText': answerText,
-        'isCorrect': isCorrect ? 1 : 0,
-        'responseTimeMs': responseMs,
-        'reviewedAt': now.toIso8601String(),
-      });
+    // Reserve synchronously so rapid taps cannot queue the same card twice.
+    _recordedResultCardIds.add(card.id);
+    final operation = _studyWriteTail.then((_) async {
+      try {
+        await AppDatabase.instance.ensureSyncOutboxTable();
+        final db = await AppDatabase.instance.database;
+        await db.transaction((txn) async {
+          await txn.insert('study_results', {
+            'sessionId': sessionId,
+            'cardId': card.id,
+            'answerText': answerText,
+            'isCorrect': isCorrect ? 1 : 0,
+            'responseTimeMs': responseMs,
+            'reviewedAt': now.toIso8601String(),
+          });
 
-      await this._markReviewStateForCard(cardId: card.id, isCorrect: isCorrect);
+          final rows = await txn.query(
+            'review_states',
+            where: 'cardId = ?',
+            whereArgs: [card.id],
+            limit: 1,
+          );
+          final previousState = rows.isEmpty
+              ? null
+              : Map<String, Object?>.from(rows.first);
+          final nextState = ReviewScheduler.nextState(
+            cardId: card.id,
+            previous: previousState,
+            isCorrect: isCorrect,
+            now: now,
+          );
+          if (rows.isEmpty) {
+            await txn.insert('review_states', nextState);
+          } else {
+            await txn.update(
+              'review_states',
+              nextState,
+              where: 'cardId = ?',
+              whereArgs: [card.id],
+            );
+          }
 
-      _recordedResultCardIds.add(card.id);
+          final sessionSummary = await txn.rawQuery(
+            '''
+            SELECT
+              COUNT(*) AS totalCount,
+              COALESCE(SUM(CASE WHEN isCorrect = 1 THEN 1 ELSE 0 END), 0)
+                AS correctCount
+            FROM study_results
+            WHERE sessionId = ?
+            ''',
+            [sessionId],
+          );
+          final answeredCount = _dbInt(sessionSummary.first['totalCount']);
+          final correctCount = _dbInt(sessionSummary.first['correctCount']);
+          await txn.update(
+            'study_sessions',
+            {
+              'correctCount': correctCount,
+              'wrongCount': answeredCount - correctCount,
+            },
+            where: 'id = ?',
+            whereArgs: [sessionId],
+          );
 
-      await db.update(
-        'study_sessions',
-        {
-          'correctCount': _correctMap.values.where((e) => e).length,
-          'wrongCount':
-              _answeredCards.length - _correctMap.values.where((e) => e).length,
-        },
-        where: 'id = ?',
-        whereArgs: [sessionId],
-      );
-    } catch (e) {
-      debugPrint('INSERT REVIEW RESULT ERROR: $e');
-    }
+          await AppDatabase.instance.enqueueSyncOutbox(
+            txn,
+            kind: 'review_card',
+            entityId: card.id,
+            queuedAt: now,
+          );
+          await AppDatabase.instance.enqueueSyncOutbox(
+            txn,
+            kind: 'review_session',
+            entityId: sessionId,
+            queuedAt: now,
+          );
+        });
+      } catch (e) {
+        _recordedResultCardIds.remove(card.id);
+        debugPrint('INSERT REVIEW RESULT ERROR: $e');
+      }
+    });
+    _studyWriteTail = operation;
+    return operation;
   }
 
 }
