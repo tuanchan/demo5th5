@@ -90,35 +90,45 @@ extension StatisticsPageStatePart07 on _StatisticsPageState {
                   ),
                 ),
               );
-              final dueToggle = InkWell(
-                borderRadius: BorderRadius.circular(8),
-                onTap: () =>
-                    setState(() => _srsOnlyDueToday = !_srsOnlyDueToday),
-                child: Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-                  child: Row(
+              final dueToggle = ValueListenableBuilder<bool>(
+                valueListenable: _srsOnlyDueTodayNotifier,
+                builder: (context, onlyDueToday, _) {
+                  return Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Checkbox(
-                        value: _srsOnlyDueToday,
-                        onChanged: (value) =>
-                            setState(() => _srsOnlyDueToday = value ?? false),
+                        value: onlyDueToday,
+                        onChanged: (value) {
+                          _srsOnlyDueTodayNotifier.value = value ?? false;
+                        },
                         activeColor: _dashBlue,
                         checkColor: Colors.white,
                         side: BorderSide(color: _dashBorder),
                         visualDensity: VisualDensity.compact,
                       ),
-                      Text(
-                        'Chỉ thẻ đến hạn hôm nay',
-                        style: TextStyle(
-                          color: _dashText,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w900,
+                      InkWell(
+                        borderRadius: BorderRadius.circular(6),
+                        onTap: () {
+                          _srsOnlyDueTodayNotifier.value = !onlyDueToday;
+                        },
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: 2,
+                            vertical: 8,
+                          ),
+                          child: Text(
+                            'Chỉ thẻ đến hạn hôm nay',
+                            style: TextStyle(
+                              color: _dashText,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
                         ),
                       ),
                     ],
-                  ),
-                ),
+                  );
+                },
               );
               if (constraints.maxWidth < 680) {
                 return Column(
@@ -136,9 +146,12 @@ extension StatisticsPageStatePart07 on _StatisticsPageState {
             },
           ),
           SizedBox(height: 12),
-          FutureBuilder<List<_SrsEditorItem>>(
-            future: _srsManagerFuture,
-            builder: (context, snapshot) {
+          ValueListenableBuilder<bool>(
+            valueListenable: _srsOnlyDueTodayNotifier,
+            builder: (context, onlyDueToday, _) {
+              return FutureBuilder<List<_SrsEditorItem>>(
+                future: _srsManagerFuture,
+                builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
                 return SizedBox(
                   height: 160,
@@ -152,13 +165,16 @@ extension StatisticsPageStatePart07 on _StatisticsPageState {
               }
 
               final allItems = snapshot.data ?? [];
-              final filtered = this._filterSrsManagerItems(allItems);
+              final filtered = this._filterSrsManagerItems(
+                allItems,
+                onlyDueToday: onlyDueToday,
+              );
               if (filtered.isEmpty) {
                 return SizedBox(
                   height: 110,
                   child: Center(
                     child: this._dashEmpty(
-                      _srsOnlyDueToday
+                      onlyDueToday
                           ? 'Không có thẻ đến hạn phù hợp'
                           : 'Không có từ vựng phù hợp',
                     ),
@@ -166,12 +182,19 @@ extension StatisticsPageStatePart07 on _StatisticsPageState {
                 );
               }
 
-              final visibleCourseIds = filtered
-                  .map((item) => item.courseId)
-                  .toSet();
+              final allItemsByCourse = <int, List<_SrsEditorItem>>{};
+              for (final item in allItems) {
+                (allItemsByCourse[item.courseId] ??= []).add(item);
+              }
+              final visibleItemsByCourse = <int, List<_SrsEditorItem>>{};
+              for (final item in filtered) {
+                (visibleItemsByCourse[item.courseId] ??= []).add(item);
+              }
               final courses = this
                   ._buildSrsEditorCourses(allItems)
-                  .where((course) => visibleCourseIds.contains(course.id))
+                  .where(
+                    (course) => visibleItemsByCourse.containsKey(course.id),
+                  )
                   .toList();
               return ListView.builder(
                 shrinkWrap: true,
@@ -179,17 +202,17 @@ extension StatisticsPageStatePart07 on _StatisticsPageState {
                 itemCount: courses.length,
                 itemBuilder: (context, index) {
                   final course = courses[index];
-                  final allCourseItems = allItems
-                      .where((item) => item.courseId == course.id)
-                      .toList();
-                  final visibleItems = filtered
-                      .where((item) => item.courseId == course.id)
-                      .toList();
+                  final allCourseItems =
+                      allItemsByCourse[course.id] ?? <_SrsEditorItem>[];
+                  final visibleItems =
+                      visibleItemsByCourse[course.id] ?? <_SrsEditorItem>[];
                   return this._buildInlineSrsCourse(
                     course,
                     allCourseItems,
                     visibleItems,
                   );
+                },
+              );
                 },
               );
             },
@@ -199,7 +222,10 @@ extension StatisticsPageStatePart07 on _StatisticsPageState {
     );
   }
 
-  List<_SrsEditorItem> _filterSrsManagerItems(List<_SrsEditorItem> items) {
+  List<_SrsEditorItem> _filterSrsManagerItems(
+    List<_SrsEditorItem> items, {
+    required bool onlyDueToday,
+  }) {
     final query = normalizeText(_srsSearchController.text.trim());
     final now = DateTime.now();
     final tomorrow = DateTime(
@@ -208,7 +234,7 @@ extension StatisticsPageStatePart07 on _StatisticsPageState {
       now.day,
     ).add(getDuration(days: 1));
     return items.where((item) {
-      if (_srsOnlyDueToday) {
+      if (onlyDueToday) {
         final due = DateTime.tryParse(item.nextReviewAt);
         if (item.repetitionCount <= 0 ||
             due == null ||
@@ -258,7 +284,6 @@ extension StatisticsPageStatePart07 on _StatisticsPageState {
             padding: EdgeInsets.symmetric(horizontal: 10, vertical: 9),
             child: LayoutBuilder(
               builder: (context, constraints) {
-                final compact = constraints.maxWidth < 980;
                 final identity = InkWell(
                   borderRadius: BorderRadius.circular(8),
                   onTap: () {
@@ -314,58 +339,17 @@ extension StatisticsPageStatePart07 on _StatisticsPageState {
                     ),
                   ),
                 );
-                final controls = Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  alignment: WrapAlignment.end,
-                  children: [
-                    this._srsValueButton(
-                      text: '$level',
-                      icon: Icons.unfold_more_rounded,
-                      width: 58,
-                      onTap: () => this._pickCourseSrsLevel(course.id, level),
-                    ),
-                    this._srsValueButton(
-                      text: this._formatCompactDate(date),
-                      icon: Icons.calendar_month_rounded,
-                      width: 116,
-                      onTap: () => this._pickCourseSrsDate(course.id, date),
-                    ),
-                    this._srsActionButton(
-                      text: 'Ôn riêng',
-                      onTap: () =>
-                          this._openSrsFlashcards(course, visibleItems),
-                    ),
-                    this._srsActionButton(
-                      text: 'Kiểm tra',
-                      onTap: () => this._openSrsTest(course, visibleItems),
-                    ),
-                    this._srsActionButton(
-                      text: 'Chuyên sâu',
-                      onTap: () => this._openSrsDeepLearn(course, visibleItems),
-                    ),
-                    this._srsActionButton(
-                      text: 'SRS cả học phần',
-                      onTap: () =>
-                          this._applySrsToCourse(course, allItems, level, date),
-                    ),
-                    this._srsActionButton(
-                      text: 'Xóa SRS học phần',
-                      onTap: () => this._deleteCourseSrs(course, allItems),
-                    ),
-                  ],
-                );
-                if (compact) {
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [identity, SizedBox(height: 8), controls],
-                  );
-                }
                 return Row(
                   children: [
                     Expanded(child: identity),
-                    SizedBox(width: 12),
-                    controls,
+                    SizedBox(width: 8),
+                    this._buildCourseSrsEditMenu(
+                      course: course,
+                      allItems: allItems,
+                      visibleItems: visibleItems,
+                      level: level,
+                      date: date,
+                    ),
                   ],
                 );
               },
@@ -408,61 +392,159 @@ extension StatisticsPageStatePart07 on _StatisticsPageState {
     );
   }
 
-  Widget _srsActionButton({required String text, required VoidCallback onTap}) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(7),
-      onTap: onTap,
-      child: Container(
-        height: 30,
-        padding: EdgeInsets.symmetric(horizontal: 9),
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: Color(0xff202735),
-          borderRadius: BorderRadius.circular(7),
-          border: Border.all(color: _dashBorder.withOpacity(0.28)),
-        ),
-        child: Text(
-          text,
-          style: TextStyle(
-            color: _dashText,
-            fontSize: 10,
-            fontWeight: FontWeight.w900,
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _srsValueButton({
-    required String text,
-    required IconData icon,
-    required double width,
-    required VoidCallback onTap,
+  Widget _buildCourseSrsEditMenu({
+    required _SrsEditorCourse course,
+    required List<_SrsEditorItem> allItems,
+    required List<_SrsEditorItem> visibleItems,
+    required int level,
+    required DateTime date,
   }) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(8),
-      onTap: onTap,
+    PopupMenuItem<String> menuItem({
+      required String value,
+      required IconData icon,
+      required String label,
+      bool danger = false,
+    }) {
+      final color = danger ? _dashRed : _dashText;
+      return PopupMenuItem<String>(
+        value: value,
+        height: 40,
+        child: Row(
+          children: [
+            Icon(icon, size: 17, color: color),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: color,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return PopupMenuButton<String>(
+      tooltip: 'Chỉnh sửa SRS học phần',
+      color: _dashPanel2,
+      elevation: 12,
+      offset: Offset(0, 34),
+      constraints: BoxConstraints(minWidth: 220, maxWidth: 270),
+      onSelected: (action) async {
+        switch (action) {
+          case 'level':
+            await this._pickCourseSrsLevel(course.id, level);
+            break;
+          case 'date':
+            await this._pickCourseSrsDate(course.id, date);
+            break;
+          case 'review':
+            await this._openSrsFlashcards(course, visibleItems);
+            break;
+          case 'test':
+            await this._openSrsTest(course, visibleItems);
+            break;
+          case 'deep':
+            await this._openSrsDeepLearn(course, visibleItems);
+            break;
+          case 'apply':
+            await this._applySrsToCourse(
+              course,
+              allItems,
+              _courseSrsLevelDraft[course.id] ?? level,
+              _courseSrsDateDraft[course.id] ?? date,
+            );
+            break;
+          case 'delete':
+            await this._deleteCourseSrs(course, allItems);
+            break;
+        }
+      },
+      itemBuilder: (context) => <PopupMenuEntry<String>>[
+        menuItem(
+          value: 'level',
+          icon: Icons.stairs_rounded,
+          label: 'Cấp độ SRS: $level',
+        ),
+        menuItem(
+          value: 'date',
+          icon: Icons.calendar_month_rounded,
+          label: 'Đến hạn: ${this._formatCompactDate(date)}',
+        ),
+        PopupMenuDivider(height: 8),
+        menuItem(
+          value: 'review',
+          icon: Icons.style_rounded,
+          label: 'Ôn riêng',
+        ),
+        menuItem(
+          value: 'test',
+          icon: Icons.quiz_rounded,
+          label: 'Kiểm tra',
+        ),
+        menuItem(
+          value: 'deep',
+          icon: Icons.psychology_rounded,
+          label: 'Chuyên sâu',
+        ),
+        menuItem(
+          value: 'apply',
+          icon: Icons.save_rounded,
+          label: 'SRS cả học phần',
+        ),
+        menuItem(
+          value: 'delete',
+          icon: Icons.delete_outline_rounded,
+          label: 'Xóa SRS học phần',
+          danger: true,
+        ),
+      ],
       child: Container(
-        width: width,
+        width: 32,
         height: 32,
-        padding: EdgeInsets.symmetric(horizontal: 8),
         decoration: BoxDecoration(
           color: _dashPanel,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(color: _dashBorder),
         ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                text,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: _dashText, fontWeight: FontWeight.w900),
-              ),
+        child: Icon(
+          Icons.edit_rounded,
+          size: 17,
+          color: _dashBlue,
+        ),
+      ),
+    );
+  }
+
+  Widget _srsActionButton({required String text, required VoidCallback onTap}) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(7),
+      onTap: onTap,
+      child: Container(
+        height: 24,
+        padding: EdgeInsets.symmetric(horizontal: 8),
+        decoration: BoxDecoration(
+          color: Color(0xff202735),
+          borderRadius: BorderRadius.circular(7),
+          border: Border.all(color: _dashBorder.withOpacity(0.28)),
+        ),
+        child: Align(
+          widthFactor: 1,
+          alignment: Alignment.center,
+          child: Text(
+            text,
+            style: TextStyle(
+              color: _dashText,
+              fontSize: 9,
+              fontWeight: FontWeight.w900,
             ),
-            Icon(icon, color: _dashMuted, size: 14),
-          ],
+          ),
         ),
       ),
     );
@@ -1180,20 +1262,23 @@ class _InlineSrsCardWidgetState extends State<_InlineSrsCardWidget> {
       onTap: onTap,
       borderRadius: BorderRadius.circular(7),
       child: Container(
-        height: 28,
-        padding: const EdgeInsets.symmetric(horizontal: 8),
-        alignment: Alignment.center,
+        height: 24,
+        padding: const EdgeInsets.symmetric(horizontal: 7),
         decoration: BoxDecoration(
           color: bgColor,
           border: Border.all(color: borderColor),
           borderRadius: BorderRadius.circular(7),
         ),
-        child: Text(
-          text,
-          style: const TextStyle(
-            color: Color(0xffeaf0ff),
-            fontSize: 10,
-            fontWeight: FontWeight.w900,
+        child: Align(
+          widthFactor: 1,
+          alignment: Alignment.center,
+          child: Text(
+            text,
+            style: const TextStyle(
+              color: Color(0xffeaf0ff),
+              fontSize: 9,
+              fontWeight: FontWeight.w900,
+            ),
           ),
         ),
       ),
@@ -1268,8 +1353,8 @@ class _InlineSrsCardWidgetState extends State<_InlineSrsCardWidget> {
           );
 
           final actionsRow = Wrap(
-            spacing: 6,
-            runSpacing: 6,
+            spacing: 4,
+            runSpacing: 4,
             children: [
               _buildButton(
                 text: 'Ôn từ',

@@ -10,9 +10,10 @@ class _StatisticsPageState extends State<StatisticsPage> {
   late final StreamSubscription<AuthState> _statisticsAuthSubscription;
   final Set<int> _expandedCourseIds = {};
   final TextEditingController _srsSearchController = TextEditingController();
+  final ValueNotifier<bool> _srsOnlyDueTodayNotifier =
+      ValueNotifier<bool>(true);
   final Map<int, int> _courseSrsLevelDraft = {};
   final Map<int, DateTime> _courseSrsDateDraft = {};
-  bool _srsOnlyDueToday = true;
   bool _isDashboardRefreshing = false;
 
   List<Map<String, Object?>> _extractSrsImportItems(Object? decoded) {
@@ -138,6 +139,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
     _statisticsRealtimeSubscription.cancel();
     _statisticsAuthSubscription.cancel();
     _srsSearchController.dispose();
+    _srsOnlyDueTodayNotifier.dispose();
     super.dispose();
   }
 

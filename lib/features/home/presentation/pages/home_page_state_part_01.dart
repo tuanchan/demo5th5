@@ -44,7 +44,7 @@ extension HomePageStatePart01 on _HomePageState {
       this._homeNavButton('Thống kê', this.openStatistics),
       this._homeNavButton('Kiểm tra', this.openReviewPractice),
       this._homeNavButton('Viết', this.openWritingPractice),
-      this._homeNavButton('Luyện nói', () {}),
+      this._homeNavButton('Học ảnh', this.openImageLearning),
       this._homeNavButton('Tạo học phần', this.openCreateCourse),
       StreamBuilder<AuthState>(
         stream: SupabaseConfig.onAuthStateChange,
@@ -224,15 +224,15 @@ extension HomePageStatePart01 on _HomePageState {
                   alignment: Alignment.center,
                   children: [
                     ImageFiltered(
-                      imageFilter: ImageFilter.blur(sigmaX: 3.4, sigmaY: 3.4),
+                      imageFilter: ImageFilter.blur(sigmaX: 10.4, sigmaY: 10.4),
                       child: Opacity(
-                        opacity: 0.7,
+                        opacity: 0.95,
                         child: SvgPicture.asset(
                           'assets/icon/star-solid-full.svg',
                           width: 19,
                           height: 19,
                           colorFilter: ColorFilter.mode(
-                            Color(0xffffcf33),
+                            Color(0xffffd740),
                             BlendMode.srcIn,
                           ),
                         ),
@@ -614,6 +614,51 @@ extension HomePageStatePart01 on _HomePageState {
     );
   }
 
+  void _showLongPressMenu({
+    required VoidCallback onEdit,
+    required VoidCallback onDelete,
+  }) {
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final anchor = overlay.localToGlobal(
+      Offset(overlay.size.width / 2, overlay.size.height / 2),
+    );
+    final position = RelativeRect.fromRect(
+      anchor & const Size(1, 1),
+      Offset.zero & overlay.size,
+    );
+    showMenu<String>(
+      context: context,
+      position: position,
+      color: const Color(0xff0b0d12),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      items: [
+        PopupMenuItem(
+          value: 'edit',
+          child: Row(
+            children: [
+              Icon(Icons.edit_rounded, color: _homeText, size: 18),
+              SizedBox(width: 10),
+              Text('Sửa', style: TextStyle(color: _homeText, fontWeight: FontWeight.w700)),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: 'delete',
+          child: Row(
+            children: [
+              Icon(Icons.delete_rounded, color: Color(0xffef4444), size: 18),
+              SizedBox(width: 10),
+              Text('Xóa', style: TextStyle(color: Color(0xffef4444), fontWeight: FontWeight.w700)),
+            ],
+          ),
+        ),
+      ],
+    ).then((value) {
+      if (value == 'edit') onEdit();
+      if (value == 'delete') onDelete();
+    });
+  }
+
   Widget _buildHomeDashboardGrid(bool compact) {
     if (isLoadingCourses) {
       return Center(
@@ -743,7 +788,10 @@ extension HomePageStatePart01 on _HomePageState {
           }
         });
       },
-      onLongPress: () => this.openEditTopicDialog(topic),
+      onLongPress: () => this._showLongPressMenu(
+        onEdit: () => this.openEditTopicDialog(topic),
+        onDelete: () => this.confirmDeleteTopic(topic),
+      ),
       borderRadius: BorderRadius.circular(12),
       child: Container(
         height: cardHeight,
@@ -755,22 +803,6 @@ extension HomePageStatePart01 on _HomePageState {
         ),
         child: Stack(
           children: [
-            Align(
-              alignment: Alignment.topRight,
-              child: PopupMenuButton<String>(
-                tooltip: 'Tùy chọn chủ đề',
-                color: Color(0xff0b0d12),
-                onSelected: (value) {
-                  if (value == 'edit') this.openEditTopicDialog(topic);
-                  if (value == 'delete') this.confirmDeleteTopic(topic);
-                },
-                itemBuilder: (_) => [
-                  this._homePopupItem('edit', 'Sửa'),
-                  this._homePopupItem('delete', 'Xóa'),
-                ],
-                icon: Icon(Icons.more_horiz_rounded, color: _homeMuted),
-              ),
-            ),
             Center(
               child: Padding(
                 padding: EdgeInsets.only(top: isMobile ? 8.0 : 0.0),
@@ -1277,6 +1309,10 @@ extension HomePageStatePart01 on _HomePageState {
           setState(() => selectedHomeCourse = course);
         }
       },
+      onLongPress: () => this._showLongPressMenu(
+        onEdit: () => this.openEditCourseDialog(course),
+        onDelete: () => this.confirmDeleteCourse(course),
+      ),
       borderRadius: BorderRadius.circular(12),
       child: Container(
         height: cardHeight,
@@ -1318,25 +1354,9 @@ extension HomePageStatePart01 on _HomePageState {
                 child: Stack(
                   children: [
             Align(
-              alignment: Alignment.topRight,
-              child: PopupMenuButton<String>(
-                tooltip: 'Tùy chọn học phần',
-                color: Color(0xff0b0d12),
-                onSelected: (value) {
-                  if (value == 'edit') this.openEditCourseDialog(course);
-                  if (value == 'delete') this.confirmDeleteCourse(course);
-                },
-                itemBuilder: (_) => [
-                  this._homePopupItem('edit', 'Sửa'),
-                  this._homePopupItem('delete', 'Xóa'),
-                ],
-                icon: Icon(Icons.more_vert_rounded, color: _homeMuted),
-              ),
-            ),
-            Align(
               alignment: Alignment.topLeft,
               child: Padding(
-                padding: EdgeInsets.only(right: 34),
+                padding: EdgeInsets.zero,
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [

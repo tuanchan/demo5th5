@@ -47,6 +47,12 @@
 	<string>Ứng dụng cần dùng microphone để luyện phát âm.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Ứng dụng cần nhận diện giọng nói để kiểm tra phát âm.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Ứng dụng cần dùng camera để chụp ảnh và nhận diện từ vựng.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Ứng dụng cần truy cập thư viện ảnh để nhận diện từ vựng.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Ứng dụng cần lưu ảnh học đã được chú thích vào thiết bị.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	

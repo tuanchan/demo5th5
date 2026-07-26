@@ -359,6 +359,83 @@ class GeminiFlashLiteClient {
       client.close(force: true);
     }
   }
+
+  static Future<String> analyzeImage(
+    String prompt, {
+    required Uint8List imageBytes,
+    required String mimeType,
+    String? modelOverride,
+    int maxOutputTokens = 4096,
+  }) async {
+    final apiKey = await _apiKey();
+    final requestedModel = modelOverride?.trim() ?? '';
+    final modelName =
+        requestedModel.isNotEmpty ? requestedModel : await _modelName();
+    final uri = Uri.https(
+      'generativelanguage.googleapis.com',
+      '/v1beta/models/$modelName:generateContent',
+      {'key': apiKey},
+    );
+
+    final client = HttpClient();
+    try {
+      final request = await client.postUrl(uri);
+      request.headers.contentType = ContentType.json;
+      final generationConfig = <String, Object>{
+        'maxOutputTokens': maxOutputTokens,
+        'responseMimeType': 'application/json',
+      };
+      if (!modelName.startsWith('gemini-3')) {
+        generationConfig['temperature'] = 0.2;
+        generationConfig['topP'] = 0.85;
+      }
+      request.write(
+        jsonEncode({
+          'contents': [
+            {
+              'role': 'user',
+              'parts': [
+                {'text': prompt},
+                {
+                  'inlineData': {
+                    'mimeType': mimeType,
+                    'data': base64Encode(imageBytes),
+                  },
+                },
+              ],
+            },
+          ],
+          'generationConfig': generationConfig,
+        }),
+      );
+
+      final response = await request.close();
+      final body = await response.transform(utf8.decoder).join();
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        String message = body;
+        try {
+          final data = jsonDecode(body) as Map<String, dynamic>;
+          message = data['error']?['message']?.toString() ?? body;
+        } catch (_) {}
+        throw Exception(message);
+      }
+
+      final data = jsonDecode(body) as Map<String, dynamic>;
+      final candidates = data['candidates'] as List<dynamic>?;
+      final parts = candidates?.isNotEmpty == true
+          ? (candidates!.first['content']?['parts'] as List<dynamic>?)
+          : null;
+      final generated =
+          parts?.map((part) => part['text']?.toString() ?? '').join('\n').trim() ??
+          '';
+      if (generated.isEmpty) {
+        throw Exception('Gemini không nhận diện được nội dung trong ảnh.');
+      }
+      return generated;
+    } finally {
+      client.close(force: true);
+    }
+  }
 }
 
 

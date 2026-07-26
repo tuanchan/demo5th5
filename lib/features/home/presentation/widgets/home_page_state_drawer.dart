@@ -225,7 +225,10 @@ extension HomePageStateDrawer on _HomePageState {
                     }
                   });
                 },
-                onLongPress: () => this.openEditTopicDialog(topic),
+                onLongPress: () => this._showLongPressMenu(
+                  onEdit: () => this.openEditTopicDialog(topic),
+                  onDelete: () => this.confirmDeleteTopic(topic),
+                ),
                 child: Container(
                   padding: EdgeInsets.fromLTRB(12, 10, 10, 10),
                   decoration: BoxDecoration(
@@ -254,32 +257,12 @@ extension HomePageStateDrawer on _HomePageState {
                         ),
                       ),
                       SizedBox(width: 6),
-                      PopupMenuButton<String>(
-                        onSelected: (value) {
-                          if (value == "edit") this.openEditTopicDialog(topic);
-                          if (value == "delete") this.confirmDeleteTopic(topic);
-                        },
-                        itemBuilder: (_) => [
-                          PopupMenuItem(value: "edit", child: Text("Sửa")),
-                          PopupMenuItem(value: "delete", child: Text("Xóa")),
-                        ],
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              '${topic.courseCount}',
-                              style: TextStyle(
-                                color: AppColors.muted,
-                                fontWeight: FontWeight.w900,
-                                fontSize: 12,
-                              ),
-                            ),
-                            Icon(
-                              Icons.more_vert_rounded,
-                              color: AppColors.onIconButton,
-                              size: 20,
-                            ),
-                          ],
+                      Text(
+                        '${topic.courseCount}',
+                        style: TextStyle(
+                          color: AppColors.muted,
+                          fontWeight: FontWeight.w900,
+                          fontSize: 12,
                         ),
                       ),
                     ],
@@ -315,10 +298,14 @@ extension HomePageStateDrawer on _HomePageState {
           });
           this.openFlashCards(course);
         },
+        onLongPress: () => this._showLongPressMenu(
+          onEdit: () => this.openEditCourseDialog(course),
+          onDelete: () => this.confirmDeleteCourse(course),
+        ),
         child: AnimatedContainer(
           duration: Duration(milliseconds: 220),
           curve: Curves.easeOutCubic,
-          padding: EdgeInsets.fromLTRB(12, 10, 6, 10),
+          padding: EdgeInsets.fromLTRB(12, 10, 12, 10),
           decoration: BoxDecoration(
             color: isSelected ? AppColors.green : AppColors.panel,
             borderRadius: BorderRadius.circular(16),
@@ -348,7 +335,7 @@ extension HomePageStateDrawer on _HomePageState {
                     ),
                     SizedBox(height: 4),
                     Text(
-                      "${course.cardCount} thẻ • ${course.languageCode}",
+                      "${course.cardCount} th\u1ebb \u2022 ${course.languageCode}",
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -359,16 +346,6 @@ extension HomePageStateDrawer on _HomePageState {
                     ),
                   ],
                 ),
-              ),
-              PopupMenuButton<String>(
-                onSelected: (value) {
-                  if (value == "edit") this.openEditCourseDialog(course);
-                  if (value == "delete") this.confirmDeleteCourse(course);
-                },
-                itemBuilder: (_) => [
-                  PopupMenuItem(value: "edit", child: Text("Sửa")),
-                  PopupMenuItem(value: "delete", child: Text("Xóa")),
-                ],
               ),
             ],
           ),

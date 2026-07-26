@@ -165,6 +165,14 @@ extension HomePageStatePart02Split02 on _HomePageState {
     }
   }
 
+  Future<void> openImageLearning() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => ImageLearningPage()),
+    );
+    if (mounted) await this.loadCourses(showLoading: false);
+  }
+
 
 
 
