@@ -126,7 +126,21 @@ extension StatisticsPageStatePart02 on _StatisticsPageState {
         ) AS masteredTodayCards,
         COALESCE(SUM(rs.correctCount), 0) AS correctCount,
         COALESCE(SUM(rs.wrongCount), 0) AS wrongCount,
-        (SELECT COUNT(*) FROM study_sessions ss WHERE ss.courseId = c.id) AS sessionCount
+        (SELECT COUNT(*) FROM study_sessions ss WHERE ss.courseId = c.id) AS sessionCount,
+        CAST(
+          COALESCE(
+            AVG(
+              CASE
+                WHEN ca.id IS NOT NULL THEN COALESCE(rs.level, 0)
+                ELSE NULL
+              END
+            ),
+            0
+          ) AS INTEGER
+        ) AS srsStars,
+        COALESCE(SUM(CASE WHEN ca.id IS NOT NULL AND COALESCE(rs.level, 0) BETWEEN 1 AND 3 THEN 1 ELSE 0 END), 0) AS srsLearningCards,
+        COALESCE(SUM(CASE WHEN ca.id IS NOT NULL AND COALESCE(rs.level, 0) BETWEEN 4 AND 6 THEN 1 ELSE 0 END), 0) AS srsSteadyCards,
+        COALESCE(SUM(CASE WHEN ca.id IS NOT NULL AND COALESCE(rs.level, 0) >= 7 THEN 1 ELSE 0 END), 0) AS srsAdvancedCards
       FROM courses c
       LEFT JOIN cards ca
         ON ca.courseId = c.id
@@ -245,30 +259,87 @@ extension StatisticsPageStatePart02 on _StatisticsPageState {
       ORDER BY cardCount DESC, c.languageCode ASC
     ''');
 
-    final hardCourseRows = await db.rawQuery('''
-      SELECT
-        c.title,
-        COUNT(ca.id) AS hardCards,
-        (
-          SELECT COUNT(*)
-          FROM cards allCards
-          WHERE allCards.courseId = c.id
-            AND allCards.deletedAt IS NULL
-            AND allCards.isHidden = 0
-        ) AS totalCards
-      FROM courses c
-      INNER JOIN cards ca
-        ON ca.courseId = c.id
-        AND ca.deletedAt IS NULL
+    final activityRows = await db.rawQuery('''
+      SELECT sr.cardId, sr.reviewedAt
+      FROM study_results sr
+      INNER JOIN cards ca ON ca.id = sr.cardId
+      INNER JOIN courses c ON c.id = ca.courseId
+      WHERE ca.deletedAt IS NULL
         AND ca.isHidden = 0
-      LEFT JOIN review_states rs ON rs.cardId = ca.id
-      WHERE c.deletedAt IS NULL
-        AND COALESCE(rs.level, 0) < $masteredLevel
-        AND COALESCE(rs.wrongCount, 0) > $_hardCardWrongThreshold
-      GROUP BY c.id, c.title
-      ORDER BY hardCards DESC, totalCards DESC, c.title ASC
-      LIMIT 8
+        AND c.deletedAt IS NULL
+        AND sr.reviewedAt IS NOT NULL
+        AND TRIM(sr.reviewedAt) <> ''
     ''');
+    int activityDayKey(DateTime date) =>
+        date.year * 10000 + date.month * 100 + date.day;
+    DateTime? storedActivityDay(Object? value) {
+      final text = value?.toString().trim() ?? '';
+      final match = RegExp(
+        r'^(\d{4})-(\d{2})-(\d{2})',
+      ).firstMatch(text);
+      if (match == null) return null;
+      final year = int.tryParse(match.group(1) ?? '');
+      final month = int.tryParse(match.group(2) ?? '');
+      final day = int.tryParse(match.group(3) ?? '');
+      if (year == null || month == null || day == null) return null;
+      final parsed = DateTime(year, month, day);
+      if (parsed.year != year || parsed.month != month || parsed.day != day) {
+        return null;
+      }
+      return parsed;
+    }
+
+    final activityCardSets = <int, Set<int>>{};
+    final activeDays = <DateTime>{};
+    for (final row in activityRows) {
+      // study_results historically sync their device-local wall clock through
+      // a timestamptz column. Supabase appends +00:00 without changing those
+      // clock fields. Calling toLocal() here shifts late-evening reviews into
+      // the next calendar day, so activity must use the stored study date.
+      final day = storedActivityDay(row['reviewedAt']);
+      if (day == null) continue;
+      final cardId = this._asInt(row['cardId']);
+      final key = activityDayKey(day);
+      activityCardSets.putIfAbsent(key, () => <int>{}).add(cardId);
+      activeDays.add(day);
+    }
+
+    final sortedActiveDays = activeDays.toList()..sort();
+    var longestActivityStreak = 0;
+    var runningStreak = 0;
+    DateTime? previousActiveDay;
+    for (final day in sortedActiveDays) {
+      if (previousActiveDay != null &&
+          day.difference(previousActiveDay).inDays == 1) {
+        runningStreak++;
+      } else {
+        runningStreak = 1;
+      }
+      longestActivityStreak = math.max(longestActivityStreak, runningStreak);
+      previousActiveDay = day;
+    }
+
+    var currentActivityStreak = 0;
+    var streakCursor = todayStart;
+    if (!activeDays.contains(streakCursor)) {
+      streakCursor = streakCursor.subtract(Duration(days: 1));
+    }
+    while (activeDays.contains(streakCursor)) {
+      currentActivityStreak++;
+      streakCursor = streakCursor.subtract(Duration(days: 1));
+    }
+
+    final activityItems = List<ActivityDayItem>.generate(7, (index) {
+      final day = todayStart.subtract(Duration(days: 6 - index));
+      final dayKey = activityDayKey(day);
+      return ActivityDayItem(
+        date: day,
+        label: index == 6
+            ? 'Hôm nay'
+            : '${day.day.toString().padLeft(2, '0')}/${day.month.toString().padLeft(2, '0')}',
+        reviewCount: activityCardSets[dayKey]?.length ?? 0,
+      );
+    });
 
     return StatisticsData(
       totalCourses: this._asInt(overview['totalCourses']),
@@ -319,13 +390,6 @@ extension StatisticsPageStatePart02 on _StatisticsPageState {
           color: this._languageColor(entry.key),
         );
       }).toList(),
-      hardCourseItems: hardCourseRows.map((row) {
-        return HardCourseItem(
-          title: row['title']?.toString() ?? '',
-          hardCards: this._asInt(row['hardCards']),
-          totalCards: this._asInt(row['totalCards']),
-        );
-      }).toList(),
       courseItems: courseRows.map((row) {
         return CourseStatisticsItem(
           id: this._asInt(row['id']),
@@ -339,6 +403,10 @@ extension StatisticsPageStatePart02 on _StatisticsPageState {
           correctCount: this._asInt(row['correctCount']),
           wrongCount: this._asInt(row['wrongCount']),
           sessionCount: this._asInt(row['sessionCount']),
+          srsStars: this._asInt(row['srsStars']).clamp(0, 8).toInt(),
+          srsLearningCards: this._asInt(row['srsLearningCards']),
+          srsSteadyCards: this._asInt(row['srsSteadyCards']),
+          srsAdvancedCards: this._asInt(row['srsAdvancedCards']),
         );
       }).toList(),
       dueItems: dueRows.map((row) {
@@ -351,6 +419,9 @@ extension StatisticsPageStatePart02 on _StatisticsPageState {
           intervalDays: this._asInt(row['intervalDays']),
         );
       }).toList(),
+      activityItems: activityItems,
+      currentActivityStreak: currentActivityStreak,
+      longestActivityStreak: longestActivityStreak,
     );
   }
 
@@ -424,20 +495,14 @@ extension StatisticsPageStatePart02 on _StatisticsPageState {
                     flexes: [3, 5, 4],
                   ),
                   SizedBox(height: 16),
-                  this._dashRow(
-                    [
-                      this._buildOverviewPanel(data),
-                      this._buildMemoryChallengePanel(data),
-                    ],
-                    flexes: [1, 1],
-                  ),
+                  this._buildLiveActivityPanel(data),
                   SizedBox(height: 16),
                   this._dashRow(
                     [
-                      this._buildStatusRatioPanel(data),
-                      this._buildHardCoursesPanel(data),
+                      this._buildCourseStarsPanel(data),
+                      this._buildCourseSrsCardsPanel(data),
                     ],
-                    flexes: [5, 7],
+                    flexes: [1, 1],
                   ),
                 ],
               );
@@ -451,13 +516,11 @@ extension StatisticsPageStatePart02 on _StatisticsPageState {
                 SizedBox(height: 14),
                 this._buildLanguageDistributionPanel(data),
                 SizedBox(height: 14),
-                this._buildOverviewPanel(data),
+                this._buildLiveActivityPanel(data),
                 SizedBox(height: 14),
-                this._buildMemoryChallengePanel(data),
+                this._buildCourseStarsPanel(data),
                 SizedBox(height: 14),
-                this._buildStatusRatioPanel(data),
-                SizedBox(height: 14),
-                this._buildHardCoursesPanel(data),
+                this._buildCourseSrsCardsPanel(data),
               ],
             );
           },

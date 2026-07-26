@@ -255,7 +255,7 @@ extension StatisticsPageStatePart07 on _StatisticsPageState {
       child: Column(
         children: [
           Padding(
-            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+            padding: EdgeInsets.symmetric(horizontal: 10, vertical: 9),
             child: LayoutBuilder(
               builder: (context, constraints) {
                 final compact = constraints.maxWidth < 980;
@@ -315,8 +315,8 @@ extension StatisticsPageStatePart07 on _StatisticsPageState {
                   ),
                 );
                 final controls = Wrap(
-                  spacing: 7,
-                  runSpacing: 7,
+                  spacing: 6,
+                  runSpacing: 6,
                   alignment: WrapAlignment.end,
                   children: [
                     this._srsValueButton(
@@ -358,7 +358,7 @@ extension StatisticsPageStatePart07 on _StatisticsPageState {
                 if (compact) {
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [identity, SizedBox(height: 10), controls],
+                    children: [identity, SizedBox(height: 8), controls],
                   );
                 }
                 return Row(
@@ -410,22 +410,22 @@ extension StatisticsPageStatePart07 on _StatisticsPageState {
 
   Widget _srsActionButton({required String text, required VoidCallback onTap}) {
     return InkWell(
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(7),
       onTap: onTap,
       child: Container(
-        height: 36,
-        padding: EdgeInsets.symmetric(horizontal: 12),
+        height: 30,
+        padding: EdgeInsets.symmetric(horizontal: 9),
         alignment: Alignment.center,
         decoration: BoxDecoration(
           color: Color(0xff202735),
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(7),
           border: Border.all(color: _dashBorder.withOpacity(0.28)),
         ),
         child: Text(
           text,
           style: TextStyle(
             color: _dashText,
-            fontSize: 11,
+            fontSize: 10,
             fontWeight: FontWeight.w900,
           ),
         ),
@@ -444,7 +444,7 @@ extension StatisticsPageStatePart07 on _StatisticsPageState {
       onTap: onTap,
       child: Container(
         width: width,
-        height: 36,
+        height: 32,
         padding: EdgeInsets.symmetric(horizontal: 8),
         decoration: BoxDecoration(
           color: _dashPanel,
@@ -1178,21 +1178,21 @@ class _InlineSrsCardWidgetState extends State<_InlineSrsCardWidget> {
     final borderColor = isDanger ? const Color(0x61ef4444) : const Color(0x615e81d7);
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(7),
       child: Container(
-        height: 30,
-        padding: const EdgeInsets.symmetric(horizontal: 10),
+        height: 28,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
         alignment: Alignment.center,
         decoration: BoxDecoration(
           color: bgColor,
           border: Border.all(color: borderColor),
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(7),
         ),
         child: Text(
           text,
           style: const TextStyle(
             color: Color(0xffeaf0ff),
-            fontSize: 11,
+            fontSize: 10,
             fontWeight: FontWeight.w900,
           ),
         ),
@@ -1212,7 +1212,7 @@ class _InlineSrsCardWidgetState extends State<_InlineSrsCardWidget> {
         : const Color(0x05ffffff); // Muted dark for non-due card
 
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(10),
       margin: const EdgeInsets.symmetric(vertical: 4),
       decoration: BoxDecoration(
         color: rowBg,
@@ -1256,8 +1256,8 @@ class _InlineSrsCardWidgetState extends State<_InlineSrsCardWidget> {
           );
 
           final controlsRow = Wrap(
-            spacing: 8,
-            runSpacing: 8,
+            spacing: 6,
+            runSpacing: 6,
             crossAxisAlignment: WrapCrossAlignment.end,
             children: [
               _buildInputControl('Lv', _buildTextField(_levelController, TextInputType.number), width: 64),
@@ -1268,8 +1268,8 @@ class _InlineSrsCardWidgetState extends State<_InlineSrsCardWidget> {
           );
 
           final actionsRow = Wrap(
-            spacing: 8,
-            runSpacing: 8,
+            spacing: 6,
+            runSpacing: 6,
             children: [
               _buildButton(
                 text: 'Ôn từ',
@@ -1382,9 +1382,9 @@ class _InlineSrsCardWidgetState extends State<_InlineSrsCardWidget> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 infoColumn,
-                const SizedBox(height: 12),
+                const SizedBox(height: 10),
                 controlsRow,
-                const SizedBox(height: 12),
+                const SizedBox(height: 10),
                 actionsRow,
               ],
             );

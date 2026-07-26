@@ -203,6 +203,118 @@ extension StatisticsPageStatePart03 on _StatisticsPageState {
     );
   }
 
+  Widget _buildLiveActivityPanel(StatisticsData data) {
+    var maxReviews = 1;
+    for (final item in data.activityItems) {
+      maxReviews = math.max(maxReviews, item.reviewCount);
+    }
+
+    return this._dashCard(
+      title: 'HOẠT ĐỘNG NGƯỜI DÙNG',
+      minHeight: 200,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            height: 132,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: data.activityItems.map((item) {
+                final ratio = item.reviewCount / maxReviews;
+                final barHeight =
+                    item.reviewCount == 0 ? 4.0 : math.max(10.0, 78 * ratio);
+                final isToday = item.date.year == DateTime.now().year &&
+                    item.date.month == DateTime.now().month &&
+                    item.date.day == DateTime.now().day;
+                return Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      Text(
+                        item.reviewCount.toString(),
+                        style: TextStyle(
+                          color: isToday ? _dashText : _dashMuted,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      SizedBox(height: 5),
+                      SizedBox(
+                        height: 78,
+                        child: Align(
+                          alignment: Alignment.bottomCenter,
+                          child: AnimatedContainer(
+                            duration: Duration(milliseconds: 240),
+                            width: 18,
+                            height: barHeight,
+                            decoration: BoxDecoration(
+                              color: isToday
+                                  ? _dashBlue
+                                  : _dashBlue.withOpacity(0.48),
+                              borderRadius: BorderRadius.circular(5),
+                            ),
+                          ),
+                        ),
+                      ),
+                      SizedBox(height: 7),
+                      Text(
+                        item.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: isToday ? _dashText : _dashMuted,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _activitySummaryChip({
+    required String label,
+    required String value,
+    required Color color,
+  }) {
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.09),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              color: _dashMuted,
+              fontSize: 10,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          SizedBox(width: 7),
+          Text(
+            value,
+            style: TextStyle(
+              color: color,
+              fontSize: 11,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
 
   Widget _buildOverviewPanel(StatisticsData data) {
     return this._dashCard(

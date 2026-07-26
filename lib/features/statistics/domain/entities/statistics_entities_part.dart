@@ -15,9 +15,11 @@ class StatisticsData {
   final List<SrsDistributionItem> srsItems;
   final List<DueScheduleItem> dueScheduleItems;
   final List<LanguageDistributionItem> languageItems;
-  final List<HardCourseItem> hardCourseItems;
   final List<CourseStatisticsItem> courseItems;
   final List<ReviewDueItem> dueItems;
+  final List<ActivityDayItem> activityItems;
+  final int currentActivityStreak;
+  final int longestActivityStreak;
 
   StatisticsData({
     required this.totalCourses,
@@ -34,9 +36,11 @@ class StatisticsData {
     required this.srsItems,
     required this.dueScheduleItems,
     required this.languageItems,
-    required this.hardCourseItems,
     required this.courseItems,
     required this.dueItems,
+    required this.activityItems,
+    required this.currentActivityStreak,
+    required this.longestActivityStreak,
   });
 
   int get completionPercent {
@@ -67,6 +71,18 @@ class StatisticsData {
   }
 }
 
+class ActivityDayItem {
+  final DateTime date;
+  final String label;
+  final int reviewCount;
+
+  ActivityDayItem({
+    required this.date,
+    required this.label,
+    required this.reviewCount,
+  });
+}
+
 
 class CourseStatisticsItem {
   final int id;
@@ -80,6 +96,10 @@ class CourseStatisticsItem {
   final int correctCount;
   final int wrongCount;
   final int sessionCount;
+  final int srsStars;
+  final int srsLearningCards;
+  final int srsSteadyCards;
+  final int srsAdvancedCards;
 
   CourseStatisticsItem({
     required this.id,
@@ -93,12 +113,19 @@ class CourseStatisticsItem {
     required this.correctCount,
     required this.wrongCount,
     required this.sessionCount,
+    required this.srsStars,
+    required this.srsLearningCards,
+    required this.srsSteadyCards,
+    required this.srsAdvancedCards,
   });
 
   int get progressPercent {
     if (totalCards <= 0) return 0;
     return ((masteredCards / totalCards) * 100).round().clamp(0, 100).toInt();
   }
+
+  int get srsTrackedCards =>
+      srsLearningCards + srsSteadyCards + srsAdvancedCards;
 }
 
 
@@ -153,19 +180,6 @@ class LanguageDistributionItem {
     required this.label,
     required this.count,
     required this.color,
-  });
-}
-
-
-class HardCourseItem {
-  final String title;
-  final int hardCards;
-  final int totalCards;
-
-  HardCourseItem({
-    required this.title,
-    required this.hardCards,
-    required this.totalCards,
   });
 }
 

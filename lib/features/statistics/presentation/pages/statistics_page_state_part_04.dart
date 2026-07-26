@@ -1,27 +1,31 @@
 part of flutterflashcard_main;
 
 extension StatisticsPageStatePart04 on _StatisticsPageState {
-  Widget _buildHardCoursesPanel(StatisticsData data) {
+  Widget _buildCourseStarsPanel(StatisticsData data) {
+    final sortedItems = data.courseItems.toList()
+      ..sort((a, b) {
+        final byStars = b.srsStars.compareTo(a.srsStars);
+        return byStars != 0
+            ? byStars
+            : a.title.toLowerCase().compareTo(b.title.toLowerCase());
+      });
+    final items = sortedItems.take(10).toList();
+
     return this._dashCard(
-      title: 'HỌC PHẦN NHIỀU THẺ KHÓ NHẤT',
+      title: 'TOP 10 SAO SRS THEO HỌC PHẦN',
       minHeight: 240,
-      child: data.hardCourseItems.isEmpty
+      child: items.isEmpty
           ? SizedBox(
               height: 130,
-              child: Center(child: this._dashEmpty('Không có thẻ khó nào')),
+              child: Center(child: this._dashEmpty('Chưa có học phần nào')),
             )
           : Column(
-              children: data.hardCourseItems.map((item) {
-                var maxHard = 1;
-                for (final course in data.hardCourseItems) {
-                  maxHard = math.max(maxHard, course.hardCards);
-                }
-                final widthFactor = (item.hardCards / maxHard)
-                    .clamp(0.04, 1.0)
-                    .toDouble();
+              children: items.map((item) {
+                final value = item.srsStars.clamp(0, 8).toInt();
                 return Padding(
-                  padding: EdgeInsets.only(bottom: 12),
+                  padding: EdgeInsets.only(bottom: 14),
                   child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
                         children: [
@@ -37,24 +41,70 @@ extension StatisticsPageStatePart04 on _StatisticsPageState {
                               ),
                             ),
                           ),
-                          Text(
-                            '${item.hardCards}/${item.totalCards}',
-                            style: TextStyle(
-                              color: _dashMuted,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w900,
-                            ),
+                          SizedBox(width: 8),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.star_rounded,
+                                color: Color(0xffffcf33),
+                                size: 16,
+                              ),
+                              SizedBox(width: 3),
+                              Text(
+                                '× $value',
+                                style: TextStyle(
+                                  color: _dashText,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ),
                       SizedBox(height: 7),
                       ClipRRect(
                         borderRadius: BorderRadius.circular(99),
-                        child: LinearProgressIndicator(
-                          value: widthFactor,
-                          minHeight: 8,
-                          backgroundColor: _dashPanel2,
-                          color: _dashRed,
+                        child: Stack(
+                          children: [
+                            Container(height: 10, color: _dashPanel2),
+                            FractionallySizedBox(
+                              widthFactor: value / 8,
+                              alignment: Alignment.centerLeft,
+                              child: Container(
+                                height: 10,
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    colors: [
+                                      Color(0xffffb800),
+                                      Color(0xffffe56b),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                            Row(
+                              children: List.generate(
+                                8,
+                                (index) => Expanded(
+                                  child: Container(
+                                    height: 10,
+                                    decoration: BoxDecoration(
+                                      border: index == 7
+                                          ? null
+                                          : Border(
+                                              right: BorderSide(
+                                                color: _dashBg.withOpacity(0.5),
+                                                width: 1,
+                                              ),
+                                            ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ],
@@ -62,6 +112,183 @@ extension StatisticsPageStatePart04 on _StatisticsPageState {
                 );
               }).toList(),
             ),
+    );
+  }
+
+  Widget _buildCourseSrsCardsPanel(StatisticsData data) {
+    final sortedItems = data.courseItems.toList()
+      ..sort((a, b) {
+        final byTracked = b.srsTrackedCards.compareTo(a.srsTrackedCards);
+        return byTracked != 0
+            ? byTracked
+            : a.title.toLowerCase().compareTo(b.title.toLowerCase());
+      });
+    final items = sortedItems.take(10).toList();
+    var maxTracked = 1;
+    for (final item in items) {
+      maxTracked = math.max(maxTracked, item.srsTrackedCards);
+    }
+
+    return this._dashCard(
+      title: 'TOP 10 SỐ THẺ SRS',
+      minHeight: 240,
+      child: items.isEmpty
+          ? SizedBox(
+              height: 130,
+              child: Center(child: this._dashEmpty('Chưa có học phần nào')),
+            )
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 7,
+                  children: [
+                    this._courseSrsLegend('Cấp 1–3', _dashBlue),
+                    this._courseSrsLegend('Cấp 4–6', _dashPurple),
+                    this._courseSrsLegend('Cấp 7–8', _dashGreen),
+                  ],
+                ),
+                SizedBox(height: 14),
+                Row(
+                  children: [
+                    Text(
+                      '0',
+                      style: TextStyle(
+                        color: _dashMuted,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    Spacer(),
+                    Text(
+                      'Tối đa $maxTracked thẻ SRS',
+                      style: TextStyle(
+                        color: _dashMuted,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+                SizedBox(height: 6),
+                ...items.map((item) {
+                  final tracked = item.srsTrackedCards;
+                  return Padding(
+                    padding: EdgeInsets.only(bottom: 14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                item.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: _dashText,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                            ),
+                            SizedBox(width: 8),
+                            Text(
+                              '$tracked/${item.totalCards} thẻ',
+                              style: TextStyle(
+                                color: _dashMuted,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ],
+                        ),
+                        SizedBox(height: 7),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(99),
+                          child: Stack(
+                            children: [
+                              Container(height: 12, color: _dashPanel2),
+                              if (tracked > 0)
+                                FractionallySizedBox(
+                                  widthFactor: tracked / maxTracked,
+                                  alignment: Alignment.centerLeft,
+                                  child: SizedBox(
+                                    height: 12,
+                                    child: Row(
+                                      children: [
+                                        if (item.srsLearningCards > 0)
+                                          Expanded(
+                                            flex: item.srsLearningCards,
+                                            child: Tooltip(
+                                              message:
+                                                  'Cấp 1–3: ${item.srsLearningCards} thẻ',
+                                              child: Container(
+                                                color: _dashBlue,
+                                              ),
+                                            ),
+                                          ),
+                                        if (item.srsSteadyCards > 0)
+                                          Expanded(
+                                            flex: item.srsSteadyCards,
+                                            child: Tooltip(
+                                              message:
+                                                  'Cấp 4–6: ${item.srsSteadyCards} thẻ',
+                                              child: Container(
+                                                color: _dashPurple,
+                                              ),
+                                            ),
+                                          ),
+                                        if (item.srsAdvancedCards > 0)
+                                          Expanded(
+                                            flex: item.srsAdvancedCards,
+                                            child: Tooltip(
+                                              message:
+                                                  'Cấp 7–8: ${item.srsAdvancedCards} thẻ',
+                                              child: Container(
+                                                color: _dashGreen,
+                                              ),
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }),
+              ],
+            ),
+    );
+  }
+
+  Widget _courseSrsLegend(String label, Color color) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 9,
+          height: 9,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(3),
+          ),
+        ),
+        SizedBox(width: 5),
+        Text(
+          label,
+          style: TextStyle(
+            color: _dashMuted,
+            fontSize: 10,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ],
     );
   }
 

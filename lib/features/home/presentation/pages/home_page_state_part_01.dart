@@ -104,6 +104,10 @@ extension HomePageStatePart01 on _HomePageState {
                 child: Row(
                   children: [
                     Expanded(child: this._buildHomeBrand()),
+                    if (_activeHomeTopic != null) ...[
+                      this._buildHomeTopicSrsBadge(_activeHomeTopic!),
+                      SizedBox(width: 2),
+                    ],
                     IconButton(
                       tooltip: _isHomeNavExpanded ? 'Đóng menu' : 'Mở menu',
                       onPressed: () {
@@ -189,6 +193,80 @@ extension HomePageStatePart01 on _HomePageState {
                       size: 24,
                     ),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHomeTopicSrsBadge(CourseTopicItem topic) {
+    final stars = courses
+        .where((course) => course.topicId == topic.id)
+        .fold<int>(
+          0,
+          (sum, course) => sum + course.srsLevel.clamp(0, 8).toInt(),
+        );
+    return Tooltip(
+      message: 'Tổng sao SRS của chủ đề: $stars',
+      child: Semantics(
+        label: 'Chủ đề có tổng cộng $stars sao SRS',
+        child: Container(
+          height: 34,
+          padding: EdgeInsets.symmetric(horizontal: 6),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: 23,
+                height: 23,
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  alignment: Alignment.center,
+                  children: [
+                    ImageFiltered(
+                      imageFilter: ImageFilter.blur(sigmaX: 3.4, sigmaY: 3.4),
+                      child: Opacity(
+                        opacity: 0.7,
+                        child: SvgPicture.asset(
+                          'assets/icon/star-solid-full.svg',
+                          width: 19,
+                          height: 19,
+                          colorFilter: ColorFilter.mode(
+                            Color(0xffffcf33),
+                            BlendMode.srcIn,
+                          ),
+                        ),
+                      ),
+                    ),
+                    SvgPicture.asset(
+                      'assets/icon/star-solid-full.svg',
+                      width: 19,
+                      height: 19,
+                      colorFilter: ColorFilter.mode(
+                        Color(0xffffcf33),
+                        BlendMode.srcIn,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              SizedBox(width: 4),
+              Text(
+                '× $stars',
+                style: TextStyle(
+                  color: Color(0xffe8e8e8),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.2,
+                  shadows: [
+                    Shadow(
+                      color: Color(0x52ffff99),
+                      blurRadius: 5,
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
       ),

@@ -295,7 +295,7 @@ extension HomePageStatePart02Split02 on _HomePageState {
         c.languageCode,
         COALESCE(c.hasLocalNameConflict, 0) AS hasLocalNameConflict,
         COUNT(cards.id) AS cardCount,
-        MAX(COALESCE(rs.level, 0)) AS srsLevel
+        COALESCE(AVG(COALESCE(rs.level, 0)), 0) AS srsLevel
       FROM courses c
       LEFT JOIN topics t
         ON t.id = c.topicId

@@ -7,6 +7,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
   late Future<List<_SrsEditorItem>> _srsManagerFuture;
   late final StreamSubscription<SyncResult> _statisticsSyncSubscription;
   late final StreamSubscription<void> _statisticsRealtimeSubscription;
+  late final StreamSubscription<AuthState> _statisticsAuthSubscription;
   final Set<int> _expandedCourseIds = {};
   final TextEditingController _srsSearchController = TextEditingController();
   final Map<int, int> _courseSrsLevelDraft = {};
@@ -126,12 +127,16 @@ class _StatisticsPageState extends State<StatisticsPage> {
         SupabaseSyncService.instance.remoteDataChanged.listen((_) {
           if (mounted) this.reloadStatistics();
         });
+    _statisticsAuthSubscription = SupabaseConfig.onAuthStateChange.listen((_) {
+      if (mounted) setState(() {});
+    });
   }
 
   @override
   void dispose() {
     _statisticsSyncSubscription.cancel();
     _statisticsRealtimeSubscription.cancel();
+    _statisticsAuthSubscription.cancel();
     _srsSearchController.dispose();
     super.dispose();
   }
