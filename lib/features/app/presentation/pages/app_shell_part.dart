@@ -224,7 +224,7 @@ class _AppThemeLoaderState extends State<AppThemeLoader>
       if (!SupabaseConfig.isLoggedIn) return;
       // Upload durable offline answers before reading the cloud snapshot.
       // If the network is still unavailable this safely leaves the markers in
-      // SQLite; merge also knows not to overwrite those pending SRS rows.
+      // SQLite so they can be retried before a later replacement download.
       await _retryOutboxSafely();
       final ownerId = SupabaseConfig.currentUser?.id;
       final now = DateTime.now();
@@ -236,10 +236,10 @@ class _AppThemeLoaderState extends State<AppThemeLoader>
         await _retryOutboxSafely();
         return;
       }
-      // Realtime only delivers events while this process is connected. A
-      // merge on startup/real resume reconciles the Supabase snapshot with SQLite,
-      // including changes made by the WinForms app while Flutter was offline.
-      final result = await SupabaseSyncService.instance.mergeAll();
+      // Realtime only delivers events while this process is connected.
+      // On startup/real resume, use the server snapshot as the source of truth
+      // after durable local mutations have been uploaded above.
+      final result = await SupabaseSyncService.instance.syncAll();
       if (!result.hasError) {
         _lastCatchUpAt = DateTime.now();
         _lastCatchUpOwnerId = ownerId;
@@ -269,6 +269,11 @@ class _AppThemeLoaderState extends State<AppThemeLoader>
       final event = data.event;
       if (event == AuthChangeEvent.signedIn) {
         unawaited(_startSessionAndCatchUp(newLogin: true));
+      } else if (event == AuthChangeEvent.tokenRefreshed) {
+        // A channel opened from the restored (expired) desktop session keeps
+        // using that JWT. Recreate it with the newly issued access token.
+        SupabaseSyncService.instance.restartRealtimeSync();
+        unawaited(_retryOutboxSafely());
       } else if (event == AuthChangeEvent.signedOut) {
         SupabaseSyncService.instance.endAuthenticatedSession();
       } else if (event == AuthChangeEvent.passwordRecovery) {

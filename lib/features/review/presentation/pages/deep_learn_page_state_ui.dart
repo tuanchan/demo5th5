@@ -211,10 +211,39 @@ extension _DeepLearnPageStateUi on _DeepLearnPageState {
         constraints: BoxConstraints(
           minHeight: isFlash ? (compact ? 170 : 220) : (compact ? 72 : 118),
         ),
-        child: SelectableText(
-          question.flipped ? question.answer : question.prompt,
-          textAlign: isFlash ? TextAlign.center : TextAlign.left,
-          style: const TextStyle(color: Colors.white, fontSize: 24, height: 1.35, fontWeight: FontWeight.w700),
+        child: Row(
+          children: [
+            Expanded(
+              child: Align(
+                alignment:
+                    isFlash ? Alignment.center : Alignment.centerLeft,
+                child: SelectableText(
+                  question.flipped ? question.answer : question.prompt,
+                  textAlign: isFlash ? TextAlign.center : TextAlign.left,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 24,
+                    height: 1.35,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 4),
+            IconButton(
+              tooltip: 'Phát âm từ vựng',
+              onPressed: _speakVocabulary,
+              icon: SvgPicture.asset(
+                'assets/icon/volume-solid-full.svg',
+                width: 22,
+                height: 22,
+                colorFilter: const ColorFilter.mode(
+                  Colors.white,
+                  BlendMode.srcIn,
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -487,7 +516,13 @@ extension _DeepLearnPageStateUi on _DeepLearnPageState {
                 const SizedBox(width: 14),
                 _sideAction(starred ? Icons.star : Icons.star_border, _toggleStar, active: starred),
                 const SizedBox(width: 14),
-                _sideAction(Icons.volume_up_outlined, _speak),
+                _sideAction(
+                  _correctSoundEnabled
+                      ? Icons.volume_up_outlined
+                      : Icons.volume_off_outlined,
+                  () => unawaited(_toggleCorrectSound()),
+                  active: _correctSoundEnabled,
+                ),
               ],
             ),
             const SizedBox(height: 16),

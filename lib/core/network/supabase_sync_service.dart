@@ -863,6 +863,28 @@ $targetWhere
   }
 
   Future<void> beginAuthenticatedSession({bool newLogin = false}) async {
+    final session = SupabaseConfig.client.auth.currentSession;
+    final expiresAt = session?.expiresAt;
+    if (expiresAt != null) {
+      final refreshBefore =
+          DateTime.now().add(const Duration(seconds: 30)).millisecondsSinceEpoch ~/
+              1000;
+      if (expiresAt <= refreshBefore) {
+        try {
+          await SupabaseConfig.client.auth.refreshSession();
+          await ServerLogService.write('auth.session_refreshed', details: {
+            'reason': 'expired-before-realtime-subscribe',
+          });
+        } catch (error) {
+          await ServerLogService.write('auth.session_refresh_error', details: {
+            'reason': 'expired-before-realtime-subscribe',
+            'error': error,
+          });
+          rethrow;
+        }
+      }
+    }
+
     final user = SupabaseConfig.currentUser;
     if (user == null) return;
     if (!newLogin &&
@@ -917,6 +939,17 @@ $targetWhere
     _sessionOwnerId = null;
     _livePushCursorAt = null;
     _identityOwnerId = null;
+  }
+
+  /// Rebuilds the channel so Realtime uses the latest access token.
+  ///
+  /// Supabase can restore an expired persisted session before its asynchronous
+  /// token refresh completes. A channel created in that window remains in an
+  /// errored state even after Auth receives the new token.
+  void restartRealtimeSync() {
+    if (!SupabaseConfig.isLoggedIn) return;
+    stopRealtimeSync();
+    startRealtimeSync();
   }
 
   /// Listens to server-side changes and merges them into the local SQLite

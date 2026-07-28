@@ -2991,63 +2991,113 @@ Không thêm markdown, không giải thích ngoài JSON, không bịa vật th�
             };
     }
     return Container(
-      height: 58,
+      height: _showCamera ? 70 : 58,
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       decoration: const BoxDecoration(
         color: _bg,
         border: Border(top: BorderSide(color: _border)),
       ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          _bottomActionIcon(
-            icon: Icons.camera_alt_rounded,
-            tooltip: _showCamera ? 'Chụp ảnh' : 'Mở camera',
-            color: _blue,
-            onPressed: captureAction,
-          ),
-          const SizedBox(width: 8),
-          _bottomActionIcon(
-            icon: Icons.add_photo_alternate_rounded,
-            tooltip: 'Chọn ảnh',
-            onPressed: _processing ? null : _chooseAndAnalyze,
-          ),
-          if (showEntryActions) ...[
-            const SizedBox(width: 8),
-            const SizedBox(
-              height: 28,
-              child: VerticalDivider(color: _border, width: 1),
+      child: _showCamera
+          ? SizedBox.expand(
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  Tooltip(
+                    message: 'Chụp ảnh',
+                    child: Semantics(
+                      button: true,
+                      label: 'Chụp ảnh',
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: captureAction,
+                        child: AnimatedOpacity(
+                          duration: const Duration(milliseconds: 160),
+                          opacity: captureAction == null ? 0.45 : 1,
+                          child: Container(
+                            width: 54,
+                            height: 54,
+                            padding: const EdgeInsets.all(4),
+                            decoration: const BoxDecoration(
+                              color: Colors.white,
+                              shape: BoxShape.circle,
+                            ),
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: Colors.black,
+                                  width: 3,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    right: 0,
+                    child: _bottomActionIcon(
+                      icon: Icons.add_photo_alternate_rounded,
+                      tooltip: 'Chọn ảnh từ máy',
+                      onPressed: _processing ? null : _chooseAndAnalyze,
+                    ),
+                  ),
+                ],
+              ),
+            )
+          : Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _bottomActionIcon(
+                  icon: Icons.camera_alt_rounded,
+                  tooltip: 'Mở camera',
+                  color: _blue,
+                  onPressed: captureAction,
+                ),
+                const SizedBox(width: 8),
+                _bottomActionIcon(
+                  icon: Icons.add_photo_alternate_rounded,
+                  tooltip: 'Chọn ảnh',
+                  onPressed: _processing ? null : _chooseAndAnalyze,
+                ),
+                if (showEntryActions) ...[
+                  const SizedBox(width: 8),
+                  const SizedBox(
+                    height: 28,
+                    child: VerticalDivider(color: _border, width: 1),
+                  ),
+                  const SizedBox(width: 8),
+                  _bottomActionIcon(
+                    icon: Icons.style_rounded,
+                    tooltip: 'Từ vựng trong ảnh',
+                    color: _yellow,
+                    onPressed: () => _showVocabularyPopup(entry!),
+                  ),
+                  const SizedBox(width: 8),
+                  _bottomActionIcon(
+                    icon: Icons.download_rounded,
+                    tooltip: 'Lưu ảnh',
+                    onPressed: () => _saveAnnotatedImage(entry!),
+                  ),
+                  const SizedBox(width: 8),
+                  _bottomActionIcon(
+                    icon: Icons.library_add_rounded,
+                    tooltip: 'Lưu từ vựng',
+                    color: _blue,
+                    onPressed: () => _importVocabulary(entry!),
+                  ),
+                  const SizedBox(width: 8),
+                  _bottomActionIcon(
+                    icon: Icons.delete_outline_rounded,
+                    tooltip: 'Xóa ảnh',
+                    color: Colors.redAccent,
+                    onPressed: () => _deleteEntry(entry!),
+                  ),
+                ],
+              ],
             ),
-            const SizedBox(width: 8),
-            _bottomActionIcon(
-              icon: Icons.style_rounded,
-              tooltip: 'Từ vựng trong ảnh',
-              color: _yellow,
-              onPressed: () => _showVocabularyPopup(entry!),
-            ),
-            const SizedBox(width: 8),
-            _bottomActionIcon(
-              icon: Icons.download_rounded,
-              tooltip: 'Lưu ảnh',
-              onPressed: () => _saveAnnotatedImage(entry!),
-            ),
-            const SizedBox(width: 8),
-            _bottomActionIcon(
-              icon: Icons.library_add_rounded,
-              tooltip: 'Lưu từ vựng',
-              color: _blue,
-              onPressed: () => _importVocabulary(entry!),
-            ),
-            const SizedBox(width: 8),
-            _bottomActionIcon(
-              icon: Icons.delete_outline_rounded,
-              tooltip: 'Xóa ảnh',
-              color: Colors.redAccent,
-              onPressed: () => _deleteEntry(entry!),
-            ),
-          ],
-        ],
-      ),
     );
   }
 

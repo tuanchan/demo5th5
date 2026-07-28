@@ -74,6 +74,7 @@ class _DeepLearnPageState extends State<DeepLearnPage> {
   bool _multipleChoice = true;
   bool _written = true;
   bool _flashcard = false;
+  bool _correctSoundEnabled = true;
   bool _completed = false;
   bool _didRequestSrsSync = false;
   bool _correctSoundReady = false;
@@ -93,7 +94,6 @@ class _DeepLearnPageState extends State<DeepLearnPage> {
   void initState() {
     super.initState();
     if (kIsWeb || !Platform.isWindows) _correctPlayer = AudioPlayer();
-    _prepareCorrectSound();
     _load();
   }
 
@@ -108,7 +108,7 @@ class _DeepLearnPageState extends State<DeepLearnPage> {
       _windowsCorrectSoundFile = null;
       _correctSoundPreparation = null;
       _disposeWindowsSoundPlayer();
-      _prepareCorrectSound();
+      if (_correctSoundEnabled) _prepareCorrectSound();
     }
   }
 
@@ -179,6 +179,7 @@ class _DeepLearnPageState extends State<DeepLearnPage> {
       _cards = cards;
       _storageKey = _buildStorageKey(cards);
       await _loadGlobalSettings();
+      if (_correctSoundEnabled) unawaited(_prepareCorrectSound());
       
       final isAdhocOrDue = widget.dueOnly || (widget.cardIds != null && widget.cardIds!.isNotEmpty);
       final restored = isAdhocOrDue ? false : await _restoreState();
@@ -208,6 +209,8 @@ class _DeepLearnPageState extends State<DeepLearnPage> {
         await AppSettingsStore.getBool('deepLearn.multipleChoice') ?? true;
     _written = await AppSettingsStore.getBool('deepLearn.written') ?? true;
     _flashcard = await AppSettingsStore.getBool('deepLearn.flashcard') ?? false;
+    _correctSoundEnabled =
+        await AppSettingsStore.getBool('deepLearn.correctSoundEnabled') ?? true;
     if (!_multipleChoice && !_written && !_flashcard) _multipleChoice = true;
   }
 
@@ -477,6 +480,18 @@ class _DeepLearnPageState extends State<DeepLearnPage> {
   }
 
   Future<void> _playCorrectAndContinue(_DeepLearnQuestion answeredQuestion) async {
+    if (!_correctSoundEnabled) {
+      await Future<void>.delayed(
+        const Duration(milliseconds: _correctSoundDurationMs),
+      );
+      if (mounted &&
+          identical(_current, answeredQuestion) &&
+          _feedback?.correct == true) {
+        _continueFeedback();
+      }
+      return;
+    }
+
     try {
       if (!_correctSoundReady) {
         await _prepareCorrectSound().timeout(const Duration(seconds: 3));
@@ -490,13 +505,14 @@ class _DeepLearnPageState extends State<DeepLearnPage> {
         if (player == null) throw StateError('Correct audio player is unavailable');
         await player.pause();
         await player.seek(Duration.zero);
-        final finished = player.playerStateStream.firstWhere(
-          (state) => state.processingState == ProcessingState.completed,
-        );
         player.play().catchError((error) {
           debugPrint('PLAY DEEP LEARN SOUND ERROR: $error');
         });
-        await finished.timeout(const Duration(seconds: 8));
+        await Future<void>.delayed(
+          const Duration(milliseconds: _correctSoundDurationMs),
+        );
+        await player.pause();
+        await player.seek(Duration.zero);
       }
     } catch (error) {
       debugPrint('DEEP LEARN CORRECT SOUND ERROR: $error');
@@ -707,14 +723,53 @@ class _DeepLearnPageState extends State<DeepLearnPage> {
     await _saveState();
   }
 
-  Future<void> _speak() async {
+  Future<void> _speakVocabulary() async {
     final question = _current;
     if (question == null) return;
-    final text = question.promptIsDefinition ? question.card.term : question.answer;
+    final text = question.card.term.trim();
+    if (text.isEmpty) return;
     final cjk = RegExp(r'[\u3400-\u9fff\uf900-\ufaff]').hasMatch(text);
-    await _tts.stop();
-    await _tts.setLanguage(cjk ? 'zh-TW' : (widget.courseLanguageCode.isEmpty ? 'en-US' : widget.courseLanguageCode));
-    await _tts.speak(text);
+    try {
+      await _tts.stop();
+      await _tts.setLanguage(
+        cjk
+            ? 'zh-TW'
+            : (widget.courseLanguageCode.isEmpty
+                ? 'en-US'
+                : widget.courseLanguageCode),
+      );
+      await _tts.speak(text);
+    } catch (error) {
+      debugPrint('PLAY DEEP LEARN VOCABULARY TTS ERROR: $error');
+    }
+  }
+
+  Future<void> _toggleCorrectSound() async {
+    final enabled = !_correctSoundEnabled;
+    setState(() => _correctSoundEnabled = enabled);
+    await AppSettingsStore.setBool(
+      'deepLearn.correctSoundEnabled',
+      enabled,
+    );
+    if (enabled) {
+      unawaited(_prepareCorrectSound());
+      return;
+    }
+
+    try {
+      if (!kIsWeb && Platform.isWindows) {
+        final process = _windowsSoundProcess;
+        if (process != null) {
+          process.stdin.writeln('STOP');
+          await process.stdin.flush();
+        }
+      } else {
+        await _correctPlayer?.pause();
+        await _correctPlayer?.seek(Duration.zero);
+      }
+    } catch (error) {
+      debugPrint('STOP DEEP LEARN SOUND ERROR: $error');
+    }
   }
 
   void _toggleType(_DeepLearnQuestionType type) {
