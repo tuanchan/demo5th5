@@ -89,6 +89,9 @@ flutter:
     - assets/icon/star-solid-full.svg
     - assets/icon/triangle-exclamation-solid-full.svg
     - assets/icon/list-ol-solid-full.svg
+    - assets/icon/floppy-disk-solid-full.svg
+    - assets/icon/chevron-right-solid-full.svg
+    - assets/icon/arrow-right-to-bracket-solid-full.svg
     - assets/icon/volume-solid-full.svg
     - assets/icon/google-icon-logo-svgrepo-com.svg
     - assets/icon/facebook-svgrepo-com.svg

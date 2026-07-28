@@ -55,6 +55,215 @@ class _WritingScript {
       contextNote: json['contextNote']?.toString().trim() ?? '',
     );
   }
+
+  Map<String, dynamic> toJson() => {
+    'title': title,
+    'topic': topic,
+    'difficulty': difficulty,
+    'vietnameseText': vietnameseText,
+    'targetText': targetText,
+    'targetLanguageName': targetLanguageName,
+    'targetLanguageCode': targetLanguageCode,
+    'usedVocabulary': usedVocabulary,
+    'contextNote': contextNote,
+  };
+}
+
+class _SavedWritingScript {
+  final String filePath;
+  final String displayName;
+  final String groupName;
+  final DateTime modifiedAt;
+
+  const _SavedWritingScript({
+    required this.filePath,
+    required this.displayName,
+    required this.groupName,
+    required this.modifiedAt,
+  });
+}
+
+class _SavedWritingGroup {
+  final String name;
+  final List<_SavedWritingScript> scripts;
+
+  const _SavedWritingGroup({required this.name, required this.scripts});
+}
+
+class _SavedWritingEdit {
+  final String fileName;
+  final String groupName;
+
+  const _SavedWritingEdit({
+    required this.fileName,
+    required this.groupName,
+  });
+}
+
+class _SwipeableWritingJsonTile extends StatefulWidget {
+  final Widget child;
+  final VoidCallback onTap;
+  final VoidCallback onDoubleTap;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  const _SwipeableWritingJsonTile({
+    super.key,
+    required this.child,
+    required this.onTap,
+    required this.onDoubleTap,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  @override
+  State<_SwipeableWritingJsonTile> createState() =>
+      _SwipeableWritingJsonTileState();
+}
+
+class _SwipeableWritingJsonTileState
+    extends State<_SwipeableWritingJsonTile> {
+  static const double _actionWidth = 116;
+  double _offset = 0;
+  bool _dragging = false;
+
+  void _closeActions() {
+    if (_offset == 0) return;
+    setState(() {
+      _dragging = false;
+      _offset = 0;
+    });
+  }
+
+  void _runAction(VoidCallback action) {
+    _closeActions();
+    action();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(9),
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: ColoredBox(
+              color: const Color(0xff111318),
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: SizedBox(
+                  width: _actionWidth,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Material(
+                          color: const Color(0xff2448a8),
+                          child: InkWell(
+                            onTap: () => _runAction(widget.onEdit),
+                            child: const Center(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.edit_outlined,
+                                    color: Colors.white,
+                                    size: 19,
+                                  ),
+                                  SizedBox(height: 3),
+                                  Text(
+                                    'Sửa',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: Material(
+                          color: const Color(0xff9f2630),
+                          child: InkWell(
+                            onTap: () => _runAction(widget.onDelete),
+                            child: const Center(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.delete_outline_rounded,
+                                    color: Colors.white,
+                                    size: 20,
+                                  ),
+                                  SizedBox(height: 3),
+                                  Text(
+                                    'Xóa',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          AnimatedContainer(
+            duration: _dragging
+                ? Duration.zero
+                : const Duration(milliseconds: 170),
+            curve: Curves.easeOutCubic,
+            transform: Matrix4.translationValues(_offset, 0, 0),
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onHorizontalDragStart: (_) => setState(() => _dragging = true),
+              onHorizontalDragUpdate: (details) {
+                setState(() {
+                  _offset = (_offset + details.delta.dx)
+                      .clamp(-_actionWidth, 0.0)
+                      .toDouble();
+                });
+              },
+              onHorizontalDragEnd: (_) {
+                setState(() {
+                  _dragging = false;
+                  _offset = _offset < -42 ? -_actionWidth : 0;
+                });
+              },
+              onHorizontalDragCancel: () {
+                setState(() {
+                  _dragging = false;
+                  _offset = _offset < -42 ? -_actionWidth : 0;
+                });
+              },
+              onTap: () {
+                if (_offset != 0) {
+                  _closeActions();
+                } else {
+                  widget.onTap();
+                }
+              },
+              onDoubleTap: () {
+                if (_offset == 0) widget.onDoubleTap();
+              },
+              child: widget.child,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _WritingIssue {
@@ -147,15 +356,34 @@ class _WritingPracticePageState extends State<WritingPracticePage> {
   final _answerController = TextEditingController();
   final _scrollController = ScrollController();
   final FlutterTts _writingTts = FlutterTts();
+  final _scaffoldKey = GlobalKey<ScaffoldState>();
+  Timer? _dictationProgressTimer;
+  Future<dynamic>? _dictationSeekStopFuture;
+  Process? _dictationWindowsSpeechProcess;
+  int _dictationWindowsSpeechGeneration = 0;
 
   List<CourseListItem> _courses = [];
+  List<_SavedWritingGroup> _savedWritingGroups = [];
+  final Set<String> _expandedLibraryGroups = {};
   int? _selectedCourseId;
+  String? _selectedSavedScriptPath;
+  String? _scriptLibraryGroupName;
   String _sourceMode = 'course';
   String _practiceMode = 'translate';
   String _difficulty = 'basic';
   String _tense = 'Present Simple';
   String _targetLanguageOverride = '';
   bool _showSettings = true;
+  bool _libraryLoading = false;
+  bool _dictationPlaying = false;
+  bool _dictationPreparing = false;
+  bool _dictationNativePaused = false;
+  bool _dictationRestarting = false;
+  bool _resumeDictationAfterSeek = false;
+  double _dictationProgress = 0;
+  double _dictationSpeed = 1;
+  int _dictationSpeechStartOffset = 0;
+  DateTime? _dictationLastTick;
   String? _busyPhase;
   String _error = '';
   _WritingScript? _script;
@@ -165,6 +393,7 @@ class _WritingPracticePageState extends State<WritingPracticePage> {
   final List<_WritingClozeItem> _clozeItems = [];
 
   bool get _busy => _busyPhase != null;
+  bool get _usesWindowsSpeechProcess => !kIsWeb && Platform.isWindows;
   CourseListItem? get _selectedCourse {
     for (final course in _courses) {
       if (course.id == _selectedCourseId) return course;
@@ -183,6 +412,8 @@ class _WritingPracticePageState extends State<WritingPracticePage> {
     super.initState();
     _selectedCourseId = widget.initialCourseId;
     _loadCourses();
+    _loadSavedWritingLibrary();
+    _configureDictationTts();
   }
 
   @override
@@ -190,7 +421,13 @@ class _WritingPracticePageState extends State<WritingPracticePage> {
     _topicController.dispose();
     _answerController.dispose();
     _scrollController.dispose();
-    _writingTts.stop();
+    _dictationProgressTimer?.cancel();
+    if (_usesWindowsSpeechProcess) {
+      _stopWindowsSpeechProcess();
+    } else {
+      _writingTts.stop();
+    }
+    _dictationSeekStopFuture = null;
     _disposeClozeItems();
     super.dispose();
   }
@@ -230,6 +467,463 @@ class _WritingPracticePageState extends State<WritingPracticePage> {
       });
     } catch (error) {
       if (mounted) setState(() => _error = 'Không tải được học phần: $error');
+    }
+  }
+
+  Future<Directory> _writingLibraryDirectory() async {
+    final documents = await getApplicationDocumentsDirectory();
+    final directory = Directory(
+      p.join(documents.path, 'writing_practice_json'),
+    );
+    if (!await directory.exists()) {
+      await directory.create(recursive: true);
+    }
+    return directory;
+  }
+
+  String _safeLocalFileName(String value, {required String fallback}) {
+    var safe = value
+        .trim()
+        .replaceAll(RegExp(r'\.json$', caseSensitive: false), '')
+        .replaceAll(RegExp(r'[<>:"/\\|?*\u0000-\u001F]'), '_')
+        .replaceAll(RegExp(r'[. ]+$'), '')
+        .trim();
+    if (safe.isEmpty) safe = fallback;
+    const reservedWindowsNames = {
+      'CON',
+      'PRN',
+      'AUX',
+      'NUL',
+      'COM1',
+      'COM2',
+      'COM3',
+      'COM4',
+      'COM5',
+      'COM6',
+      'COM7',
+      'COM8',
+      'COM9',
+      'LPT1',
+      'LPT2',
+      'LPT3',
+      'LPT4',
+      'LPT5',
+      'LPT6',
+      'LPT7',
+      'LPT8',
+      'LPT9',
+    };
+    if (reservedWindowsNames.contains(safe.toUpperCase())) safe = '_$safe';
+    return safe;
+  }
+
+  Future<void> _loadSavedWritingLibrary() async {
+    if (mounted) setState(() => _libraryLoading = true);
+    try {
+      final root = await _writingLibraryDirectory();
+      final groups = <_SavedWritingGroup>[];
+      await for (final entity in root.list(followLinks: false)) {
+        if (entity is! Directory) continue;
+        final scripts = <_SavedWritingScript>[];
+        await for (final child in entity.list(followLinks: false)) {
+          if (child is! File ||
+              p.extension(child.path).toLowerCase() != '.json') {
+            continue;
+          }
+          final stat = await child.stat();
+          scripts.add(
+            _SavedWritingScript(
+              filePath: child.path,
+              displayName: p.basenameWithoutExtension(child.path),
+              groupName: p.basename(entity.path),
+              modifiedAt: stat.modified,
+            ),
+          );
+        }
+        if (scripts.isEmpty) continue;
+        scripts.sort((a, b) => b.modifiedAt.compareTo(a.modifiedAt));
+        groups.add(
+          _SavedWritingGroup(
+            name: p.basename(entity.path),
+            scripts: scripts,
+          ),
+        );
+      }
+      groups.sort(
+        (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+      );
+      if (!mounted) return;
+      setState(() {
+        _savedWritingGroups = groups;
+        _expandedLibraryGroups.removeWhere(
+          (name) => !groups.any((group) => group.name == name),
+        );
+      });
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _error = 'Không tải được JSON đã lưu: $error';
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _libraryLoading = false);
+    }
+  }
+
+  Future<void> _openWritingLibrary() async {
+    await _loadSavedWritingLibrary();
+    if (!mounted) return;
+    _scaffoldKey.currentState?.openEndDrawer();
+  }
+
+  String _currentWritingGroupName(_WritingScript script) {
+    final existingGroupName = _scriptLibraryGroupName?.trim() ?? '';
+    if (existingGroupName.isNotEmpty) return existingGroupName;
+    if (_sourceMode == 'topic') {
+      final topic = _topicController.text.trim();
+      return topic.isNotEmpty
+          ? topic
+          : (script.topic.isEmpty ? 'Chủ đề khác' : script.topic);
+    }
+    final courseTitle = _selectedCourse?.title.trim() ?? '';
+    return courseTitle.isEmpty ? 'Học phần khác' : courseTitle;
+  }
+
+  Future<String?> _askWritingFileName(_WritingScript script) async {
+    final controller = TextEditingController(
+      text: script.title.trim().isEmpty ? '' : script.title.trim(),
+    );
+    final result = await showDialog<String>(
+      context: context,
+      barrierColor: Colors.black87,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: _surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(15),
+          side: BorderSide(color: _border),
+        ),
+        title: Text('Đặt tên file JSON', style: _titleStyle(19)),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          style: TextStyle(color: Colors.white),
+          decoration: _inputDecoration('Tên đoạn viết'),
+          onSubmitted: (value) {
+            final name = value.trim();
+            if (name.isNotEmpty) Navigator.pop(dialogContext, name);
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: Text('Hủy', style: TextStyle(color: _muted)),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: _blue),
+            onPressed: () {
+              final name = controller.text.trim();
+              if (name.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Hãy nhập tên file JSON')),
+                );
+                return;
+              }
+              Navigator.pop(dialogContext, name);
+            },
+            child: Text('Lưu'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    return result;
+  }
+
+  Future<void> _saveCurrentWritingJson() async {
+    final script = _script;
+    if (script == null) {
+      _showMessage('Chưa có đoạn viết để lưu');
+      return;
+    }
+    final requestedName = await _askWritingFileName(script);
+    if (requestedName == null || requestedName.trim().isEmpty) return;
+    try {
+      final root = await _writingLibraryDirectory();
+      final groupName = _safeLocalFileName(
+        _currentWritingGroupName(script),
+        fallback: 'Học phần khác',
+      );
+      final groupDirectory = Directory(p.join(root.path, groupName));
+      if (!await groupDirectory.exists()) {
+        await groupDirectory.create(recursive: true);
+      }
+      final baseName = _safeLocalFileName(
+        requestedName,
+        fallback: 'Đoạn viết',
+      );
+      var file = File(p.join(groupDirectory.path, '$baseName.json'));
+      var duplicateIndex = 2;
+      while (await file.exists()) {
+        file = File(
+          p.join(groupDirectory.path, '$baseName ($duplicateIndex).json'),
+        );
+        duplicateIndex++;
+      }
+      await file.writeAsString(
+        const JsonEncoder.withIndent('  ').convert(script.toJson()),
+        flush: true,
+      );
+      _selectedSavedScriptPath = file.path;
+      _expandedLibraryGroups.add(groupName);
+      await _loadSavedWritingLibrary();
+      if (!mounted) return;
+      _showMessage('Đã lưu ${p.basename(file.path)} vào máy');
+    } catch (error) {
+      _showMessage('Không lưu được JSON: $error');
+    }
+  }
+
+  Future<void> _applySavedWriting(_SavedWritingScript saved) async {
+    try {
+      final raw = await File(saved.filePath).readAsString();
+      final imported = _WritingScript.fromJson(_decodeJsonObject(raw));
+      if (imported.vietnameseText.isEmpty || imported.targetText.isEmpty) {
+        throw FormatException('JSON thiếu nội dung bài viết');
+      }
+      if (!mounted) return;
+      _clearDictationPlaybackState();
+      setState(() {
+        _selectedSavedScriptPath = saved.filePath;
+        _scriptLibraryGroupName = saved.groupName;
+        _script = imported;
+        _answerController.clear();
+        _grade = null;
+        _hints = null;
+        _error = '';
+        _showSettings = false;
+        _buildClozeItems();
+      });
+      _scaffoldKey.currentState?.closeEndDrawer();
+      _showMessage('Đã áp dụng ${saved.displayName}');
+    } catch (error) {
+      _showMessage('Không áp dụng được JSON: $error');
+    }
+  }
+
+  Future<void> _removeWritingGroupIfEmpty(Directory directory) async {
+    if (!await directory.exists()) return;
+    if (await directory.list(followLinks: false).isEmpty) {
+      await directory.delete();
+    }
+  }
+
+  bool _sameLocalPath(String first, String second) {
+    final normalizedFirst = p.normalize(p.absolute(first));
+    final normalizedSecond = p.normalize(p.absolute(second));
+    if (Platform.isWindows) {
+      return normalizedFirst.toLowerCase() == normalizedSecond.toLowerCase();
+    }
+    return normalizedFirst == normalizedSecond;
+  }
+
+  Future<_SavedWritingEdit?> _askSavedWritingEdit(
+    _SavedWritingScript saved,
+  ) async {
+    final nameController = TextEditingController(text: saved.displayName);
+    final groupNames = <String>{
+      saved.groupName,
+      ..._courses
+          .map((course) => course.title.trim())
+          .where((title) => title.isNotEmpty),
+    }.toList();
+    var selectedGroup = saved.groupName;
+    final result = await showDialog<_SavedWritingEdit>(
+      context: context,
+      barrierColor: Colors.black87,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => AlertDialog(
+          backgroundColor: _surface,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(15),
+            side: BorderSide(color: _border),
+          ),
+          title: Text('Sửa JSON đã lưu', style: _titleStyle(19)),
+          content: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: 420),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _label('Tên file'),
+                TextField(
+                  controller: nameController,
+                  autofocus: true,
+                  style: TextStyle(color: Colors.white),
+                  decoration: _inputDecoration('Tên file JSON'),
+                ),
+                SizedBox(height: 15),
+                _label('Học phần'),
+                DropdownButtonFormField<String>(
+                  value: selectedGroup,
+                  isExpanded: true,
+                  dropdownColor: _surface2,
+                  iconEnabledColor: Colors.white,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w400,
+                  ),
+                  decoration: _inputDecoration(''),
+                  items: groupNames
+                      .map(
+                        (groupName) => DropdownMenuItem<String>(
+                          value: groupName,
+                          child: Text(
+                            groupName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (value) {
+                    if (value == null) return;
+                    setDialogState(() => selectedGroup = value);
+                  },
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: Text('Hủy', style: TextStyle(color: _muted)),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: _blue),
+              onPressed: () {
+                final fileName = nameController.text.trim();
+                if (fileName.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Hãy nhập tên file JSON')),
+                  );
+                  return;
+                }
+                Navigator.pop(
+                  dialogContext,
+                  _SavedWritingEdit(
+                    fileName: fileName,
+                    groupName: selectedGroup,
+                  ),
+                );
+              },
+              child: Text('Lưu thay đổi'),
+            ),
+          ],
+        ),
+      ),
+    );
+    nameController.dispose();
+    return result;
+  }
+
+  Future<void> _editSavedWriting(_SavedWritingScript saved) async {
+    final edit = await _askSavedWritingEdit(saved);
+    if (edit == null) return;
+    try {
+      final sourceFile = File(saved.filePath);
+      if (!await sourceFile.exists()) {
+        throw FileSystemException('File không còn tồn tại', saved.filePath);
+      }
+      final root = await _writingLibraryDirectory();
+      final targetGroupName = _safeLocalFileName(
+        edit.groupName,
+        fallback: 'Học phần khác',
+      );
+      final targetDirectory = Directory(p.join(root.path, targetGroupName));
+      if (!await targetDirectory.exists()) {
+        await targetDirectory.create(recursive: true);
+      }
+      final targetBaseName = _safeLocalFileName(
+        edit.fileName,
+        fallback: 'Đoạn viết',
+      );
+      var targetFile = File(
+        p.join(targetDirectory.path, '$targetBaseName.json'),
+      );
+      var duplicateIndex = 2;
+      while (await targetFile.exists() &&
+          !_sameLocalPath(targetFile.path, sourceFile.path)) {
+        targetFile = File(
+          p.join(
+            targetDirectory.path,
+            '$targetBaseName ($duplicateIndex).json',
+          ),
+        );
+        duplicateIndex++;
+      }
+
+      final oldDirectory = sourceFile.parent;
+      if (!_sameLocalPath(sourceFile.path, targetFile.path)) {
+        await sourceFile.rename(targetFile.path);
+        await _removeWritingGroupIfEmpty(oldDirectory);
+      }
+      if (_selectedSavedScriptPath == saved.filePath) {
+        _selectedSavedScriptPath = targetFile.path;
+        _scriptLibraryGroupName = targetGroupName;
+      }
+      _expandedLibraryGroups
+        ..remove(saved.groupName)
+        ..add(targetGroupName);
+      await _loadSavedWritingLibrary();
+      _showMessage('Đã sửa ${p.basename(targetFile.path)}');
+    } catch (error) {
+      _showMessage('Không sửa được JSON: $error');
+    }
+  }
+
+  Future<void> _deleteSavedWriting(_SavedWritingScript saved) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierColor: Colors.black87,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: _surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(15),
+          side: BorderSide(color: _border),
+        ),
+        title: Text('Xóa file JSON?', style: _titleStyle(19)),
+        content: Text(
+          'File “${saved.displayName}.json” sẽ bị xóa khỏi máy.',
+          style: TextStyle(color: _muted, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text('Hủy', style: TextStyle(color: _muted)),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Color(0xffb52d38),
+            ),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: Text('Xóa'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      final file = File(saved.filePath);
+      final parent = file.parent;
+      if (await file.exists()) await file.delete();
+      await _removeWritingGroupIfEmpty(parent);
+      if (_selectedSavedScriptPath == saved.filePath) {
+        _selectedSavedScriptPath = null;
+      }
+      await _loadSavedWritingLibrary();
+      _showMessage('Đã xóa ${saved.displayName}.json');
+    } catch (error) {
+      _showMessage('Không xóa được JSON: $error');
     }
   }
 
@@ -297,6 +991,40 @@ class _WritingPracticePageState extends State<WritingPracticePage> {
     return Map<String, dynamic>.from(decoded);
   }
 
+  List<StudyCardItem> _vocabularyForCurrentDifficulty(
+    List<StudyCardItem> shuffledCards,
+  ) {
+    if (_difficulty == 'advanced') return shuffledCards;
+    final requestedCount = _difficulty == 'hard' ? 14 : 8;
+    return shuffledCards.take(math.min(shuffledCards.length, requestedCount)).toList();
+  }
+
+  List<String> _missingRequiredVocabulary(
+    _WritingScript script,
+    List<StudyCardItem> requiredCards,
+  ) {
+    String normalize(String value) => value
+        .toLowerCase()
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    final used = script.usedVocabulary.map(normalize).toList();
+    final targetText = normalize(script.targetText);
+    return requiredCards
+        .map((card) => card.term.trim())
+        .where((term) => term.isNotEmpty)
+        .where((term) {
+          final normalizedTerm = normalize(term);
+          final listedAsUsed = used.any(
+            (item) =>
+                item == normalizedTerm ||
+                item.startsWith('$normalizedTerm -') ||
+                item.startsWith('$normalizedTerm:'),
+          );
+          return !listedAsUsed || !targetText.contains(normalizedTerm);
+        })
+        .toList();
+  }
+
   Future<void> _generate() async {
     if (_busy) return;
     final course = _selectedCourse;
@@ -317,7 +1045,8 @@ class _WritingPracticePageState extends State<WritingPracticePage> {
       _hints = null;
     });
     try {
-      final cards = await _loadVocabulary();
+      final allCards = await _loadVocabulary(limit: null);
+      final cards = _vocabularyForCurrentDifficulty(allCards);
       final info = _difficultyInfo;
       final languageCode = _targetLanguageCode;
       final languageName = _languageName(languageCode);
@@ -333,6 +1062,18 @@ class _WritingPracticePageState extends State<WritingPracticePage> {
             },
           )
           .toList();
+      final sentenceCount = _difficulty == 'advanced' && cards.isNotEmpty
+          ? math.max(info.sentences, (cards.length / 4).ceil())
+          : info.sentences;
+      final vocabularyRule = _difficulty == 'advanced'
+          ? '''
+- BẮT BUỘC dùng đủ toàn bộ ${cards.length} từ/cụm trong danh sách, không bỏ sót và không chỉ lấy vài từ đầu.
+- Có thể tăng số câu nếu cần để tất cả từ xuất hiện tự nhiên.
+- usedVocabulary phải ghi lại đúng toàn bộ từ/cụm đã dùng bằng nguyên dạng trong danh sách.'''
+          : '''
+- Danh sách ${cards.length} từ/cụm dưới đây đã được lấy ngẫu nhiên lại từ học phần cho lần tạo này.
+- Dùng tự nhiên toàn bộ danh sách ngẫu nhiên này; không lặp một khuôn câu cố định giữa các lần tạo.
+- usedVocabulary phải ghi đúng các từ/cụm thực sự đã dùng bằng nguyên dạng trong danh sách.''';
       final tenseRule = _sourceMode == 'tense'
           ? 'Tất cả câu trong targetText phải dùng đúng thì $_tense.'
           : '';
@@ -343,7 +1084,7 @@ Chỉ trả về đúng một JSON hợp lệ, không markdown, không chú thí
 Học phần: ${course?.title ?? 'Theo chủ đề'}
 Ngôn ngữ đích: $languageName ($languageCode)
 Chủ đề/ngữ cảnh: $topic
-Số câu tiếng Việt: khoảng ${info.sentences}
+Số câu tiếng Việt: khoảng $sentenceCount
 Độ khó: ${info.label} — ${info.instruction}
 $tenseRule
 
@@ -352,7 +1093,7 @@ ${jsonEncode(vocabulary)}
 
 Yêu cầu:
 - Tạo đoạn tiếng Việt tự nhiên, thực tế và targetText cùng ý bằng đúng ngôn ngữ đích.
-- Dùng khoảng ${math.min(cards.length, math.max(3, info.sentences))} đến ${math.min(cards.length, info.sentences + 3)} từ/cụm trong danh sách nếu có, không nhồi từ.
+$vocabularyRule
 - Nội dung hữu ích cho giao tiếp, công việc, học tập hoặc đời sống; tránh văn phong AI.
 - Nếu là zh-TW phải dùng chữ phồn thể.
 - usedVocabulary chỉ ghi từ thực sự đã dùng; contextNote viết ngắn bằng tiếng Việt.
@@ -360,18 +1101,56 @@ Yêu cầu:
 Schema:
 {"title":"tiêu đề ngắn","topic":"chủ đề","difficulty":"${info.label}","vietnameseText":"đoạn tiếng Việt","targetText":"đoạn ngôn ngữ đích","targetLanguageName":"$languageName","targetLanguageCode":"$languageCode","usedVocabulary":["từ đã dùng"],"contextNote":"ghi chú ngắn"}
 ''';
-      final raw = await GeminiFlashLiteClient.generateText(
+      var raw = await GeminiFlashLiteClient.generateText(
         prompt,
-        maxOutputTokens: 1800,
+        maxOutputTokens: _difficulty == 'advanced' ? 6000 : 2200,
         responseMimeType: 'application/json',
       );
-      final generated = _WritingScript.fromJson(_decodeJsonObject(raw));
+      var generated = _WritingScript.fromJson(_decodeJsonObject(raw));
+      if (_difficulty == 'advanced') {
+        var missing = _missingRequiredVocabulary(generated, cards);
+        if (missing.isNotEmpty) {
+          final repairPrompt = '''
+Hãy sửa JSON bài luyện viết dưới đây. Chỉ trả về đúng một JSON hợp lệ theo nguyên schema, không markdown.
+
+JSON hiện tại:
+$raw
+
+Danh sách từ/cụm còn thiếu:
+${jsonEncode(missing)}
+
+Yêu cầu bắt buộc:
+- Viết lại vietnameseText và targetText tự nhiên, cùng ý.
+- Bổ sung đủ TẤT CẢ từ/cụm còn thiếu vào targetText.
+- Giữ các từ đã có và dùng đủ toàn bộ ${cards.length} từ/cụm của bài.
+- usedVocabulary phải liệt kê nguyên dạng đủ toàn bộ danh sách sau:
+${jsonEncode(cards.map((card) => card.term.trim()).where((term) => term.isNotEmpty).toList())}
+- Ngôn ngữ đích là $languageName ($languageCode); zh-TW phải dùng chữ phồn thể.
+''';
+          raw = await GeminiFlashLiteClient.generateText(
+            repairPrompt,
+            maxOutputTokens: 6000,
+            responseMimeType: 'application/json',
+          );
+          generated = _WritingScript.fromJson(_decodeJsonObject(raw));
+          missing = _missingRequiredVocabulary(generated, cards);
+          if (missing.isNotEmpty) {
+            throw FormatException(
+              'Chưa thể phủ đủ từ vựng nâng cao (${missing.length} từ còn thiếu). Hãy tạo lại.',
+            );
+          }
+        }
+      }
       if (generated.vietnameseText.isEmpty || generated.targetText.isEmpty) {
         throw FormatException('Gemini chưa tạo đủ hai đoạn văn');
       }
       if (!mounted) return;
+      _clearDictationPlaybackState();
       setState(() {
         _script = generated;
+        _scriptLibraryGroupName = _sourceMode == 'topic'
+            ? topic
+            : (course?.title ?? 'Học phần khác');
         _answerController.clear();
         _showSettings = false;
         _buildClozeItems();
@@ -576,25 +1355,447 @@ Schema: {"score":82,"overallFeedback":"nhận xét","suggestedRewrite":"bản vi
     }
   }
 
-  Future<void> _playDictation() async {
-    final script = _script;
-    if (script == null || script.targetText.isEmpty) return;
+  Duration get _dictationDuration {
+    final text = _script?.targetText.trim() ?? '';
+    if (text.isEmpty) return Duration.zero;
+    final wordCount = RegExp(
+      r"[A-Za-zÀ-ỹ\u00C0-\u024F]+(?:['’-][A-Za-zÀ-ỹ\u00C0-\u024F]+)*",
+      unicode: true,
+    ).allMatches(text).length;
+    final cjkCount = RegExp(
+      r'[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]',
+      unicode: true,
+    ).allMatches(text).length;
+    final punctuationPauses =
+        RegExp(r'[,.!?;:，。！？；：]').allMatches(text).length * 0.22;
+    final estimatedSeconds =
+        math.max(wordCount / 2.35, cjkCount / 4.4) + punctuationPauses;
+    return Duration(
+      milliseconds: math
+          .max(2500, (estimatedSeconds * 1000).round())
+          .toInt(),
+    );
+  }
+
+  Duration get _dictationPosition {
+    final totalMilliseconds = _dictationDuration.inMilliseconds;
+    if (totalMilliseconds <= 0) return Duration.zero;
+    return Duration(
+      milliseconds: (totalMilliseconds * _dictationProgress)
+          .round()
+          .clamp(0, totalMilliseconds)
+          .toInt(),
+    );
+  }
+
+  double get _writingTtsRate =>
+      (0.42 * _dictationSpeed).clamp(0.22, 0.72).toDouble();
+
+  int get _windowsSpeechRate =>
+      (((_dictationSpeed - 1) * 8) - 1)
+          .round()
+          .clamp(-10, 10)
+          .toInt();
+
+  void _stopWindowsSpeechProcess() {
+    _dictationWindowsSpeechGeneration++;
+    final process = _dictationWindowsSpeechProcess;
+    _dictationWindowsSpeechProcess = null;
+    if (process != null) {
+      try {
+        process.kill();
+      } catch (_) {}
+    }
+  }
+
+  Future<void> _startWindowsSpeech({
+    required String text,
+    required String languageCode,
+  }) async {
+    final value = text.trim();
+    if (value.isEmpty) return;
+    _stopWindowsSpeechProcess();
+    final generation = _dictationWindowsSpeechGeneration;
+    final encodedLanguage = base64Encode(utf8.encode(languageCode.trim()));
+    final command = '''
+[Console]::InputEncoding = [System.Text.UTF8Encoding]::new(\$false);
+\$text = [Console]::In.ReadToEnd();
+\$language = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$encodedLanguage'));
+Add-Type -AssemblyName System.Speech;
+\$speaker = New-Object System.Speech.Synthesis.SpeechSynthesizer;
+try {
+  \$voice = \$speaker.GetInstalledVoices() |
+    Where-Object { \$_.Enabled -and \$_.VoiceInfo.Culture.Name -eq \$language } |
+    Select-Object -First 1;
+  if (\$null -ne \$voice) {
+    \$speaker.SelectVoice(\$voice.VoiceInfo.Name);
+  }
+  \$speaker.Rate = $_windowsSpeechRate;
+  \$speaker.Volume = 100;
+  \$speaker.SetOutputToDefaultAudioDevice();
+  \$speaker.Speak(\$text);
+} finally {
+  \$speaker.Dispose();
+}
+''';
     try {
-      if (!kIsWeb && Platform.isWindows) {
-        await _writingTts.stop();
-        await _writingTts.setLanguage(script.targetLanguageCode);
-        await _writingTts.setSpeechRate(0.42);
-        await _writingTts.speak(script.targetText);
+      final process = await Process.start(
+        'powershell.exe',
+        [
+          '-NoLogo',
+          '-NoProfile',
+          '-NonInteractive',
+          '-WindowStyle',
+          'Hidden',
+          '-Command',
+          command,
+        ],
+        mode: ProcessStartMode.normal,
+        runInShell: false,
+      );
+      if (generation != _dictationWindowsSpeechGeneration) {
+        process.kill();
         return;
       }
-      await TtsAudioCache.instance.playText(
-        text: script.targetText,
-        languageCode: script.targetLanguageCode,
-        courseId: _selectedCourseId ?? 0,
-      );
+      _dictationWindowsSpeechProcess = process;
+      process.stdout.drain<void>();
+      final errorOutput = process.stderr.transform(utf8.decoder).join();
+      process.stdin.write(value);
+      await process.stdin.close();
+      if (mounted) {
+        setState(() {
+          _dictationPreparing = false;
+          _dictationPlaying = true;
+          _dictationNativePaused = false;
+        });
+      }
+      _startDictationProgressTimer();
+      final exitCode = await process.exitCode;
+      final nativeError = (await errorOutput).trim();
+      if (!mounted ||
+          generation != _dictationWindowsSpeechGeneration) {
+        return;
+      }
+      _dictationWindowsSpeechProcess = null;
+      _dictationProgressTimer?.cancel();
+      setState(() {
+        _dictationPreparing = false;
+        _dictationPlaying = false;
+        _dictationNativePaused = false;
+        if (exitCode == 0) _dictationProgress = 1;
+      });
+      if (exitCode != 0) {
+        _showMessage(
+          nativeError.isEmpty
+              ? 'Windows không thể phát giọng đọc'
+              : 'Windows không thể phát giọng đọc: $nativeError',
+        );
+      }
     } catch (error) {
+      if (!mounted ||
+          generation != _dictationWindowsSpeechGeneration) {
+        return;
+      }
+      setState(() {
+        _dictationPreparing = false;
+        _dictationPlaying = false;
+      });
+      _showMessage('Không khởi động được giọng đọc Windows: $error');
+    }
+  }
+
+  void _configureDictationTts() {
+    if (_usesWindowsSpeechProcess) return;
+    _writingTts.awaitSpeakCompletion(false);
+    _writingTts.setStartHandler(() {
+      if (!mounted) return;
+      _dictationRestarting = false;
+      setState(() {
+        _dictationPreparing = false;
+        _dictationPlaying = true;
+        _dictationNativePaused = false;
+      });
+      _startDictationProgressTimer();
+    });
+    _writingTts.setCompletionHandler(() {
+      if (!mounted || _dictationRestarting) return;
+      _dictationProgressTimer?.cancel();
+      setState(() {
+        _dictationPreparing = false;
+        _dictationPlaying = false;
+        _dictationNativePaused = false;
+        _dictationProgress = 1;
+        _dictationSpeechStartOffset =
+            _script?.targetText.length ?? _dictationSpeechStartOffset;
+      });
+    });
+    _writingTts.setPauseHandler(() {
+      if (!mounted) return;
+      _dictationProgressTimer?.cancel();
+      setState(() {
+        _dictationPreparing = false;
+        _dictationPlaying = false;
+        _dictationNativePaused = true;
+      });
+    });
+    _writingTts.setContinueHandler(() {
+      if (!mounted) return;
+      setState(() {
+        _dictationPreparing = false;
+        _dictationPlaying = true;
+        _dictationNativePaused = false;
+      });
+      _startDictationProgressTimer();
+    });
+    _writingTts.setProgressHandler((text, start, end, word) {
+      final fullText = _script?.targetText ?? '';
+      if (!mounted || fullText.isEmpty) return;
+      final absoluteEnd = (_dictationSpeechStartOffset + end).clamp(
+        0,
+        fullText.length,
+      ).toInt();
+      setState(() {
+        _dictationProgress = absoluteEnd / fullText.length;
+      });
+    });
+    _writingTts.setErrorHandler((message) {
+      if (!mounted) return;
+      _dictationProgressTimer?.cancel();
+      setState(() {
+        _dictationPreparing = false;
+        _dictationPlaying = false;
+        _dictationNativePaused = false;
+      });
+      _showMessage('Không phát được âm thanh: $message');
+    });
+  }
+
+  void _startDictationProgressTimer() {
+    _dictationProgressTimer?.cancel();
+    _dictationLastTick = DateTime.now();
+    _dictationProgressTimer = Timer.periodic(
+      const Duration(milliseconds: 180),
+      (_) {
+        if (!mounted || !_dictationPlaying) return;
+        final durationMilliseconds = _dictationDuration.inMilliseconds;
+        if (durationMilliseconds <= 0) return;
+        final now = DateTime.now();
+        final elapsedMilliseconds = now
+            .difference(_dictationLastTick ?? now)
+            .inMilliseconds;
+        _dictationLastTick = now;
+        final increment =
+            elapsedMilliseconds * _dictationSpeed / durationMilliseconds;
+        setState(() {
+          _dictationProgress = math.min(
+            0.995,
+            _dictationProgress + increment,
+          ).toDouble();
+        });
+      },
+    );
+  }
+
+  int _dictationOffsetForProgress(String text, double progress) {
+    if (text.isEmpty || progress <= 0) return 0;
+    if (progress >= 1) return text.length;
+    var offset = (text.length * progress)
+        .round()
+        .clamp(0, text.length)
+        .toInt();
+    final isCjk = RegExp(
+      r'[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]',
+      unicode: true,
+    ).hasMatch(text);
+    if (!isCjk) {
+      while (offset < text.length &&
+          offset > 0 &&
+          !RegExp(r'\s').hasMatch(text[offset - 1])) {
+        offset++;
+      }
+    }
+    while (offset < text.length &&
+        RegExp(r'\s').hasMatch(text[offset])) {
+      offset++;
+    }
+    return offset;
+  }
+
+  void _clearDictationPlaybackState() {
+    _dictationProgressTimer?.cancel();
+    if (_usesWindowsSpeechProcess) {
+      _stopWindowsSpeechProcess();
+    } else {
+      _writingTts.stop();
+    }
+    _dictationSeekStopFuture = null;
+    _dictationPlaying = false;
+    _dictationPreparing = false;
+    _dictationNativePaused = false;
+    _dictationRestarting = false;
+    _resumeDictationAfterSeek = false;
+    _dictationProgress = 0;
+    _dictationSpeechStartOffset = 0;
+  }
+
+  Future<void> _speakDictationFromProgress() async {
+    final script = _script;
+    if (script == null || script.targetText.trim().isEmpty) return;
+    try {
+      if (_dictationProgress >= 0.999) {
+        _dictationProgress = 0;
+        _dictationSpeechStartOffset = 0;
+      }
+      if (_usesWindowsSpeechProcess) {
+        final offset = _dictationOffsetForProgress(
+          script.targetText,
+          _dictationProgress,
+        );
+        final remainingText = script.targetText.substring(offset).trimLeft();
+        if (remainingText.isEmpty) return;
+        _dictationSpeechStartOffset =
+            script.targetText.length - remainingText.length;
+        setState(() => _dictationPreparing = true);
+        await _startWindowsSpeech(
+          text: remainingText,
+          languageCode: script.targetLanguageCode,
+        );
+        return;
+      }
+      if (_dictationNativePaused) {
+        setState(() => _dictationPreparing = true);
+        final resumed = await _writingTts.speak(script.targetText);
+        if (resumed != 1 && mounted) {
+          setState(() => _dictationPreparing = false);
+        }
+        return;
+      }
+
+      final offset = _dictationOffsetForProgress(
+        script.targetText,
+        _dictationProgress,
+      );
+      final remainingText = script.targetText.substring(offset).trimLeft();
+      if (remainingText.isEmpty) return;
+      _dictationSpeechStartOffset =
+          script.targetText.length - remainingText.length;
+      await _writingTts.setLanguage(script.targetLanguageCode);
+      await _writingTts.setSpeechRate(_writingTtsRate);
+      if (!mounted) return;
+      setState(() => _dictationPreparing = true);
+      final result = await _writingTts.speak(remainingText);
+      if (result != 1 && mounted) {
+        setState(() => _dictationPreparing = false);
+        _showMessage('Không thể bắt đầu phát âm thanh');
+      }
+    } catch (error) {
+      if (mounted) setState(() => _dictationPreparing = false);
       _showMessage('Không phát được âm thanh: $error');
     }
+  }
+
+  Future<void> _toggleDictationPlayback() async {
+    if (_dictationPreparing) return;
+    if (_dictationPlaying) {
+      _dictationProgressTimer?.cancel();
+      if (_usesWindowsSpeechProcess) {
+        _stopWindowsSpeechProcess();
+        if (mounted) {
+          setState(() {
+            _dictationPlaying = false;
+            _dictationPreparing = false;
+            _dictationNativePaused = false;
+          });
+        }
+        return;
+      }
+      final result = await _writingTts.pause();
+      if (result != 1 && mounted) {
+        setState(() {
+          _dictationPlaying = false;
+          _dictationNativePaused = false;
+        });
+      }
+      return;
+    }
+    await _speakDictationFromProgress();
+  }
+
+  void _beginDictationSeek(double value) {
+    _resumeDictationAfterSeek = _dictationPlaying;
+    _dictationProgressTimer?.cancel();
+    if (_usesWindowsSpeechProcess) {
+      _stopWindowsSpeechProcess();
+      _dictationSeekStopFuture = null;
+    } else if (_dictationPlaying ||
+        _dictationNativePaused ||
+        _dictationPreparing) {
+      _dictationRestarting = true;
+      _dictationSeekStopFuture = _writingTts.stop();
+    } else {
+      _dictationSeekStopFuture = null;
+    }
+    setState(() {
+      _dictationPlaying = false;
+      _dictationPreparing = false;
+      _dictationNativePaused = false;
+      _dictationProgress = value;
+    });
+  }
+
+  void _previewDictationSeek(double value) {
+    setState(() => _dictationProgress = value);
+  }
+
+  Future<void> _endDictationSeek(double value) async {
+    try {
+      final stopFuture = _dictationSeekStopFuture;
+      if (stopFuture != null) await stopFuture;
+    } catch (_) {}
+    _dictationSeekStopFuture = null;
+    if (!mounted) return;
+    final script = _script;
+    if (script == null) return;
+    setState(() {
+      _dictationProgress = value;
+      _dictationSpeechStartOffset = _dictationOffsetForProgress(
+        script.targetText,
+        value,
+      );
+    });
+    final shouldResume = _resumeDictationAfterSeek;
+    _resumeDictationAfterSeek = false;
+    _dictationRestarting = false;
+    if (shouldResume) await _speakDictationFromProgress();
+  }
+
+  Future<void> _setDictationSpeed(double speed) async {
+    final restartWindowsSpeech =
+        _usesWindowsSpeechProcess && _dictationPlaying;
+    setState(() => _dictationSpeed = speed);
+    if (_usesWindowsSpeechProcess) {
+      if (restartWindowsSpeech) {
+        _dictationProgressTimer?.cancel();
+        _stopWindowsSpeechProcess();
+        setState(() {
+          _dictationPlaying = false;
+          _dictationPreparing = false;
+        });
+        await _speakDictationFromProgress();
+      }
+      return;
+    }
+    try {
+      await _writingTts.setSpeechRate(_writingTtsRate);
+    } catch (error) {
+      _showMessage('Không đổi được tốc độ phát: $error');
+    }
+  }
+
+  String _formatDictationDuration(Duration value) {
+    final minutes = value.inMinutes;
+    final seconds = value.inSeconds.remainder(60);
+    return '$minutes:${seconds.toString().padLeft(2, '0')}';
   }
 
   void _clearAnswer() {
@@ -648,6 +1849,13 @@ Schema: {"score":82,"overallFeedback":"nhận xét","suggestedRewrite":"bản vi
     final suggestedParagraphs = cards.isEmpty
         ? 0
         : (cards.length / 5).ceil();
+    final coverageRule = _difficulty == 'advanced'
+        ? '''
+- BẮT BUỘC phủ đủ toàn bộ ${cards.length} từ/cụm trong danh sách, không được bỏ sót.
+- usedVocabulary của các đoạn cộng lại phải chứa nguyên dạng đủ toàn bộ danh sách.'''
+        : '''
+- Danh sách đã được trộn ngẫu nhiên; hãy chia tiếp thành các tổ hợp ngẫu nhiên khác nhau cho từng đoạn.
+- Không dùng đi dùng lại một nhóm ít từ hoặc một khuôn câu cố định.''';
     return '''
 Hãy tạo JSON để import vào app luyện viết.
 
@@ -668,8 +1876,9 @@ Yêu cầu tạo đoạn:
 - Mỗi đoạn dùng linh hoạt khoảng 4-6 từ/cụm từ khác nhau.
 - Công thức gợi ý: số đoạn = làm tròn lên của tổng số từ vựng / 5. Với danh sách này, số đoạn gợi ý là $suggestedParagraphs.
 - Nếu còn dư từ, phân bổ vào các đoạn cuối.
-- Ưu tiên dùng gần hết từ vựng, nhưng không ép nếu câu bị mất tự nhiên.
+- Phủ hết danh sách từ vựng bằng cách tăng số đoạn khi cần.
 - Mỗi đoạn phải có tổ hợp từ vựng khác nhau, tránh lặp lại nếu chưa cần.
+$coverageRule
 - Nội dung giống TOEIC Part 1: mô tả người, đồ vật, văn phòng, thiết bị, cảnh làm việc.
 - Đoạn tiếng Việt phải tự nhiên, ngắn, thực tế, không văn phong AI.
 - targetText là bản viết đúng bằng ngôn ngữ đích, cùng ý với vietnameseText.
@@ -812,8 +2021,14 @@ Cách trả lời:
     );
     controller.dispose();
     if (imported == null || !mounted) return;
+    _clearDictationPlaybackState();
     setState(() {
       _script = imported;
+      _scriptLibraryGroupName = _sourceMode == 'topic'
+          ? (_topicController.text.trim().isEmpty
+                ? (imported.topic.isEmpty ? 'Chủ đề khác' : imported.topic)
+                : _topicController.text.trim())
+          : (_selectedCourse?.title ?? 'Học phần khác');
       _answerController.clear();
       _grade = null;
       _hints = null;
@@ -1003,12 +2218,16 @@ Cách trả lời:
                       ),
                     )
                     .toList(),
-                onChanged: (value) => setState(() {
-                  _selectedCourseId = value;
-                  _script = null;
-                  _grade = null;
-                  _hints = null;
-                }),
+                onChanged: (value) {
+                  _clearDictationPlaybackState();
+                  setState(() {
+                    _selectedCourseId = value;
+                    _script = null;
+                    _scriptLibraryGroupName = null;
+                    _grade = null;
+                    _hints = null;
+                  });
+                },
               ),
             SizedBox(height: 14),
           ],
@@ -1078,11 +2297,13 @@ Cách trả lời:
               ),
             ],
             onChanged: (value) {
+              _clearDictationPlaybackState();
               setState(() {
                 _targetLanguageOverride = value == '__course__'
                     ? ''
                     : (value ?? '');
                 _script = null;
+                _scriptLibraryGroupName = null;
                 _grade = null;
                 _hints = null;
               });
@@ -1510,6 +2731,434 @@ Cách trả lời:
     return TextSpan(children: spans);
   }
 
+  Widget _buildDictationAudioPanel() {
+    final duration = _dictationDuration;
+    final position = _dictationPosition;
+    final sliderValue = _dictationProgress.clamp(0.0, 1.0).toDouble();
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: _surface2,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: _border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              IconButton.filled(
+                tooltip: _dictationPlaying ? 'Tạm dừng' : 'Phát',
+                onPressed:
+                    _dictationPreparing ? null : _toggleDictationPlayback,
+                style: IconButton.styleFrom(
+                  backgroundColor: _blue,
+                  disabledBackgroundColor: _blue.withOpacity(0.55),
+                  fixedSize: Size(48, 48),
+                ),
+                icon: _dictationPreparing
+                    ? SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.4,
+                          color: Colors.white,
+                        ),
+                      )
+                    : Icon(
+                        _dictationPlaying
+                            ? Icons.pause_rounded
+                            : Icons.play_arrow_rounded,
+                        color: Colors.white,
+                        size: 29,
+                      ),
+              ),
+              SizedBox(width: 10),
+              Expanded(
+                child: SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    activeTrackColor: _blue,
+                    inactiveTrackColor: Color(0xff2a2f3a),
+                    thumbColor: Color(0xff6e80ff),
+                    overlayColor: _blue.withOpacity(0.18),
+                    trackHeight: 3,
+                    thumbShape: RoundSliderThumbShape(
+                      enabledThumbRadius: 6,
+                    ),
+                    overlayShape: RoundSliderOverlayShape(
+                      overlayRadius: 13,
+                    ),
+                  ),
+                  child: Slider(
+                    value: sliderValue,
+                    onChangeStart:
+                        _dictationPreparing ? null : _beginDictationSeek,
+                    onChanged:
+                        _dictationPreparing ? null : _previewDictationSeek,
+                    onChangeEnd:
+                        _dictationPreparing ? null : _endDictationSeek,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: 4),
+          Row(
+            children: [
+              Text(
+                '${_formatDictationDuration(position)} / '
+                '${_formatDictationDuration(duration)}',
+                style: TextStyle(
+                  color: _muted,
+                  fontSize: 12,
+                  fontFeatures: [FontFeature.tabularFigures()],
+                ),
+              ),
+              Spacer(),
+              PopupMenuButton<double>(
+                tooltip: 'Tốc độ phát',
+                initialValue: _dictationSpeed,
+                color: _surface2,
+                onSelected: _setDictationSpeed,
+                itemBuilder: (context) => const [
+                  PopupMenuItem(
+                    value: 0.5,
+                    child: Text(
+                      '0.5x',
+                      style: TextStyle(color: Colors.white),
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 0.75,
+                    child: Text(
+                      '0.75x',
+                      style: TextStyle(color: Colors.white),
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 1.0,
+                    child: Text(
+                      '1.0x',
+                      style: TextStyle(color: Colors.white),
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 1.25,
+                    child: Text(
+                      '1.25x',
+                      style: TextStyle(color: Colors.white),
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 1.5,
+                    child: Text(
+                      '1.5x',
+                      style: TextStyle(color: Colors.white),
+                    ),
+                  ),
+                ],
+                child: Container(
+                  padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Color(0xff171a21),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: _border),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.speed_rounded,
+                        color: Colors.white,
+                        size: 16,
+                      ),
+                      SizedBox(width: 5),
+                      Text(
+                        '${_dictationSpeed.toStringAsFixed(_dictationSpeed % 1 == 0 ? 1 : 2)}x',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _savedWritingTime(DateTime value) {
+    String twoDigits(int number) => number.toString().padLeft(2, '0');
+    return '${twoDigits(value.day)}/${twoDigits(value.month)}/${value.year} '
+        '${twoDigits(value.hour)}:${twoDigits(value.minute)}';
+  }
+
+  Widget _buildWritingLibraryDrawer() {
+    return Drawer(
+      width: math.min(MediaQuery.sizeOf(context).width * 0.88, 390.0),
+      backgroundColor: _surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.horizontal(left: Radius.circular(16)),
+        side: BorderSide(color: _border),
+      ),
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: EdgeInsets.fromLTRB(18, 13, 8, 12),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text('Danh sách đoạn viết', style: _titleStyle(20)),
+                  ),
+                  IconButton(
+                    tooltip: 'Đóng',
+                    onPressed: () =>
+                        _scaffoldKey.currentState?.closeEndDrawer(),
+                    icon: Icon(Icons.close, color: Colors.white),
+                  ),
+                ],
+              ),
+            ),
+            Divider(height: 1, color: _border),
+            Expanded(
+              child: _libraryLoading
+                  ? Center(
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.5,
+                        color: _blue,
+                      ),
+                    )
+                  : _savedWritingGroups.isEmpty
+                  ? Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(28),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            SvgPicture.asset(
+                              'assets/icon/floppy-disk-solid-full.svg',
+                              width: 32,
+                              height: 32,
+                              colorFilter: ColorFilter.mode(
+                                _muted,
+                                BlendMode.srcIn,
+                              ),
+                            ),
+                            SizedBox(height: 12),
+                            Text(
+                              'Chưa có JSON cục bộ.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(color: _muted, height: 1.45),
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
+                  : ListView.builder(
+                      padding: EdgeInsets.fromLTRB(12, 12, 12, 24),
+                      itemCount: _savedWritingGroups.length,
+                      itemBuilder: (context, groupIndex) {
+                        final group = _savedWritingGroups[groupIndex];
+                        final expanded = _expandedLibraryGroups.contains(
+                          group.name,
+                        );
+                        return Container(
+                          margin: EdgeInsets.only(bottom: 8),
+                          decoration: BoxDecoration(
+                            color: Color(0xff0d0f14),
+                            borderRadius: BorderRadius.circular(11),
+                            border: Border.all(color: _border),
+                          ),
+                          child: Column(
+                            children: [
+                              InkWell(
+                                borderRadius: BorderRadius.circular(11),
+                                onTap: () => setState(() {
+                                  if (expanded) {
+                                    _expandedLibraryGroups.remove(group.name);
+                                  } else {
+                                    _expandedLibraryGroups.add(group.name);
+                                  }
+                                }),
+                                child: Padding(
+                                  padding: EdgeInsets.symmetric(
+                                    horizontal: 13,
+                                    vertical: 13,
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          group.name,
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.w600,
+                                            height: 1.3,
+                                          ),
+                                        ),
+                                      ),
+                                      SizedBox(width: 8),
+                                      Text(
+                                        '${group.scripts.length}',
+                                        style: TextStyle(
+                                          color: _muted,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                      SizedBox(width: 9),
+                                      AnimatedRotation(
+                                        turns: expanded ? 0.25 : 0,
+                                        duration: Duration(milliseconds: 170),
+                                        child: SvgPicture.asset(
+                                          'assets/icon/chevron-right-solid-full.svg',
+                                          width: 15,
+                                          height: 15,
+                                          colorFilter: ColorFilter.mode(
+                                            Colors.white,
+                                            BlendMode.srcIn,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                              if (expanded) ...[
+                                Divider(height: 1, color: _border),
+                                Padding(
+                                  padding: EdgeInsets.all(8),
+                                  child: Column(
+                                    children: group.scripts.map((saved) {
+                                      final selected =
+                                          saved.filePath ==
+                                          _selectedSavedScriptPath;
+                                      return Padding(
+                                        padding: EdgeInsets.only(bottom: 6),
+                                        child: _SwipeableWritingJsonTile(
+                                          key: ValueKey(saved.filePath),
+                                          onTap: () => setState(
+                                            () => _selectedSavedScriptPath =
+                                                saved.filePath,
+                                          ),
+                                          onDoubleTap: () =>
+                                              _applySavedWriting(saved),
+                                          onEdit: () =>
+                                              _editSavedWriting(saved),
+                                          onDelete: () =>
+                                              _deleteSavedWriting(saved),
+                                          child: AnimatedContainer(
+                                            duration: Duration(
+                                              milliseconds: 140,
+                                            ),
+                                            padding: EdgeInsets.fromLTRB(
+                                              11,
+                                              9,
+                                              9,
+                                              9,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: selected
+                                                  ? _blue.withOpacity(0.13)
+                                                  : _surface2,
+                                              borderRadius:
+                                                  BorderRadius.circular(9),
+                                              border: Border.all(
+                                                color: selected
+                                                    ? Color(0xff4b7bff)
+                                                    : _border,
+                                                width: selected ? 1.5 : 1,
+                                              ),
+                                            ),
+                                            child: Row(
+                                              children: [
+                                                Expanded(
+                                                  child: Column(
+                                                    crossAxisAlignment:
+                                                        CrossAxisAlignment
+                                                            .start,
+                                                    children: [
+                                                      Text(
+                                                        '${saved.displayName}.json',
+                                                        maxLines: 1,
+                                                        overflow: TextOverflow
+                                                            .ellipsis,
+                                                        style: TextStyle(
+                                                          color: Colors.white,
+                                                          fontWeight:
+                                                              FontWeight.w600,
+                                                        ),
+                                                      ),
+                                                      SizedBox(height: 3),
+                                                      Text(
+                                                        _savedWritingTime(
+                                                          saved.modifiedAt,
+                                                        ),
+                                                        style: TextStyle(
+                                                          color: _muted,
+                                                          fontSize: 11,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                                SizedBox(width: 9),
+                                                Tooltip(
+                                                  message:
+                                                      'Nhấp đúp để áp dụng',
+                                                  child: SvgPicture.asset(
+                                                    'assets/icon/arrow-right-to-bracket-solid-full.svg',
+                                                    width: 19,
+                                                    height: 19,
+                                                    colorFilter:
+                                                        ColorFilter.mode(
+                                                          selected
+                                                              ? Color(
+                                                                  0xff70a0ff,
+                                                                )
+                                                              : Colors.white,
+                                                          BlendMode.srcIn,
+                                                        ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      );
+                                    }).toList(),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+            ),
+            Padding(
+              padding: EdgeInsets.fromLTRB(18, 10, 18, 16),
+              child: Text(
+                '',
+                style: TextStyle(color: _muted, fontSize: 12),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildWorkspace() {
     final script = _script;
     return _panel(
@@ -1582,39 +3231,34 @@ Cách trả lời:
                   style: TextStyle(color: Colors.white, height: 1.55),
                 ),
               ),
-              SizedBox(height: 16),
-            ] else if (_practiceMode == 'dictation') ...[
-              Container(
-                width: double.infinity,
-                padding: EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: _surface2,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: _border),
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Nghe và chép lại đoạn văn', style: _titleStyle(16)),
-                          SizedBox(height: 4),
-                          Text(
-                            '${script.targetLanguageName} · nghe lại không giới hạn',
-                            style: TextStyle(color: _muted),
-                          ),
-                        ],
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Padding(
+                  padding: EdgeInsets.only(top: 5),
+                  child: IconButton(
+                    tooltip: 'Lưu đoạn viết thành JSON cục bộ',
+                    onPressed: _busy ? null : _saveCurrentWritingJson,
+                    style: IconButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      disabledForegroundColor: _muted,
+                      side: BorderSide(color: _border),
+                      backgroundColor: _surface2,
+                    ),
+                    icon: SvgPicture.asset(
+                      'assets/icon/floppy-disk-solid-full.svg',
+                      width: 18,
+                      height: 18,
+                      colorFilter: ColorFilter.mode(
+                        _busy ? _muted : Colors.white,
+                        BlendMode.srcIn,
                       ),
                     ),
-                    IconButton.filled(
-                      onPressed: _playDictation,
-                      style: IconButton.styleFrom(backgroundColor: _blue),
-                      icon: Icon(Icons.volume_up_rounded, color: Colors.white),
-                    ),
-                  ],
+                  ),
                 ),
               ),
+              SizedBox(height: 10),
+            ] else if (_practiceMode == 'dictation') ...[
+              _buildDictationAudioPanel(),
               SizedBox(height: 16),
             ] else ...[
               _label('Điền các từ còn thiếu'),
@@ -1648,28 +3292,46 @@ Cách trả lời:
               ),
               SizedBox(height: 14),
             ],
-            Wrap(
-              spacing: 9,
-              runSpacing: 9,
+            Row(
               children: [
-                _actionButton(
-                  _busyPhase == 'hint' ? 'Đang gợi ý...' : 'Gợi ý',
-                  Icons.lightbulb_outline_rounded,
-                  _busy ? null : _requestHint,
-                  primary: false,
+                IconButton(
+                  tooltip: _busyPhase == 'hint' ? 'Đang gợi ý...' : 'Gợi ý',
+                  onPressed: _busy ? null : _requestHint,
+                  style: IconButton.styleFrom(
+                    backgroundColor: Colors.transparent,
+                    disabledBackgroundColor: Colors.transparent,
+                  ),
+                  icon: Icon(
+                    Icons.lightbulb_outline_rounded,
+                    color: _busy
+                        ? Color(0xff806d25)
+                        : Color(0xffffd43b),
+                    size: 23,
+                  ),
                 ),
+                SizedBox(width: 3),
+                IconButton(
+                  tooltip: 'Xóa bài',
+                  onPressed: _busy ? null : _clearAnswer,
+                  style: IconButton.styleFrom(
+                    backgroundColor: Colors.transparent,
+                    disabledBackgroundColor: Colors.transparent,
+                  ),
+                  icon: Icon(
+                    Icons.delete_outline_rounded,
+                    color: _busy
+                        ? Color(0xff71383d)
+                        : Color(0xffff4f5e),
+                    size: 23,
+                  ),
+                ),
+                Spacer(),
                 _actionButton(
                   _busyPhase == 'grade' ? 'Đang chấm...' : 'Gửi chấm',
                   Icons.fact_check_outlined,
                   _busy ? null : _gradeWriting,
                   primary: false,
                   iconWidget: geminiColorIcon(size: 19),
-                ),
-                _actionButton(
-                  'Xóa bài',
-                  Icons.delete_outline_rounded,
-                  _busy ? null : _clearAnswer,
-                  primary: false,
                 ),
               ],
             ),
@@ -1684,7 +3346,10 @@ Cách trả lời:
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      key: _scaffoldKey,
       backgroundColor: _bg,
+      endDrawer: _buildWritingLibraryDrawer(),
+      endDrawerEnableOpenDragGesture: false,
       appBar: AppBar(
         backgroundColor: _surface,
         foregroundColor: Colors.white,
@@ -1700,6 +3365,19 @@ Cách trả lời:
           style: TextStyle(fontSize: 17, fontWeight: FontWeight.w400),
         ),
         actions: [
+          IconButton(
+            tooltip: 'JSON đã lưu',
+            onPressed: _openWritingLibrary,
+            icon: SvgPicture.asset(
+              'assets/icon/list-ol-solid-full.svg',
+              width: 20,
+              height: 20,
+              colorFilter: ColorFilter.mode(
+                Colors.white,
+                BlendMode.srcIn,
+              ),
+            ),
+          ),
           IconButton(
             tooltip: _showSettings ? 'Ẩn thiết lập' : 'Hiện thiết lập',
             onPressed: () => setState(() => _showSettings = !_showSettings),
