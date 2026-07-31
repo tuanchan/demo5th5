@@ -279,6 +279,11 @@ extension ReviewPracticePageStatePart04 on _ReviewPracticePageState {
 
     await this._finishStudySession();
     this._scrollToFirstWrong();
+    if (mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) this._showResultSheet();
+      });
+    }
   }
 
 
