@@ -4,8 +4,8 @@ enum _DeepLearnQuestionType { multipleChoice, written, flashcard }
 
 /// Chế độ hỏi ngôn ngữ:
 /// - [both]       : xen kẽ ngẫu nhiên hỏi từ vựng hoặc nghĩa (mặc định)
-/// - [termOnly]   : luôn hỏi từ vựng (prompt = định nghĩa, answer = thuật ngữ)
-/// - [definitionOnly]: luôn hỏi nghĩa  (prompt = thuật ngữ,  answer = định nghĩa)
+/// - [termOnly]   : luôn hỏi từ vựng (prompt = thuật ngữ, answer = định nghĩa)
+/// - [definitionOnly]: luôn hỏi nghĩa  (prompt = định nghĩa, answer = thuật ngữ)
 enum _DeepLearnLanguageMode { both, termOnly, definitionOnly }
 
 class _DeepLearnQuestion {
@@ -369,10 +369,10 @@ class _DeepLearnPageState extends State<DeepLearnPage> {
     final type = types[_random.nextInt(types.length)];
     final promptIsDefinition = switch (_languageMode) {
       _DeepLearnLanguageMode.both => _random.nextBool(),
-      // Hỏi nghĩa: hiện thuật ngữ → trả lời là định nghĩa
-      _DeepLearnLanguageMode.definitionOnly => false,
-      // Hỏi từ vựng: hiện định nghĩa → trả lời là thuật ngữ
-      _DeepLearnLanguageMode.termOnly => true,
+      // Nghĩa: hiện định nghĩa → trả lời là thuật ngữ
+      _DeepLearnLanguageMode.definitionOnly => true,
+      // Từ vựng: hiện thuật ngữ → trả lời là định nghĩa
+      _DeepLearnLanguageMode.termOnly => false,
     };
     final question = _DeepLearnQuestion(
       card: card,
