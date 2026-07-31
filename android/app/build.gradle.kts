@@ -5,6 +5,16 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+val androidKeystorePath = System.getenv("ANDROID_KEYSTORE_PATH")
+val androidKeystorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+val androidKeyAlias = System.getenv("ANDROID_KEY_ALIAS")
+val androidKeyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+val hasReleaseSigning =
+    !androidKeystorePath.isNullOrBlank() &&
+        !androidKeystorePassword.isNullOrBlank() &&
+        !androidKeyAlias.isNullOrBlank() &&
+        !androidKeyPassword.isNullOrBlank()
+
 android {
     namespace = "com.example.flutterflashcard"
     compileSdk = flutter.compileSdkVersion
@@ -32,11 +42,26 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(androidKeystorePath!!)
+                storePassword = androidKeystorePassword
+                keyAlias = androidKeyAlias
+                keyPassword = androidKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig =
+                if (hasReleaseSigning) {
+                    signingConfigs.getByName("release")
+                } else {
+                    // Chỉ dùng cho build local. CI bắt buộc cung cấp release keystore cố định.
+                    signingConfigs.getByName("debug")
+                }
         }
     }
 }

@@ -1397,6 +1397,18 @@ Schema: {"score":82,"overallFeedback":"nhận xét","suggestedRewrite":"bản vi
           .clamp(-10, 10)
           .toInt();
 
+  String _windowsVoiceHint(String languageCode) {
+    final normalized = languageCode.toLowerCase();
+    if (normalized.startsWith('zh')) return 'Chinese';
+    if (normalized.startsWith('ja')) return 'Japanese';
+    if (normalized.startsWith('ko')) return 'Korean';
+    if (normalized.startsWith('fr')) return 'French';
+    if (normalized.startsWith('de')) return 'German';
+    if (normalized.startsWith('es')) return 'Spanish';
+    if (normalized.startsWith('vi')) return 'Vietnamese';
+    return 'English';
+  }
+
   void _stopWindowsSpeechProcess() {
     _dictationWindowsSpeechGeneration++;
     final process = _dictationWindowsSpeechProcess;
@@ -1416,26 +1428,28 @@ Schema: {"score":82,"overallFeedback":"nhận xét","suggestedRewrite":"bản vi
     if (value.isEmpty) return;
     _stopWindowsSpeechProcess();
     final generation = _dictationWindowsSpeechGeneration;
-    final encodedLanguage = base64Encode(utf8.encode(languageCode.trim()));
+    final encodedVoiceHint = base64Encode(
+      utf8.encode(_windowsVoiceHint(languageCode)),
+    );
     final command = '''
 [Console]::InputEncoding = [System.Text.UTF8Encoding]::new(\$false);
 \$text = [Console]::In.ReadToEnd();
-\$language = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$encodedLanguage'));
-Add-Type -AssemblyName System.Speech;
-\$speaker = New-Object System.Speech.Synthesis.SpeechSynthesizer;
+\$voiceHint = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$encodedVoiceHint'));
+\$speaker = New-Object -ComObject SAPI.SpVoice;
 try {
-  \$voice = \$speaker.GetInstalledVoices() |
-    Where-Object { \$_.Enabled -and \$_.VoiceInfo.Culture.Name -eq \$language } |
-    Select-Object -First 1;
-  if (\$null -ne \$voice) {
-    \$speaker.SelectVoice(\$voice.VoiceInfo.Name);
+  \$voices = \$speaker.GetVoices();
+  for (\$index = 0; \$index -lt \$voices.Count; \$index++) {
+    \$candidate = \$voices.Item(\$index);
+    if (\$candidate.GetDescription().IndexOf(\$voiceHint, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+      \$speaker.Voice = \$candidate;
+      break;
+    }
   }
   \$speaker.Rate = $_windowsSpeechRate;
   \$speaker.Volume = 100;
-  \$speaker.SetOutputToDefaultAudioDevice();
-  \$speaker.Speak(\$text);
+  [void]\$speaker.Speak(\$text);
 } finally {
-  \$speaker.Dispose();
+  [void][Runtime.InteropServices.Marshal]::ReleaseComObject(\$speaker);
 }
 ''';
     try {

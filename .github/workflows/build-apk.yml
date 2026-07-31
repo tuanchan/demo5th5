@@ -19,6 +19,11 @@ jobs:
   build-apk:
     name: Build APK
     runs-on: ubuntu-latest
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
     steps:
       - name: Checkout source code
@@ -52,20 +57,49 @@ jobs:
       - name: Analyze project
         run: flutter analyze || true
 
-      - name: Build debug APK
-        run: flutter build apk --debug
+      - name: Build debug APK for pull request validation
+        if: github.event_name == 'pull_request'
+        run: flutter build apk --debug --build-number="${GITHUB_RUN_NUMBER}"
 
-      - name: Build release APK
-        run: flutter build apk --release
+      - name: Configure stable Android release signing
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          if [[ -z "$ANDROID_KEYSTORE_BASE64" ||
+                -z "$ANDROID_KEYSTORE_PASSWORD" ||
+                -z "$ANDROID_KEY_ALIAS" ||
+                -z "$ANDROID_KEY_PASSWORD" ]]; then
+            echo "::error::Missing Android signing secrets. Configure ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD."
+            exit 1
+          fi
+          KEYSTORE_FILE="$RUNNER_TEMP/flutterflashcard-release.jks"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_FILE"
+          if [[ ! -s "$KEYSTORE_FILE" ]]; then
+            echo "::error::Decoded Android keystore is empty."
+            exit 1
+          fi
+          echo "ANDROID_KEYSTORE_PATH=$KEYSTORE_FILE" >> "$GITHUB_ENV"
 
-      - name: Upload debug APK
+      - name: Build signed release APK
+        if: github.event_name != 'pull_request'
+        run: flutter build apk --release --build-number="${GITHUB_RUN_NUMBER}"
+
+      - name: Verify release APK signature
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          if [[ -z "$APKSIGNER" ]]; then
+            echo "::error::Android apksigner was not found."
+            exit 1
+          fi
+          "$APKSIGNER" verify --verbose --print-certs build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Upload signed release APK
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
-          name: flutterflashcard-debug-apk
-          path: build/app/outputs/flutter-apk/app-debug.apk
-
-      - name: Upload release APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: flutterflashcard-release-apk
+          name: flutterflashcard-release-apk-${{ github.run_number }}
           path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 30
