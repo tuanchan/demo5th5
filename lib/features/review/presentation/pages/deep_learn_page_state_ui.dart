@@ -1,4 +1,4 @@
-part of flutterflashcard_main;
+﻿part of flutterflashcard_main;
 
 extension _DeepLearnPageStateUi on _DeepLearnPageState {
   static const Color _bg = Color(0xff000000);
@@ -537,6 +537,58 @@ extension _DeepLearnPageStateUi on _DeepLearnPageState {
                   _settingToggle(Icons.checklist, 'Trắc nghiệm', _multipleChoice, () => _toggleType(_DeepLearnQuestionType.multipleChoice)),
                   _settingToggle(Icons.edit_outlined, 'Tự luận', _written, () => _toggleType(_DeepLearnQuestionType.written)),
                   _settingToggle(Icons.style_outlined, 'Thẻ ghi nhớ', _flashcard, () => _toggleType(_DeepLearnQuestionType.flashcard)),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              decoration: BoxDecoration(
+                color: _surface,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: _border),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.translate_outlined,
+                      color: Color(0xffdce3ff), size: 20),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Text(
+                      'Loại ngôn ngữ',
+                      style: TextStyle(
+                          color: Colors.white, fontWeight: FontWeight.w900),
+                    ),
+                  ),
+                  DropdownButtonHideUnderline(
+                    child: DropdownButton<_DeepLearnLanguageMode>(
+                      value: _languageMode,
+                      dropdownColor: const Color(0xff080719),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14,
+                      ),
+                      borderRadius: BorderRadius.circular(8),
+                      items: const [
+                        DropdownMenuItem(
+                          value: _DeepLearnLanguageMode.both,
+                          child: Text('Cả hai'),
+                        ),
+                        DropdownMenuItem(
+                          value: _DeepLearnLanguageMode.termOnly,
+                          child: Text('Từ vựng'),
+                        ),
+                        DropdownMenuItem(
+                          value: _DeepLearnLanguageMode.definitionOnly,
+                          child: Text('Nghĩa'),
+                        ),
+                      ],
+                      onChanged: (mode) {
+                        if (mode != null) _setLanguageMode(mode);
+                      },
+                    ),
+                  ),
                 ],
               ),
             ),

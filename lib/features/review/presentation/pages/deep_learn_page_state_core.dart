@@ -2,6 +2,12 @@ part of flutterflashcard_main;
 
 enum _DeepLearnQuestionType { multipleChoice, written, flashcard }
 
+/// Chế độ hỏi ngôn ngữ:
+/// - [both]       : xen kẽ ngẫu nhiên hỏi từ vựng hoặc nghĩa (mặc định)
+/// - [termOnly]   : luôn hỏi từ vựng (prompt = định nghĩa, answer = thuật ngữ)
+/// - [definitionOnly]: luôn hỏi nghĩa  (prompt = thuật ngữ,  answer = định nghĩa)
+enum _DeepLearnLanguageMode { both, termOnly, definitionOnly }
+
 class _DeepLearnQuestion {
   final StudyCardItem card;
   final _DeepLearnQuestionType type;
@@ -77,6 +83,7 @@ class _DeepLearnPageState extends State<DeepLearnPage> {
   bool _correctSoundEnabled = true;
   bool _completed = false;
   bool _didRequestSrsSync = false;
+  _DeepLearnLanguageMode _languageMode = _DeepLearnLanguageMode.both;
   bool _correctSoundReady = false;
   Future<void>? _correctSoundPreparation;
   File? _windowsCorrectSoundFile;
@@ -211,7 +218,32 @@ class _DeepLearnPageState extends State<DeepLearnPage> {
     _flashcard = await AppSettingsStore.getBool('deepLearn.flashcard') ?? false;
     _correctSoundEnabled =
         await AppSettingsStore.getBool('deepLearn.correctSoundEnabled') ?? true;
+    final langModeRaw =
+        await AppSettingsStore.getString('deepLearn.languageMode');
+    _languageMode = _parseLangMode(langModeRaw);
     if (!_multipleChoice && !_written && !_flashcard) _multipleChoice = true;
+  }
+
+  static _DeepLearnLanguageMode _parseLangMode(String? raw) {
+    switch (raw) {
+      case 'termOnly':
+        return _DeepLearnLanguageMode.termOnly;
+      case 'definitionOnly':
+        return _DeepLearnLanguageMode.definitionOnly;
+      default:
+        return _DeepLearnLanguageMode.both;
+    }
+  }
+
+  static String _langModeToString(_DeepLearnLanguageMode mode) {
+    switch (mode) {
+      case _DeepLearnLanguageMode.termOnly:
+        return 'termOnly';
+      case _DeepLearnLanguageMode.definitionOnly:
+        return 'definitionOnly';
+      case _DeepLearnLanguageMode.both:
+        return 'both';
+    }
   }
 
   void _createState(List<StudyCardItem> cards) {
@@ -273,6 +305,7 @@ class _DeepLearnPageState extends State<DeepLearnPage> {
       _multipleChoice = settings['mc'] != false;
       _written = settings['write'] != false;
       _flashcard = settings['flash'] == true;
+      _languageMode = _parseLangMode(settings['langMode'] as String?);
       if (!_multipleChoice && !_written && !_flashcard) _multipleChoice = true;
       _completed = _correct >= _total && _total > 0;
       return true;
@@ -291,7 +324,7 @@ class _DeepLearnPageState extends State<DeepLearnPage> {
         'mastered': _mastered.toList(),
         'wrongMap': _wrongMap.map((key, value) => MapEntry('$key', value)),
         'starred': _starred.toList(),
-        'settings': {'mc': _multipleChoice, 'write': _written, 'flash': _flashcard},
+        'settings': {'mc': _multipleChoice, 'write': _written, 'flash': _flashcard, 'langMode': _langModeToString(_languageMode)},
       }),
     );
   }
@@ -334,7 +367,13 @@ class _DeepLearnPageState extends State<DeepLearnPage> {
       if (_flashcard) _DeepLearnQuestionType.flashcard,
     ];
     final type = types[_random.nextInt(types.length)];
-    final promptIsDefinition = _random.nextBool();
+    final promptIsDefinition = switch (_languageMode) {
+      _DeepLearnLanguageMode.both => _random.nextBool(),
+      // Hỏi nghĩa: hiện thuật ngữ → trả lời là định nghĩa
+      _DeepLearnLanguageMode.definitionOnly => false,
+      // Hỏi từ vựng: hiện định nghĩa → trả lời là thuật ngữ
+      _DeepLearnLanguageMode.termOnly => true,
+    };
     final question = _DeepLearnQuestion(
       card: card,
       type: type,
@@ -799,6 +838,13 @@ class _DeepLearnPageState extends State<DeepLearnPage> {
     AppSettingsStore.setBool('deepLearn.multipleChoice', _multipleChoice);
     AppSettingsStore.setBool('deepLearn.written', _written);
     AppSettingsStore.setBool('deepLearn.flashcard', _flashcard);
+    _saveState();
+  }
+
+  void _setLanguageMode(_DeepLearnLanguageMode mode) {
+    if (_languageMode == mode) return;
+    setState(() => _languageMode = mode);
+    AppSettingsStore.setString('deepLearn.languageMode', _langModeToString(mode));
     _saveState();
   }
 
