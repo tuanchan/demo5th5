@@ -122,7 +122,11 @@ class _StatisticsPageState extends State<StatisticsPage> {
     _srsManagerFuture = this._loadSrsEditorItems();
     _statisticsSyncSubscription = SupabaseSyncService.instance.syncCompleted
         .listen((result) {
-          if (mounted && result.pulled > 0) this.reloadStatistics();
+          if (mounted &&
+              result.pulled > 0 &&
+              !_isDashboardRefreshing) {
+            this.reloadStatistics();
+          }
         });
     _statisticsRealtimeSubscription =
         SupabaseSyncService.instance.remoteDataChanged.listen((_) {

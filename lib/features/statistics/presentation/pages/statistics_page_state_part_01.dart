@@ -21,7 +21,7 @@ extension StatisticsPageStatePart01 on _StatisticsPageState {
             if (data == null) return this._buildError('Không có dữ liệu thống kê');
 
             return RefreshIndicator(
-              onRefresh: () async => this.reloadStatistics(),
+              onRefresh: this._refreshDashboard,
               color: _dashBlue,
               backgroundColor: _dashPanel,
               child: CustomScrollView(

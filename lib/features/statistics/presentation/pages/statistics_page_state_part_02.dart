@@ -442,9 +442,39 @@ extension StatisticsPageStatePart02 on _StatisticsPageState {
       _courseSrsDateDraft.clear();
     });
 
-    final statisticsFuture = this.loadStatistics();
-    final srsManagerFuture = this._loadSrsEditorItems();
+    String? syncError;
+    if (SupabaseConfig.isLoggedIn) {
+      try {
+        // Never replace SQLite with the cloud snapshot while an offline SRS
+        // mutation is still waiting to be uploaded. That would make the latest
+        // answer on this device disappear.
+        final pendingResult =
+            await SupabaseSyncService.instance.retryPendingOutbox();
+        if (pendingResult?.hasError == true) {
+          syncError = pendingResult!.error;
+        } else {
+          await AppDatabase.instance.ensureSyncOutboxTable();
+          final db = await AppDatabase.instance.database;
+          final pendingRows = await db.query(
+            'sync_outbox',
+            columns: const ['kind'],
+            limit: 1,
+          );
+          if (pendingRows.isNotEmpty) {
+            syncError = 'Vẫn còn thay đổi local đang chờ tải lên';
+          } else {
+            final pullResult = await SupabaseSyncService.instance.syncAll();
+            if (pullResult.hasError) syncError = pullResult.error;
+          }
+        }
+      } catch (error) {
+        syncError = error.toString();
+      }
+    }
+
     try {
+      final statisticsFuture = this.loadStatistics();
+      final srsManagerFuture = this._loadSrsEditorItems();
       await Future.wait([statisticsFuture, srsManagerFuture]);
       if (!mounted) return;
       setState(() {
@@ -455,8 +485,20 @@ extension StatisticsPageStatePart02 on _StatisticsPageState {
         _future = statisticsFuture;
         _srsManagerFuture = srsManagerFuture;
       });
+      if (syncError != null) {
+        showAppToast(
+          context,
+          'Chưa đồng bộ được lịch SRS. Đang hiển thị dữ liệu trên thiết bị.',
+        );
+      }
     } catch (error) {
       debugPrint('REFRESH SRS DASHBOARD ERROR: $error');
+      if (mounted) {
+        showAppToast(
+          context,
+          'Không thể đồng bộ lịch SRS. Vui lòng kiểm tra kết nối mạng.',
+        );
+      }
     } finally {
       if (mounted) setState(() => _isDashboardRefreshing = false);
     }
