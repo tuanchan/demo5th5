@@ -350,7 +350,6 @@ $cardsJson
         });
         if (_finished) {
           this._finishStudySession();
-          this._showResultSheet();
         } else {
           if (_currentEssayIndex % 3 == 2) {
             this._playListeningAudio();
@@ -400,7 +399,6 @@ $cardsJson
       return;
     }
 
-    Navigator.pop(context);
     final firstWrong = wrongCards.first;
     final firstWrongIndex = _quizCards.indexWhere((e) => e.id == firstWrong.id);
 

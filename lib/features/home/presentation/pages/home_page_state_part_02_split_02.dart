@@ -1,56 +1,78 @@
 part of flutterflashcard_main;
 
 extension HomePageStatePart02Split02 on _HomePageState {
-  Widget _numberStepper({
+  Widget _questionCountSpinner({
+    required FixedExtentScrollController controller,
     required int value,
     required int min,
     required int max,
     required ValueChanged<int> onChanged,
   }) {
+    const itemHeight = 38.0;
+
     return Container(
-      height: 46,
-      padding: EdgeInsets.only(left: 12, right: 5),
+      height: itemHeight * 3,
+      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: Color(0x0fffffff),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: Color(0xff2a334a)),
       ),
-      child: Row(
+      child: Stack(
+        alignment: Alignment.center,
         children: [
-          Expanded(
-            child: Text(
-              '$value',
-              style: TextStyle(
-                color: Color(0xffeaf1ff),
-                fontWeight: FontWeight.w400,
-                fontSize: 16,
+          IgnorePointer(
+            child: Container(
+              height: itemHeight,
+              margin: EdgeInsets.symmetric(horizontal: 8),
+              decoration: BoxDecoration(
+                color: Color(0x263e5cff),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Color(0xff3e5cff)),
               ),
             ),
           ),
-          Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              InkWell(
-                onTap: value >= max ? null : () => onChanged(value + 1),
-                child: Icon(
-                  Icons.arrow_drop_up_rounded,
-                  size: 18,
-                  color: value >= max
-                      ? Color(0xff59657f)
-                      : Color(0xffeaf1ff),
+          ListWheelScrollView.useDelegate(
+            controller: controller,
+            itemExtent: itemHeight,
+            diameterRatio: 1.8,
+            perspective: 0.003,
+            physics: ItemScrollPhysics(itemHeight: itemHeight),
+            onSelectedItemChanged: (index) => onChanged(min + index),
+            childDelegate: ListWheelChildBuilderDelegate(
+              childCount: max - min + 1,
+              builder: (context, index) {
+                final questionCount = min + index;
+                final selected = questionCount == value;
+                return Center(
+                  child: Text(
+                    '$questionCount',
+                    style: TextStyle(
+                      color: selected
+                          ? Color(0xfff8fbff)
+                          : Color(0xff71809f),
+                      fontWeight: selected
+                          ? FontWeight.w700
+                          : FontWeight.w400,
+                      fontSize: selected ? 18 : 15,
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          Positioned(
+            right: 12,
+            child: IgnorePointer(
+              child: Text(
+                '/ $max',
+                style: TextStyle(
+                  color: Color(0xff8e9bb8),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w400,
                 ),
               ),
-              InkWell(
-                onTap: value <= min ? null : () => onChanged(value - 1),
-                child: Icon(
-                  Icons.arrow_drop_down_rounded,
-                  size: 18,
-                  color: value <= min
-                      ? Color(0xff59657f)
-                      : Color(0xffeaf1ff),
-                ),
-              ),
-            ],
+            ),
           ),
         ],
       ),

@@ -34,11 +34,7 @@ extension ReviewPracticePageStatePart07 on _ReviewPracticePageState {
                   ),
                   Spacer(),
                   if (_sentenceMode)
-                    Icon(
-                      Icons.auto_awesome_rounded,
-                      size: 21,
-                      color: Color(0xff4257ff),
-                    ),
+                    geminiColorIcon(size: 21),
                 ],
               ),
               SizedBox(height: 18),
@@ -634,12 +630,10 @@ extension ReviewPracticePageStatePart07 on _ReviewPracticePageState {
             child: Align(
               alignment: Alignment.centerRight,
               child: this._solidButton(
-                text: _finished ? 'Xem kết quả' : 'Nộp bài',
+                text: 'Nộp bài',
                 icon: Icons.flag_rounded,
                 color: Color(0xff4257ff),
-                onTap: _finished
-                    ? _showResultSheet
-                    : this._submitMultipleChoice,
+                onTap: this._submitMultipleChoice,
               ),
             ),
           );

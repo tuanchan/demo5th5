@@ -106,27 +106,14 @@ extension CreateCourseImportPart on _CreateCoursePageState {
           continue;
         }
 
-        // Check duplicate course name
-        final existed = await db.query(
-          'courses',
-          columns: ['id'],
-          where: 'lower(trim(title)) = ? AND deletedAt IS NULL',
-          whereArgs: [courseName.trim().toLowerCase()],
-          limit: 1,
+        // Never discard a valid file because its course name already exists.
+        // Resolve conflicts against both SQLite and this import batch.
+        final resolvedCourseName = await _uniqueTxtImportCourseName(
+          db: db,
+          originalName: courseName,
+          reservedNames: pendingCourseNames,
         );
-
-        if (existed.isNotEmpty) {
-          skippedNames.add(courseName);
-          continue;
-        }
-
-        // Two files from different folders may still have the same filename.
-        // They both pass the database check above before either one is saved,
-        // so de-duplicate the current import batch as well.
-        if (!pendingCourseNames.add(courseName.trim().toLowerCase())) {
-          skippedNames.add(courseName);
-          continue;
-        }
+        pendingCourseNames.add(resolvedCourseName.toLowerCase());
 
         final topicName = selectedTopicId != null
             ? availableTopics
@@ -141,10 +128,10 @@ extension CreateCourseImportPart on _CreateCoursePageState {
                   ),
                 )
                 .name
-            : courseName; // Auto-created topic uses the courseName
+            : resolvedCourseName; // Auto-created topic uses the resolved name
 
         pendingSets.add(_PendingTxtImportSet(
-          courseName: courseName,
+          courseName: resolvedCourseName,
           items: items,
           topicName: topicName,
           languageName: selectedLanguage,
@@ -155,7 +142,7 @@ extension CreateCourseImportPart on _CreateCoursePageState {
         this.showMessage(
           "Không có học phần nào hợp lệ để import" +
               (skippedNames.isNotEmpty
-                  ? " (bỏ qua ${skippedNames.length} trùng hoặc rỗng)"
+                  ? " (bỏ qua ${skippedNames.length} file rỗng hoặc không hợp lệ)"
                   : ""),
         );
         return;
@@ -192,6 +179,38 @@ extension CreateCourseImportPart on _CreateCoursePageState {
     } catch (e) {
       this.showMessage("Import thất bại: $e");
       debugPrint("IMPORT TXT ERROR: $e");
+    }
+  }
+
+  Future<String> _uniqueTxtImportCourseName({
+    required Database db,
+    required String originalName,
+    required Set<String> reservedNames,
+  }) async {
+    final baseName = originalName.trim();
+    var candidate = baseName;
+    var number = 1;
+
+    while (true) {
+      final normalized = candidate.toLowerCase();
+      final existsInBatch = reservedNames.contains(normalized);
+      final existsInDatabase = existsInBatch
+          ? true
+          : (await db.query(
+              'courses',
+              columns: ['id'],
+              where: 'lower(trim(title)) = ? AND deletedAt IS NULL',
+              whereArgs: [normalized],
+              limit: 1,
+            ))
+              .isNotEmpty;
+      if (!existsInDatabase) return candidate;
+
+      number++;
+      final suffix = ' (số $number)';
+      final maxBaseLength = math.max(1, 80 - suffix.length).toInt();
+      final cutAt = math.min(baseName.length, maxBaseLength).toInt();
+      candidate = '${baseName.substring(0, cutAt)}$suffix';
     }
   }
 
@@ -997,7 +1016,7 @@ class _TxtImportPreviewDialogState extends State<_TxtImportPreviewDialog> {
           SizedBox(width: 8),
           Expanded(
             child: Text(
-              "Bỏ qua ${widget.skippedNames.length} file trùng tên hoặc không có thẻ: ${widget.skippedNames.join(', ')}",
+              "Bỏ qua ${widget.skippedNames.length} file rỗng, lỗi hoặc không có thẻ: ${widget.skippedNames.join(', ')}",
               style: TextStyle(
                 color: AppColors.text,
                 fontSize: 13,

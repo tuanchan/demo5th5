@@ -22,27 +22,31 @@ extension CreateCoursePageStatePart01 on _CreateCoursePageState {
                   bottom: BorderSide(color: border),
                 ),
               ),
-              child: Stack(
-                alignment: Alignment.center,
+              child: Row(
                 children: [
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: TextButton.icon(
-                      onPressed: () => Navigator.pop(context),
-                      icon: Icon(Icons.arrow_back_rounded, size: 18),
-                      label: Text('Trang chủ'),
-                      style: TextButton.styleFrom(
-                        foregroundColor: text,
-                        textStyle: TextStyle(fontWeight: FontWeight.w900),
-                      ),
+                  TextButton.icon(
+                    onPressed: () => Navigator.pop(context),
+                    icon: Icon(Icons.arrow_back_rounded, size: 18),
+                    label: Text('Trang chủ'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: text,
+                      padding: EdgeInsets.symmetric(horizontal: 8),
+                      textStyle: TextStyle(fontWeight: FontWeight.w900),
                     ),
                   ),
-                  Text(
-                    'Tạo học phần',
-                    style: TextStyle(
-                      color: text,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w900,
+                  SizedBox(width: 14),
+                  Container(width: 1, height: 24, color: border),
+                  SizedBox(width: 14),
+                  Expanded(
+                    child: Text(
+                      'Tạo học phần',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: text,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w900,
+                      ),
                     ),
                   ),
                 ],
@@ -69,14 +73,14 @@ extension CreateCoursePageStatePart01 on _CreateCoursePageState {
                             if (compact) ...[
                               this._buildCourseTitleField(),
                               SizedBox(height: 12),
-                              this._buildCreateCourseActions(compact: true),
+                              this._buildCreateCourseActions(),
                             ] else
                               Row(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Expanded(child: this._buildCourseTitleField()),
                                   SizedBox(width: 12),
-                                  this._buildCreateCourseActions(compact: false),
+                                  this._buildCreateCourseActions(),
                                 ],
                               ),
                             SizedBox(height: 22),
@@ -158,6 +162,7 @@ extension CreateCoursePageStatePart01 on _CreateCoursePageState {
                             ),
                             SizedBox(height: 22),
                             Row(
+                              key: _createCoursePreviewKey,
                               children: [
                                 Text(
                                   'XEM TRƯỚC',
@@ -223,62 +228,82 @@ extension CreateCoursePageStatePart01 on _CreateCoursePageState {
     );
   }
 
-  Widget _buildCreateCourseActions({required bool compact}) {
+  Widget _buildCreateCourseActions() {
     final buttons = <Widget>[
       this._buildCreateCourseAction(
         label: 'Nhập bảng',
-        icon: Icons.grid_on_rounded,
+        icon: Icon(Icons.grid_on_rounded, size: 19),
         onTap: this.openManualTableDialog,
       ),
       this._buildCreateCourseAction(
         label: 'Import TXT',
-        icon: Icons.file_open_rounded,
+        icon: SvgPicture.asset(
+          'assets/icon/txt-file-symbol-svgrepo-com.svg',
+          width: 19,
+          height: 19,
+          colorFilter: ColorFilter.mode(Colors.white, BlendMode.srcIn),
+        ),
         onTap: this.importTxtFiles,
       ),
       this._buildCreateCourseAction(
         label: 'Xem trước',
-        icon: Icons.visibility_outlined,
-        onTap: this.updatePreview,
+        icon: Icon(Icons.visibility_outlined, size: 20),
+        onTap: () => this.updatePreview(scrollToPreview: true),
       ),
       this._buildCreateCourseAction(
         label: 'Lưu',
-        icon: Icons.save_outlined,
+        icon: SvgPicture.asset(
+          'assets/icon/floppy-disk-solid-full.svg',
+          width: 18,
+          height: 18,
+          colorFilter: ColorFilter.mode(Colors.white, BlendMode.srcIn),
+        ),
         primary: true,
         onTap: this.saveCourse,
       ),
     ];
 
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      alignment: compact ? WrapAlignment.start : WrapAlignment.end,
-      children: buttons,
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var index = 0; index < buttons.length; index++) ...[
+          if (index > 0) SizedBox(width: 8),
+          buttons[index],
+        ],
+      ],
     );
   }
 
   Widget _buildCreateCourseAction({
     required String label,
-    required IconData icon,
+    required Widget icon,
     required VoidCallback onTap,
     bool primary = false,
   }) {
-    return SizedBox(
-      height: 44,
-      child: ElevatedButton.icon(
-        onPressed: onTap,
-        icon: Icon(icon, size: 17),
-        label: Text(label),
-        style: ElevatedButton.styleFrom(
-          elevation: 0,
-          backgroundColor:
-              primary ? Color(0xff4268ff) : Color(0xff0b0d12),
-          foregroundColor: Color(0xfff8fbff),
-          side: primary ? BorderSide.none : BorderSide(color: Color(0xff242a36)),
-          padding: EdgeInsets.symmetric(horizontal: 15),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
+    return Tooltip(
+      message: label,
+      child: Semantics(
+        button: true,
+        label: label,
+        child: SizedBox.square(
+          dimension: 44,
+          child: ElevatedButton(
+            onPressed: onTap,
+            style: ElevatedButton.styleFrom(
+              elevation: 0,
+              backgroundColor:
+                  primary ? Color(0xff4268ff) : Color(0xff0b0d12),
+              foregroundColor: Color(0xfff8fbff),
+              side: primary
+                  ? BorderSide.none
+                  : BorderSide(color: Color(0xff242a36)),
+              padding: EdgeInsets.zero,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            child: icon,
           ),
-          textStyle: TextStyle(fontWeight: FontWeight.w800),
         ),
       ),
     );
@@ -782,10 +807,22 @@ extension CreateCoursePageStatePart01 on _CreateCoursePageState {
   }
 
 
-  void updatePreview() {
+  void updatePreview({bool scrollToPreview = false}) {
     setState(() {
       previewItems = this.parseCards();
       showPreview = true;
+    });
+    if (!scrollToPreview) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final previewContext = _createCoursePreviewKey.currentContext;
+      if (previewContext == null) return;
+      Scrollable.ensureVisible(
+        previewContext,
+        alignment: 0.08,
+        duration: Duration(milliseconds: 360),
+        curve: Curves.easeOutCubic,
+      );
     });
   }
 

@@ -65,27 +65,44 @@ extension ReviewPracticePageStatePart06 on _ReviewPracticePageState {
     required bool value,
     required ValueChanged<bool> onChanged,
   }) {
-    return Padding(
-      padding: EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              text,
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w400,
-                fontSize: 15,
+    return GestureDetector(
+      onTap: () => onChanged(!value),
+      behavior: HitTestBehavior.opaque,
+      child: Padding(
+        padding: EdgeInsets.symmetric(vertical: 5),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                text,
+                style: TextStyle(
+                  color: Color(0xffeaf1ff),
+                  fontWeight: FontWeight.w400,
+                  fontSize: 15,
+                ),
               ),
             ),
-          ),
-          Switch(
-            value: value,
-            activeColor: Colors.white,
-            activeTrackColor: Color(0xff4257ff),
-            onChanged: onChanged,
-          ),
-        ],
+            AnimatedContainer(
+              duration: Duration(milliseconds: 180),
+              width: 56,
+              height: 30,
+              padding: EdgeInsets.all(2),
+              alignment: value ? Alignment.centerRight : Alignment.centerLeft,
+              decoration: BoxDecoration(
+                color: value ? Color(0xf23e5cff) : Color(0x8094a3b8),
+                borderRadius: BorderRadius.circular(99),
+              ),
+              child: Container(
+                width: 26,
+                height: 26,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -94,6 +111,7 @@ extension ReviewPracticePageStatePart06 on _ReviewPracticePageState {
   Widget _solidButton({
     required String text,
     required IconData icon,
+    bool showIcon = true,
     required Color color,
     required VoidCallback onTap,
   }) {
@@ -110,8 +128,10 @@ extension ReviewPracticePageStatePart06 on _ReviewPracticePageState {
           mainAxisSize: MainAxisSize.min,
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: Colors.white, size: 20),
-            SizedBox(width: 7),
+            if (showIcon) ...[
+              Icon(icon, color: Colors.white, size: 20),
+              SizedBox(width: 7),
+            ],
             Flexible(
               child: Text(
                 text,
@@ -214,11 +234,7 @@ extension ReviewPracticePageStatePart06 on _ReviewPracticePageState {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(
-            Icons.auto_awesome_rounded,
-            size: 21,
-            color: Color(0xff4257ff),
-          ),
+          geminiColorIcon(size: 21),
           SizedBox(width: 10),
           Expanded(
             child: Text(

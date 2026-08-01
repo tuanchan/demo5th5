@@ -78,9 +78,6 @@ extension ReviewPracticeMatchingPairs on _ReviewPracticePageState {
 
     if (_finished) {
       await this._finishStudySession();
-      Future.delayed(const Duration(milliseconds: 700), () {
-        if (mounted) this._showResultSheet();
-      });
     }
   }
 

@@ -46,7 +46,9 @@ extension ReviewPracticePageStatePart01 on _ReviewPracticePageState {
               children: [
                 this._buildReviewStandardHeader(context),
                 Expanded(
-                  child: _isGeneratingSentenceQuiz
+                  child: _finished
+                      ? this._buildResultActivity()
+                      : _isGeneratingSentenceQuiz
                       ? this._buildSentenceGeneratingMode()
                       : (_isGeminiTextGrading
                             ? this._buildGeminiTextGradingMode()
@@ -134,45 +136,6 @@ extension ReviewPracticePageStatePart01 on _ReviewPracticePageState {
                 ),
               ],
             ),
-            if (!_showSetup &&
-                _quizCards.isNotEmpty &&
-                _matchingPairs &&
-                _finished)
-              Positioned(
-                left: 14,
-                right: 14,
-                bottom: 14 + MediaQuery.viewPaddingOf(context).bottom,
-                child: Container(
-                  padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: Color(0xf20b0c10),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: Color(0xff242832)),
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: this._outlineButton(
-                          text: 'Thoát',
-                          icon: Icons.logout_rounded,
-                          onTap: () {
-                            Navigator.pop(context);
-                          },
-                        ),
-                      ),
-                      SizedBox(width: 10),
-                      Expanded(
-                        child: this._solidButton(
-                          text: 'Ôn lại',
-                          icon: Icons.refresh_rounded,
-                          color: Color(0xff4257ff),
-                          onTap: this._restart,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
           ],
         ),
       ),

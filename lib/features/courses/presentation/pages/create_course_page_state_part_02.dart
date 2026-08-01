@@ -313,7 +313,7 @@ extension CreateCoursePageStatePart02 on _CreateCoursePageState {
           SmallIcon3DButton(
             icon: Icons.visibility,
             color: AppColors.yellow,
-            onTap: this.updatePreview,
+            onTap: () => this.updatePreview(scrollToPreview: true),
           ),
           SizedBox(width: 8),
           SmallIcon3DButton(

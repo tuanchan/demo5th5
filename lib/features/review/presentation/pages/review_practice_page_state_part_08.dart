@@ -29,11 +29,7 @@ extension ReviewPracticePageStatePart08 on _ReviewPracticePageState {
                 children: [
                   this._statChip(text: '0/$total'),
                   Spacer(),
-                  Icon(
-                    Icons.auto_awesome_rounded,
-                    size: 21,
-                    color: Color(0xff4257ff),
-                  ),
+                  geminiColorIcon(size: 21),
                 ],
               ),
               SizedBox(height: 24),
@@ -115,11 +111,7 @@ extension ReviewPracticePageStatePart08 on _ReviewPracticePageState {
                 children: [
                   this._statChip(text: '$_total/$_total'),
                   Spacer(),
-                  Icon(
-                    Icons.auto_awesome_rounded,
-                    size: 21,
-                    color: Color(0xff4257ff),
-                  ),
+                  geminiColorIcon(size: 21),
                 ],
               ),
               SizedBox(height: 24),

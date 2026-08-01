@@ -54,6 +54,7 @@ dependencies:
   flutter_timezone: ^5.1.0
   timezone: ^0.11.1
   flutter_datetime_picker_plus: ^2.2.0
+  flutter_time_picker_spinner: 2.0.0
 
 dev_dependencies:
   flutter_test:
@@ -90,6 +91,7 @@ flutter:
     - assets/icon/triangle-exclamation-solid-full.svg
     - assets/icon/list-ol-solid-full.svg
     - assets/icon/floppy-disk-solid-full.svg
+    - assets/icon/txt-file-symbol-svgrepo-com.svg
     - assets/icon/chevron-right-solid-full.svg
     - assets/icon/arrow-right-to-bracket-solid-full.svg
     - assets/icon/volume-solid-full.svg

@@ -276,11 +276,6 @@ ${jsonEncode(payload)}
 
     await this._recordFinalTextResults();
     await this._finishStudySession();
-    if (mounted) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) this._showResultSheet();
-      });
-    }
   }
 
 

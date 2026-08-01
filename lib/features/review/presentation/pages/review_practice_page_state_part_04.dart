@@ -118,11 +118,7 @@ extension ReviewPracticePageStatePart04 on _ReviewPracticePageState {
                             ),
                             if (geminiFeedback.isNotEmpty) ...[
                               SizedBox(width: 8),
-                              Icon(
-                                Icons.auto_awesome_rounded,
-                                size: 22,
-                                color: Color(0xff4257ff),
-                              ),
+                              geminiColorIcon(size: 22),
                             ],
                             IconButton(
                               onPressed: () => Navigator.pop(sheetContext),
@@ -279,11 +275,6 @@ extension ReviewPracticePageStatePart04 on _ReviewPracticePageState {
 
     await this._finishStudySession();
     this._scrollToFirstWrong();
-    if (mounted) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) this._showResultSheet();
-      });
-    }
   }
 
 
@@ -339,7 +330,6 @@ extension ReviewPracticePageStatePart04 on _ReviewPracticePageState {
         await this._finalizeTextModeWithGemini();
       } else {
         await this._finishStudySession();
-        this._showResultSheet();
       }
     } else {
       final isNextListening = _listening || (_sentenceMode && _currentEssayIndex % 3 == 2);
@@ -451,7 +441,6 @@ extension ReviewPracticePageStatePart04 on _ReviewPracticePageState {
 
     if (_finished) {
       await this._finishStudySession();
-      this._showResultSheet();
     } else {
       final isNextListening = _listening || (_sentenceMode && _currentEssayIndex % 3 == 2);
       Future.delayed(Duration(milliseconds: 220), () {

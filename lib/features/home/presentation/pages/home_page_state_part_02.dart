@@ -161,23 +161,33 @@ extension HomePageStatePart02 on _HomePageState {
     final savedListening = await AppSettingsStore.getBool('review.listening') ?? false;
     final savedMatchingPairs = await AppSettingsStore.getBool('review.matchingPairs') ?? false;
     final savedAnswerByDefinition = await AppSettingsStore.getBool('review.answerByDefinition') ?? true;
+    final savedQuestionLimit =
+        await AppSettingsStore.getInt('review.questionLimit') ?? 10;
 
     if (!mounted) return;
 
-    await showDialog<void>(
-      context: context,
-      barrierColor: Colors.black.withOpacity(0.55),
-      builder: (sheetContext) {
-        int localLimit = targetCourse.cardCount;
-        bool localMc = savedMultipleChoice;
-        bool localEssay = savedEssay;
-        bool localListening = savedListening;
-        bool localMatchingPairs = savedMatchingPairs;
-        bool localSentenceMode = false;
-        bool localAnswerByDefinition = savedAnswerByDefinition;
+    final initialQuestionLimit = savedQuestionLimit
+        .clamp(1, targetCourse.cardCount)
+        .toInt();
+    final questionCountController = FixedExtentScrollController(
+      initialItem: initialQuestionLimit - 1,
+    );
 
-        return StatefulBuilder(
-          builder: (context, setSheetState) {
+    try {
+      await showDialog<void>(
+        context: context,
+        barrierColor: Colors.black.withOpacity(0.55),
+        builder: (sheetContext) {
+          int localLimit = initialQuestionLimit;
+          bool localMc = savedMultipleChoice;
+          bool localEssay = savedEssay;
+          bool localListening = savedListening;
+          bool localMatchingPairs = savedMatchingPairs;
+          bool localSentenceMode = false;
+          bool localAnswerByDefinition = savedAnswerByDefinition;
+
+          return StatefulBuilder(
+            builder: (context, setSheetState) {
             void setMode({
               bool? mc,
               bool? essay,
@@ -324,8 +334,9 @@ extension HomePageStatePart02 on _HomePageState {
                           ),
                       SizedBox(height: 14),
                       this._setupRow(
-                        label: 'Câu hỏi (tối đa ${targetCourse.cardCount})',
-                        child: this._numberStepper(
+                        label: 'Câu hỏi (1–${targetCourse.cardCount})',
+                        child: this._questionCountSpinner(
+                          controller: questionCountController,
                           value: localLimit,
                           min: 1,
                           max: targetCourse.cardCount,
@@ -535,10 +546,13 @@ extension HomePageStatePart02 on _HomePageState {
                 ),
               ),
             );
-          },
-        );
-      },
-    );
+            },
+          );
+        },
+      );
+    } finally {
+      questionCountController.dispose();
+    }
   }
 
 

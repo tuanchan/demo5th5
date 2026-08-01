@@ -9,6 +9,7 @@ class _CreateCoursePageState extends State<CreateCoursePage> {
 
   bool showPreview = false;
   List<FlashCardItem> previewItems = [];
+  final GlobalKey _createCoursePreviewKey = GlobalKey();
 
   final TextEditingController titleController = TextEditingController();
   final TextEditingController dataController = TextEditingController();

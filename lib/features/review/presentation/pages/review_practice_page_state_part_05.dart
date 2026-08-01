@@ -2,22 +2,30 @@ part of flutterflashcard_main;
 
 extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
   Future<void> _openSetupSheet() async {
-    await showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      barrierColor: Colors.black.withOpacity(0.35),
-      builder: (sheetContext) {
-        int localLimit = _questionLimit.clamp(1, _cards.length).toInt();
-        bool localMc = _multipleChoice;
-        bool localEssay = _essay;
-        bool localListening = _listening;
-        bool localMatchingPairs = _matchingPairs;
-        bool localSentenceMode = _sentenceMode;
-        bool localAnswerByDefinition = _answerByDefinition;
+    if (_cards.isEmpty) return;
 
-        return StatefulBuilder(
-          builder: (context, setSheetState) {
+    final initialQuestionLimit = _questionLimit
+        .clamp(1, _cards.length)
+        .toInt();
+    final questionCountController = FixedExtentScrollController(
+      initialItem: initialQuestionLimit - 1,
+    );
+
+    try {
+      await showDialog<void>(
+        context: context,
+        barrierColor: Colors.black.withOpacity(0.55),
+        builder: (sheetContext) {
+          int localLimit = initialQuestionLimit;
+          bool localMc = _multipleChoice;
+          bool localEssay = _essay;
+          bool localListening = _listening;
+          bool localMatchingPairs = _matchingPairs;
+          bool localSentenceMode = _sentenceMode;
+          bool localAnswerByDefinition = _answerByDefinition;
+
+          return StatefulBuilder(
+            builder: (context, setSheetState) {
             void setMode({
               bool? mc,
               bool? essay,
@@ -79,38 +87,44 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
               });
             }
 
-            return Padding(
-              padding: EdgeInsets.only(
-                left: 16,
-                right: 16,
-                bottom: MediaQuery.of(context).viewInsets.bottom + 16,
-              ),
-              child: Center(
-                child: Container(
-                  constraints: BoxConstraints(maxWidth: 560),
-                  padding: EdgeInsets.fromLTRB(18, 18, 18, 16),
-                  decoration: BoxDecoration(
-                    color: Colors.black,
-                    borderRadius: BorderRadius.circular(26),
-                    border: Border.all(color: AppColors.border, width: 1.4),
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppColors.border,
-                        offset: Offset(0, 7),
-                        blurRadius: 0,
-                      ),
-                      BoxShadow(
-                        color: Color(0x26000000),
-                        offset: Offset(0, 18),
-                        blurRadius: 28,
-                      ),
-                    ],
-                  ),
-                  child: Column(
+            final compactDialog = MediaQuery.sizeOf(context).width < 600;
+            return Material(
+              type: MaterialType.transparency,
+              child: Padding(
+                padding: EdgeInsets.only(
+                  left: compactDialog ? 12 : 18,
+                  right: compactDialog ? 12 : 18,
+                  top: compactDialog ? 12 : 18,
+                  bottom:
+                      MediaQuery.of(context).viewInsets.bottom +
+                      (compactDialog ? 12 : 18),
+                ),
+                child: Center(
+                  child: Container(
+                    constraints: BoxConstraints(
+                      maxWidth: 760,
+                      maxHeight: MediaQuery.sizeOf(context).height * 0.9,
+                    ),
+                    padding: EdgeInsets.all(compactDialog ? 16 : 22),
+                    decoration: BoxDecoration(
+                      color: Colors.black,
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(color: Color(0xff2a334a)),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Color(0x59000000),
+                          offset: Offset(0, 18),
+                          blurRadius: 46,
+                        ),
+                      ],
+                    ),
+                    child: SingleChildScrollView(
+                      child: Column(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Expanded(
                             child: Column(
@@ -123,27 +137,44 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
                                   style: TextStyle(
                                     color: Color(0xffa8b6d6),
                                     fontWeight: FontWeight.w400,
-                                    fontSize: 13,
+                                    fontSize: compactDialog ? 12 : 13,
                                   ),
                                 ),
                                 SizedBox(height: 3),
                                 Text(
-                                  'Thiết lập kiểm tra',
+                                  'Thiết lập bài kiểm tra',
+                                  maxLines: compactDialog ? 2 : 1,
+                                  overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 24,
+                                    color: Color(0xffeaf1ff),
+                                    fontSize: compactDialog ? 21 : 28,
+                                    height: 1.15,
                                     fontWeight: FontWeight.w400,
                                   ),
                                 ),
                               ],
                             ),
                           ),
+                          SizedBox(width: 8),
+                          IconButton(
+                            tooltip: 'Đóng',
+                            onPressed: () => Navigator.pop(sheetContext),
+                            style: IconButton.styleFrom(
+                              foregroundColor: Color(0xffeaf1ff),
+                              backgroundColor: Color(0x0fffffff),
+                              side: BorderSide(color: Color(0xff2a334a)),
+                              minimumSize: Size(36, 36),
+                              padding: EdgeInsets.zero,
+                            ),
+                            icon: Icon(Icons.close_rounded, size: 20),
+                          ),
                         ],
                       ),
                       SizedBox(height: 16),
                       this._setupRow(
-                        label: 'Câu hỏi tối đa ${_cards.length}',
-                        child: this._numberStepper(
+                        label: 'Câu hỏi (1–${_cards.length})',
+                        child: this._questionCountSpinner(
+                          controller: questionCountController,
                           value: localLimit,
                           min: 1,
                           max: _cards.length,
@@ -155,22 +186,20 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
                       this._setupRow(
                         label: 'Trả lời bằng',
                         child: Container(
-                          height: 48,
-                          padding: EdgeInsets.symmetric(horizontal: 14),
+                          height: 46,
+                          padding: EdgeInsets.symmetric(horizontal: 12),
                           decoration: BoxDecoration(
-                            color: Color(0xff171c28),
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(
-                              color: Color(0xff343b49),
-                            ),
+                            color: Color(0x0fffffff),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: Color(0xff2a334a)),
                           ),
                           child: DropdownButtonHideUnderline(
                             child: DropdownButton<bool>(
                               value: localAnswerByDefinition,
                               isExpanded: true,
-                              dropdownColor: Color(0xff171c28),
+                              dropdownColor: Color(0xff0b0c0f),
                               style: TextStyle(
-                                color: Colors.white,
+                                color: Color(0xffeaf1ff),
                                 fontWeight: FontWeight.w400,
                               ),
                               icon: Icon(Icons.keyboard_arrow_down_rounded, color: Color(0xffa8b6d6)),
@@ -195,8 +224,8 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
                         ),
                       ),
                       SizedBox(height: 14),
-                      Divider(color: AppColors.border.withOpacity(0.18)),
-                      SizedBox(height: 6),
+                      Divider(color: Color(0xff2a334a)),
+                      SizedBox(height: 8),
                       Text(
                         'Phương thức có cập nhật lịch SRS',
                         style: TextStyle(
@@ -205,9 +234,65 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
                           fontWeight: FontWeight.w400,
                         ),
                       ),
-                      SizedBox(height: 6),
+                      SizedBox(height: 8),
+                      GestureDetector(
+                        onTap: () async {
+                          Navigator.pop(sheetContext);
+                          await Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => DeepLearnPage(
+                                courseId: widget.courseId,
+                                courseTitle: widget.courseTitle,
+                                courseLanguageCode: widget.courseLanguageCode,
+                              ),
+                            ),
+                          );
+                        },
+                        child: AnimatedContainer(
+                          duration: Duration(milliseconds: 160),
+                          width: double.infinity,
+                          height: 52,
+                          decoration: BoxDecoration(
+                            color: Color(0x0fffffff),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Color(0xff2a334a)),
+                          ),
+                          child: Row(
+                            children: [
+                              SizedBox(width: 14),
+                              SvgPicture.asset(
+                                'assets/icon/brain-solid-full.svg',
+                                width: 20,
+                                height: 20,
+                                colorFilter: ColorFilter.mode(
+                                  Color(0xffa8b6d6),
+                                  BlendMode.srcIn,
+                                ),
+                              ),
+                              SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  'Học Chuyên Sâu',
+                                  style: TextStyle(
+                                    color: Color(0xffeaf1ff),
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w400,
+                                  ),
+                                ),
+                              ),
+                              Icon(
+                                Icons.chevron_right_rounded,
+                                color: Color(0xffa8b6d6),
+                              ),
+                              SizedBox(width: 10),
+                            ],
+                          ),
+                        ),
+                      ),
+                      SizedBox(height: 8),
                       this._switchTile(
-                        text: 'Trắc nghiệm 4 đáp án',
+                        text: 'Trắc nghiệm (4 đáp án)',
                         value: localMc,
                         onChanged: (v) => setMode(mc: v),
                       ),
@@ -226,19 +311,11 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
                         value: localMatchingPairs,
                         onChanged: (v) => setMode(matchingPairs: v),
                       ),
-                      this._switchTile(
-                        text: 'Kiểm tra tổng hợp',
-                        value: localSentenceMode,
-                        onChanged: (v) => setMode(sentence: v),
-                      ),
-                      SizedBox(height: 14),
+                      SizedBox(height: 18),
                       Align(
                         alignment: Alignment.centerRight,
-                        child: this._solidButton(
-                          text: 'Bắt đầu kiểm tra',
-                          icon: Icons.play_arrow_rounded,
-                          color: Color(0xff4257ff),
-                          onTap: () {
+                        child: ElevatedButton.icon(
+                          onPressed: () {
                             setState(() {
                               _questionLimit = localLimit;
                               _multipleChoice = localMc;
@@ -259,54 +336,98 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
                             Navigator.pop(sheetContext);
                             this._startQuiz();
                           },
+                          icon: Icon(Icons.play_arrow_rounded, size: 18),
+                          label: Text(
+                            'Bắt đầu làm kiểm tra',
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontWeight: FontWeight.w400),
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            elevation: 0,
+                            backgroundColor: Color(0xff3e5cff),
+                            foregroundColor: Colors.white,
+                            padding: EdgeInsets.symmetric(
+                              horizontal: 18,
+                              vertical: 15,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
                         ),
                       ),
-                    ],
+                        ],
+                      ),
+                    ),
                   ),
                 ),
               ),
             );
-          },
-        );
-      },
-    );
+            },
+          );
+        },
+      );
+    } finally {
+      questionCountController.dispose();
+    }
   }
 
 
-  Future<void> _showResultSheet() async {
-    await showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (context) {
-        return Padding(
-          padding: EdgeInsets.all(16),
-          child: Center(
-            child: Container(
-              constraints: BoxConstraints(maxWidth: 460),
-              padding: EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                color: Color(0xff0b0c10),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: Color(0xff242832)),
-                boxShadow: [
-                  BoxShadow(
-                    color: Color(0x66000000),
-                    offset: Offset(0, 12),
-                    blurRadius: 24,
+  Widget _buildResultActivity() {
+    return Center(
+      child: SingleChildScrollView(
+        padding: EdgeInsets.fromLTRB(16, 18, 16, 100),
+        child: Container(
+          constraints: BoxConstraints(maxWidth: 460),
+          padding: EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: Color(0xff0b0c10),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: Color(0xff242832)),
+          ),
+          child: _isGeminiTextGrading
+              ? Padding(
+                  padding: EdgeInsets.symmetric(vertical: 22),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      geminiColorIcon(size: 42),
+                      SizedBox(height: 16),
+                      Text(
+                        'Gemini đang chấm tự luận...',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      SizedBox(height: 10),
+                      Text(
+                        'Kết quả sẽ hiển thị ngay tại đây',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Color(0xffa8b6d6),
+                          fontSize: 14,
+                        ),
+                      ),
+                      SizedBox(height: 20),
+                      SizedBox(
+                        width: 28,
+                        height: 28,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 3,
+                          color: Color(0xff4257ff),
+                        ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
-              child: SingleChildScrollView(
-                child: Column(
+                )
+              : Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     _geminiTextResultScript.trim().isNotEmpty
-                        ? Icon(
-                            Icons.auto_awesome_rounded,
-                            color: Color(0xff4257ff),
-                            size: 42,
-                          )
+                        ? geminiColorIcon(size: 42)
                         : Icon(
                             Icons.emoji_events_outlined,
                             color: Color(0xff4257ff),
@@ -363,6 +484,7 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
                         child: this._solidButton(
                           text: 'Xem lại câu sai',
                           icon: Icons.fact_check_rounded,
+                          showIcon: false,
                           color: Color(0xff4257ff),
                           onTap: this._openWrongReviewFromResult,
                         ),
@@ -374,9 +496,9 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
                           child: this._solidButton(
                             text: 'Ôn lại câu sai',
                             icon: Icons.replay_rounded,
+                            showIcon: false,
                             color: Color(0xff171c28),
                             onTap: () {
-                              Navigator.pop(context);
                               this._startWrongEssayReview();
                             },
                           ),
@@ -391,8 +513,9 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
                             text: 'Thoát',
                             icon: Icons.logout_rounded,
                             onTap: () {
-                              Navigator.pop(context);
-                              Navigator.pop(this.context);
+                              Navigator.pop(context, {
+                                'courseId': widget.courseId,
+                              });
                             },
                           ),
                         ),
@@ -403,7 +526,6 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
                             icon: Icons.refresh_rounded,
                             color: Color(0xff4257ff),
                             onTap: () {
-                              Navigator.pop(context);
                               this._restart();
                             },
                           ),
@@ -412,11 +534,8 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
                     ),
                   ],
                 ),
-              ),
-            ),
           ),
-        );
-      },
+        ),
     );
   }
 
@@ -428,9 +547,9 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
         final labelWidget = Text(
           label,
           style: TextStyle(
-            color: Colors.white,
+            color: Color(0xffa8b6d6),
             fontWeight: FontWeight.w400,
-            fontSize: 15,
+            fontSize: 14,
           ),
         );
 
@@ -452,45 +571,75 @@ extension ReviewPracticePageStatePart05 on _ReviewPracticePageState {
   }
 
 
-  Widget _numberStepper({
+  Widget _questionCountSpinner({
+    required FixedExtentScrollController controller,
     required int value,
     required int min,
     required int max,
     required ValueChanged<int> onChanged,
   }) {
+    const itemHeight = 38.0;
+
     return Container(
-      height: 48,
+      height: itemHeight * 3,
+      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        color: Color(0xff171c28),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Color(0xff343b49)),
+        color: Color(0x0fffffff),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Color(0xff2a334a)),
       ),
-      child: Row(
+      child: Stack(
+        alignment: Alignment.center,
         children: [
-          IconButton(
-            onPressed: value <= min ? null : () => onChanged(value - 1),
-            icon: Icon(
-              Icons.remove_rounded,
-              color: value <= min ? AppColors.muted.withOpacity(0.45) : AppColors.onIconButton,
-            ),
-          ),
-          Expanded(
-            child: Center(
-              child: Text(
-                '$value',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w400,
-                  fontSize: 16,
-                ),
+          IgnorePointer(
+            child: Container(
+              height: itemHeight,
+              margin: EdgeInsets.symmetric(horizontal: 8),
+              decoration: BoxDecoration(
+                color: Color(0x263e5cff),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Color(0xff3e5cff)),
               ),
             ),
           ),
-          IconButton(
-            onPressed: value >= max ? null : () => onChanged(value + 1),
-            icon: Icon(
-              Icons.add_rounded,
-              color: value >= max ? AppColors.muted.withOpacity(0.45) : AppColors.onIconButton,
+          ListWheelScrollView.useDelegate(
+            controller: controller,
+            itemExtent: itemHeight,
+            diameterRatio: 1.8,
+            perspective: 0.003,
+            physics: ItemScrollPhysics(itemHeight: itemHeight),
+            onSelectedItemChanged: (index) => onChanged(min + index),
+            childDelegate: ListWheelChildBuilderDelegate(
+              childCount: max - min + 1,
+              builder: (context, index) {
+                final questionCount = min + index;
+                final selected = questionCount == value;
+                return Center(
+                  child: Text(
+                    '$questionCount',
+                    style: TextStyle(
+                      color: selected ? Colors.white : Color(0xff71809f),
+                      fontWeight: selected
+                          ? FontWeight.w700
+                          : FontWeight.w400,
+                      fontSize: selected ? 18 : 15,
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          Positioned(
+            right: 12,
+            child: IgnorePointer(
+              child: Text(
+                '/ $max',
+                style: TextStyle(
+                  color: Color(0xff8e9bb8),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w400,
+                ),
+              ),
             ),
           ),
         ],
