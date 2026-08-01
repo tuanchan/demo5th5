@@ -18,7 +18,12 @@ extension HomePageStatePart01 on _HomePageState {
             final compact = constraints.maxWidth < 900;
             return Column(
               children: [
-                this._buildWebHomeTopBar(compact),
+                AnimatedSwitcher(
+                  duration: Duration(milliseconds: 180),
+                  child: _homeSelectionMode
+                      ? this._buildHomeSelectionBar(compact)
+                      : this._buildWebHomeTopBar(compact),
+                ),
                 Expanded(
                   child: Listener(
                     behavior: HitTestBehavior.translucent,
@@ -46,6 +51,7 @@ extension HomePageStatePart01 on _HomePageState {
       this._homeNavButton('Viết', this.openWritingPractice),
       this._homeNavButton('Học ảnh', this.openImageLearning),
       this._homeNavButton('Tạo học phần', this.openCreateCourse),
+      this._buildHomeNotificationButton(),
       StreamBuilder<AuthState>(
         stream: SupabaseConfig.onAuthStateChange,
         builder: (context, _) => this._buildHomeAccountButton(),
@@ -763,8 +769,13 @@ extension HomePageStatePart01 on _HomePageState {
   Widget _buildHomeTopicCard(CourseTopicItem topic) {
     final isMobile = MediaQuery.of(context).size.width < 580;
     final cardHeight = isMobile ? 140.0 : 200.0;
+    final isBatchSelected = _selectedHomeTopicIds.contains(topic.id);
     return InkWell(
       onTap: () {
+        if (_homeSelectionMode) {
+          this._toggleHomeTopicSelection(topic);
+          return;
+        }
         courseSearchController.clear();
         setState(() {
           _activeHomeTopic = topic;
@@ -788,10 +799,7 @@ extension HomePageStatePart01 on _HomePageState {
           }
         });
       },
-      onLongPress: () => this._showLongPressMenu(
-        onEdit: () => this.openEditTopicDialog(topic),
-        onDelete: () => this.confirmDeleteTopic(topic),
-      ),
+      onLongPress: () => this._startHomeTopicSelection(topic),
       borderRadius: BorderRadius.circular(12),
       child: Container(
         height: cardHeight,
@@ -799,7 +807,10 @@ extension HomePageStatePart01 on _HomePageState {
         decoration: BoxDecoration(
           color: _homePanel,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: _homeBorder),
+          border: Border.all(
+            color: isBatchSelected ? Color(0xff2f80ff) : _homeBorder,
+            width: isBatchSelected ? 1.6 : 1,
+          ),
         ),
         child: Stack(
           children: [
@@ -835,6 +846,12 @@ extension HomePageStatePart01 on _HomePageState {
                 ),
               ),
             ),
+            if (_homeSelectionMode)
+              Positioned(
+                top: 0,
+                right: 0,
+                child: this._buildHomeSelectionCircle(isBatchSelected),
+              ),
           ],
         ),
       ),
@@ -1297,7 +1314,8 @@ extension HomePageStatePart01 on _HomePageState {
   }
 
   Widget _buildWebCourseTile(CourseListItem course, {Key? key}) {
-    final selected = selectedHomeCourse?.id == course.id;
+    final selected = !_homeSelectionMode && selectedHomeCourse?.id == course.id;
+    final isBatchSelected = _selectedHomeCourseIds.contains(course.id);
     final srsStars = course.srsLevel.clamp(0, 8).toInt();
     final displayedSrsStars = srsStars == 0 ? 1 : srsStars;
     final isMobile = MediaQuery.of(context).size.width < 580;
@@ -1305,21 +1323,25 @@ extension HomePageStatePart01 on _HomePageState {
     return InkWell(
       key: key,
       onTap: () {
+        if (_homeSelectionMode) {
+          this._toggleHomeCourseSelection(course);
+          return;
+        }
         if (selectedHomeCourse?.id != course.id) {
           setState(() => selectedHomeCourse = course);
         }
       },
-      onLongPress: () => this._showLongPressMenu(
-        onEdit: () => this.openEditCourseDialog(course),
-        onDelete: () => this.confirmDeleteCourse(course),
-      ),
+      onLongPress: () => this._startHomeCourseSelection(course),
       borderRadius: BorderRadius.circular(12),
       child: Container(
         height: cardHeight,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: selected ? Color(0xff2563eb) : _homeBorder,
+            color: isBatchSelected || selected
+                ? Color(0xff2563eb)
+                : _homeBorder,
+            width: isBatchSelected ? 1.6 : 1,
           ),
         ),
         child: Stack(
@@ -1387,6 +1409,8 @@ extension HomePageStatePart01 on _HomePageState {
                         ),
                       ),
                     ),
+                    if (_homeSelectionMode)
+                      SizedBox(width: isMobile ? 28 : 34),
                   ],
                 ),
               ),
@@ -1546,6 +1570,12 @@ extension HomePageStatePart01 on _HomePageState {
                     ),
                   ],
                 ),
+              ),
+            if (_homeSelectionMode)
+              Positioned(
+                top: isMobile ? 8 : 12,
+                right: isMobile ? 8 : 12,
+                child: this._buildHomeSelectionCircle(isBatchSelected),
               ),
           ],
         ),

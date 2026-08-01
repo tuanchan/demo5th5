@@ -95,6 +95,10 @@ flutter:
     - assets/icon/volume-solid-full.svg
     - assets/icon/google-icon-logo-svgrepo-com.svg
     - assets/icon/facebook-svgrepo-com.svg
+    - assets/icon/circle-check-solid-full.svg
+    - assets/icon/share-solid-full.svg
+    - assets/icon/pen-to-square-solid-full.svg
+    - assets/icon/trash-can-solid-full.svg
     - assets/icon/app_icon.png
     - assets/TOEIC/
     - assets/TOCFL/

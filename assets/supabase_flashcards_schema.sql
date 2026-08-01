@@ -9,10 +9,17 @@ create extension if not exists pgcrypto;
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   display_name text,
+  email text,
   avatar_url text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.profiles add column if not exists email text;
+create index if not exists profiles_display_name_search_idx
+on public.profiles (lower(display_name));
+create index if not exists profiles_email_search_idx
+on public.profiles (lower(email));
 
 create or replace function public.handle_new_user()
 returns trigger
@@ -20,9 +27,27 @@ language plpgsql
 security definer set search_path = public
 as $$
 begin
-  insert into public.profiles (id, display_name)
-  values (new.id, coalesce(new.raw_user_meta_data ->> 'display_name', ''))
-  on conflict (id) do nothing;
+  insert into public.profiles (id, display_name, email, avatar_url)
+  values (
+    new.id,
+    coalesce(
+      new.raw_user_meta_data ->> 'display_name',
+      new.raw_user_meta_data ->> 'full_name',
+      split_part(coalesce(new.email, ''), '@', 1)
+    ),
+    new.email,
+    coalesce(
+      new.raw_user_meta_data ->> 'avatar_url',
+      new.raw_user_meta_data ->> 'picture'
+    )
+  )
+  on conflict (id) do update set
+    email = excluded.email,
+    display_name = case
+      when coalesce(public.profiles.display_name, '') = '' then excluded.display_name
+      else public.profiles.display_name
+    end,
+    avatar_url = coalesce(public.profiles.avatar_url, excluded.avatar_url);
   return new;
 end;
 $$;
@@ -31,6 +56,50 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
 after insert on auth.users
 for each row execute function public.handle_new_user();
+
+-- Payloads shared directly between signed-in FlashCard users. Recipients only
+-- receive a portable snapshot; the sender's own course rows stay private.
+create table if not exists public.course_shares (
+  id uuid primary key default gen_random_uuid(),
+  sender_id uuid not null references auth.users(id) on delete cascade,
+  recipient_id uuid not null references auth.users(id) on delete cascade,
+  item_type text not null check (item_type in ('course', 'topic')),
+  title text not null,
+  payload jsonb not null,
+  status text not null default 'pending'
+    check (status in ('pending', 'accepted', 'declined')),
+  created_at timestamptz not null default now(),
+  opened_at timestamptz,
+  responded_at timestamptz,
+  check (sender_id <> recipient_id)
+);
+
+alter table public.course_shares
+add column if not exists status text not null default 'pending';
+alter table public.course_shares
+add column if not exists responded_at timestamptz;
+
+create index if not exists course_shares_recipient_created_idx
+on public.course_shares (recipient_id, created_at desc);
+create index if not exists course_shares_recipient_status_idx
+on public.course_shares (recipient_id, status, created_at desc);
+create index if not exists course_shares_sender_created_idx
+on public.course_shares (sender_id, created_at desc);
+
+-- Realtime drives the red notification badge without polling.
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'course_shares'
+  ) then
+    alter publication supabase_realtime add table public.course_shares;
+  end if;
+end;
+$$;
 
 -- =========================
 -- Shared language catalogue
@@ -315,9 +384,11 @@ $$;
 
 -- =========================
 -- Row Level Security
--- Every signed-in user can only access rows whose owner_id equals auth.uid().
+-- Learning rows remain private. Authenticated users may discover profiles,
+-- while share payloads are visible only to their sender and recipient.
 -- =========================
 alter table public.profiles enable row level security;
+alter table public.course_shares enable row level security;
 alter table public.languages enable row level security;
 alter table public.topics enable row level security;
 alter table public.courses enable row level security;
@@ -337,6 +408,32 @@ create policy profiles_own_rows on public.profiles
 for all to authenticated
 using (id = auth.uid())
 with check (id = auth.uid());
+
+drop policy if exists profiles_authenticated_read on public.profiles;
+create policy profiles_authenticated_read on public.profiles
+for select to authenticated
+using (true);
+
+drop policy if exists course_shares_read on public.course_shares;
+create policy course_shares_read on public.course_shares
+for select to authenticated
+using (sender_id = auth.uid() or recipient_id = auth.uid());
+
+drop policy if exists course_shares_send on public.course_shares;
+create policy course_shares_send on public.course_shares
+for insert to authenticated
+with check (sender_id = auth.uid() and recipient_id <> auth.uid());
+
+drop policy if exists course_shares_recipient_update on public.course_shares;
+create policy course_shares_recipient_update on public.course_shares
+for update to authenticated
+using (recipient_id = auth.uid())
+with check (recipient_id = auth.uid());
+
+drop policy if exists course_shares_delete on public.course_shares;
+create policy course_shares_delete on public.course_shares
+for delete to authenticated
+using (sender_id = auth.uid() or recipient_id = auth.uid());
 
 drop policy if exists languages_read on public.languages;
 create policy languages_read on public.languages
@@ -363,7 +460,24 @@ end;
 $$;
 
 -- Existing Auth users (created before this migration) also receive a profile.
-insert into public.profiles (id, display_name)
-select id, coalesce(raw_user_meta_data ->> 'display_name', '')
+insert into public.profiles (id, display_name, email, avatar_url)
+select
+  id,
+  coalesce(
+    raw_user_meta_data ->> 'display_name',
+    raw_user_meta_data ->> 'full_name',
+    split_part(coalesce(email, ''), '@', 1)
+  ),
+  email,
+  coalesce(
+    raw_user_meta_data ->> 'avatar_url',
+    raw_user_meta_data ->> 'picture'
+  )
 from auth.users
-on conflict (id) do nothing;
+on conflict (id) do update set
+  email = excluded.email,
+  display_name = case
+    when coalesce(public.profiles.display_name, '') = '' then excluded.display_name
+    else public.profiles.display_name
+  end,
+  avatar_url = coalesce(public.profiles.avatar_url, excluded.avatar_url);

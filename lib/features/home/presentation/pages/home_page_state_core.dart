@@ -65,6 +65,9 @@ class _HomePageState extends State<HomePage>
   final ScrollController _homeTopicScrollController = ScrollController();
   late final StreamSubscription<SyncResult> _homeSyncSubscription;
   late final StreamSubscription<void> _homeRealtimeSubscription;
+  late final StreamSubscription<AuthState> _homeShareAuthSubscription;
+  RealtimeChannel? _homeShareRealtimeChannel;
+  int _homeShareRealtimeSerial = 0;
   final GlobalKey _homeCourseViewportKey = GlobalKey();
   final GlobalKey _homeBackCardKey = GlobalKey();
   final GlobalKey _homeFirstCourseCardKey = GlobalKey();
@@ -87,6 +90,12 @@ class _HomePageState extends State<HomePage>
   String courseSortType = "updatedDesc";
   String courseLanguageFilter = "all";
   final Set<int> expandedTopicIds = {};
+  bool _homeSelectionMode = false;
+  bool _homeSelectionBusy = false;
+  final Set<int> _selectedHomeTopicIds = <int>{};
+  final Set<int> _selectedHomeCourseIds = <int>{};
+  int _homeIncomingShareCount = 0;
+  bool _homeIncomingShareCountLoading = false;
 
 
   List<String> get courseLanguageFilters {
@@ -283,6 +292,9 @@ class _HomePageState extends State<HomePage>
         .listen((_) {
           if (mounted) this.loadCourses(showLoading: false);
         });
+    _homeShareAuthSubscription = SupabaseConfig.onAuthStateChange.listen((_) {
+      this._restartHomeShareRealtime();
+    });
     _homeLogoAnimation = AnimationController(
       vsync: this,
       duration: Duration(seconds: 3),
@@ -330,12 +342,15 @@ class _HomePageState extends State<HomePage>
       }
     });
     this.loadInitialCourses();
+    this._restartHomeShareRealtime();
   }
 
   @override
   void dispose() {
     _homeSyncSubscription.cancel();
     _homeRealtimeSubscription.cancel();
+    _homeShareAuthSubscription.cancel();
+    this._stopHomeShareRealtime();
     _homeLogoAnimation.dispose();
     _homeCourseScrollController.dispose();
     _homeTopicScrollController.dispose();

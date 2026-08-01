@@ -56,6 +56,8 @@ part 'features/home/presentation/pages/home_page_state_part_01.dart';
 part 'features/home/presentation/pages/home_page_state_part_02.dart';
 part 'features/home/presentation/pages/home_page_state_part_02_split_02.dart';
 part 'features/home/presentation/pages/home_page_state_part_03.dart';
+part 'features/home/presentation/pages/home_page_selection_part.dart';
+part 'features/home/presentation/pages/home_page_inbox_part.dart';
 part 'features/home/presentation/pages/vocabulary_reminder_dialog.dart';
 part 'features/home/presentation/widgets/home_page_state_drawer.dart';
 part 'features/image_learning/presentation/pages/image_learning_page.dart';
