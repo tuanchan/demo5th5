@@ -377,7 +377,7 @@ class SupabaseSyncService {
     List<_OutboxTicket> entries, {
     bool allowWhileLearning = false,
     bool isStudyDependency = false,
-  ) async {
+  }) async {
     try {
       if (isLearningSyncPaused && !allowWhileLearning) {
         return SyncResult(
