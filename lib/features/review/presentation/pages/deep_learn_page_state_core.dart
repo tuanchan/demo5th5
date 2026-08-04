@@ -83,6 +83,9 @@ class _DeepLearnPageState extends State<DeepLearnPage> {
   bool _correctSoundEnabled = true;
   bool _completed = false;
   bool _didRequestSrsSync = false;
+  Future<SyncResult>? _srsSyncFuture;
+  Future<void> _reviewWriteTail = Future<void>.value();
+  late final LearningSyncPause _learningSyncPause;
   _DeepLearnLanguageMode _languageMode = _DeepLearnLanguageMode.both;
   bool _correctSoundReady = false;
   Future<void>? _correctSoundPreparation;
@@ -100,6 +103,8 @@ class _DeepLearnPageState extends State<DeepLearnPage> {
   @override
   void initState() {
     super.initState();
+    _learningSyncPause =
+        SupabaseSyncService.instance.pauseSyncWhileLearning();
     if (kIsWeb || !Platform.isWindows) _correctPlayer = AudioPlayer();
     _load();
   }
@@ -121,12 +126,28 @@ class _DeepLearnPageState extends State<DeepLearnPage> {
 
   @override
   void dispose() {
-    _saveState();
+    final saveFuture = _saveState();
+    unawaited(_releaseLearningPauseAfterPendingWrites(saveFuture));
     _answerController.dispose();
     _tts.stop();
     _correctPlayer?.dispose();
     _disposeWindowsSoundPlayer();
     super.dispose();
+  }
+
+  Future<void> _releaseLearningPauseAfterPendingWrites(
+    Future<void> saveFuture,
+  ) async {
+    try {
+      await _reviewWriteTail;
+      await saveFuture;
+      final srsSyncFuture = _srsSyncFuture;
+      if (srsSyncFuture != null) await srsSyncFuture;
+    } catch (error) {
+      debugPrint('DEEP LEARN FINAL SYNC ERROR: $error');
+    } finally {
+      _learningSyncPause.release();
+    }
   }
 
   Future<void> _load() async {
@@ -445,7 +466,13 @@ class _DeepLearnPageState extends State<DeepLearnPage> {
     }
   }
 
-  Future<void> _passCurrent([String pickedValue = '']) async {
+  void _passCurrent([String pickedValue = '']) {
+    final future = _passCurrentOnce(pickedValue);
+    _reviewWriteTail = future;
+    unawaited(future);
+  }
+
+  Future<void> _passCurrentOnce([String pickedValue = '']) async {
     final question = _current;
     if (question == null) return;
     question.locked = true;
@@ -726,11 +753,11 @@ class _DeepLearnPageState extends State<DeepLearnPage> {
   void _syncSrsAfterCompletion() {
     if (_didRequestSrsSync || !SupabaseConfig.isLoggedIn) return;
     _didRequestSrsSync = true;
-    unawaited(
-      SupabaseSyncService.instance.syncReviewStatesAfterStudy(
-        cardIds: _mastered,
-      ),
+    final future = SupabaseSyncService.instance.syncReviewStatesAfterStudy(
+      cardIds: _mastered,
     );
+    _srsSyncFuture = future;
+    unawaited(future);
   }
 
   Future<void> _toggleStar() async {

@@ -37,6 +37,8 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
   final Set<int> _recordedResultCardIds = {};
   final Map<int, DateTime> _cardStartedAtMap = {};
   Future<void> _studyWriteTail = Future<void>.value();
+  Future<void>? _studySessionFinishFuture;
+  late final LearningSyncPause _learningSyncPause;
 
   // ── Matching pairs timer ──────────────────────────────
   final Stopwatch _matchStopwatch = Stopwatch();
@@ -65,12 +67,15 @@ class _ReviewPracticePageState extends State<ReviewPracticePage> {
   @override
   void initState() {
     super.initState();
+    _learningSyncPause =
+        SupabaseSyncService.instance.pauseSyncWhileLearning();
     this._loadCards();
   }
 
   @override
   void dispose() {
-    this._finishStudySession();
+    final finishFuture = this._finishStudySession();
+    unawaited(finishFuture.whenComplete(_learningSyncPause.release));
     _matchTimer?.cancel();
     _matchTimer = null;
     // Review screens remain portrait on mobile, including matching pairs.

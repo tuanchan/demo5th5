@@ -35,6 +35,8 @@ class _FlashCardsPageState extends State<FlashCardsPage> {
   bool _studySessionFinished = true;
   bool _isRecordingProgress = false;
   Future<void> _flashStudyWriteTail = Future<void>.value();
+  Future<void>? _studySessionFinishFuture;
+  late final LearningSyncPause _learningSyncPause;
   late final StreamSubscription<void> _flashcardsRealtimeSubscription;
   Future<void> _realtimeRefreshTail = Future<void>.value();
 
@@ -120,6 +122,8 @@ class _FlashCardsPageState extends State<FlashCardsPage> {
   @override
   void initState() {
     super.initState();
+    _learningSyncPause =
+        SupabaseSyncService.instance.pauseSyncWhileLearning();
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
     ]);
@@ -143,7 +147,8 @@ class _FlashCardsPageState extends State<FlashCardsPage> {
   @override
   void dispose() {
     _flashcardsRealtimeSubscription.cancel();
-    this._finishStudySession();
+    final finishFuture = this._finishStudySession();
+    unawaited(finishFuture.whenComplete(_learningSyncPause.release));
     super.dispose();
   }
 

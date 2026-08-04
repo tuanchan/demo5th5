@@ -334,7 +334,23 @@ extension FlashCardsPageStatePart01 on _FlashCardsPageState {
 
 
 
-  Future<void> _finishStudySession() async {
+  Future<void> _finishStudySession() {
+    final active = _studySessionFinishFuture;
+    if (active != null) return active;
+    final future = this._finishStudySessionOnce();
+    _studySessionFinishFuture = future;
+    return future.whenComplete(() {
+      if (identical(_studySessionFinishFuture, future)) {
+        _studySessionFinishFuture = null;
+      }
+    });
+  }
+
+
+
+
+
+  Future<void> _finishStudySessionOnce() async {
     final sessionId = _studySessionId;
     if (sessionId == null || _studySessionFinished) return;
     _studySessionFinished = true;

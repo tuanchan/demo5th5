@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:sqflite/sqflite.dart';
 import '../database/app_database.dart';
@@ -17,6 +18,22 @@ class _OutboxTicket {
   final String kind;
   final String entityId;
   final String token;
+}
+
+/// Keeps background synchronization paused while a card-learning screen is
+/// alive. The lease is idempotent so page disposal and async cleanup can both
+/// safely attempt to release it.
+class LearningSyncPause {
+  LearningSyncPause._(this._service);
+
+  final SupabaseSyncService _service;
+  bool _released = false;
+
+  void release() {
+    if (_released) return;
+    _released = true;
+    _service._releaseLearningSyncPause();
+  }
 }
 
 /// Describes only the rows touched by one realtime batch. UI pages can use
@@ -72,8 +89,12 @@ class SupabaseSyncService {
   final Map<String, PostgresChangePayload> _realtimePendingChanges = {};
   Future<void> _studySyncTail = Future<void>.value();
   bool _isPushingStudyData = false;
+  bool _studyPushCanOverlapLearning = false;
   bool _outboxRetryInFlight = false;
   int _generalPushRequestsInFlight = 0;
+  int _learningSyncPauseCount = 0;
+  _SyncOperation? _deferredSyncOperation;
+  bool _resumingDeferredWork = false;
 
   bool get isSyncing => _isSyncing;
   bool get isSyncCancellationRequested => _cancelSyncRequested;
@@ -82,6 +103,71 @@ class SupabaseSyncService {
   Stream<SyncResult> get syncCompleted => _syncCompletedController.stream;
   Stream<void> get remoteDataChanged => _remoteDataChangedController.stream;
   RealtimeDataChange? get lastRealtimeDataChange => _lastRealtimeDataChange;
+  bool get isLearningSyncPaused => _learningSyncPauseCount > 0;
+
+  LearningSyncPause pauseSyncWhileLearning() {
+    _learningSyncPauseCount++;
+    _realtimeMergeDebounce?.cancel();
+    _realtimeMergeDebounce = null;
+    final shouldCancelCurrentWork =
+        !_isPushingStudyData || !_studyPushCanOverlapLearning;
+    if (_isSyncing && shouldCancelCurrentWork) {
+      if (_activeSync != null && _operation != _SyncOperation.livePush) {
+        _deferFullSync(_operation);
+      }
+      cancelActiveSync();
+    } else if (_isPushingStudyData && !_studyPushCanOverlapLearning) {
+      _cancelSyncRequested = true;
+    }
+    return LearningSyncPause._(this);
+  }
+
+  void _deferFullSync(_SyncOperation operation) {
+    // Merge preserves local rows, so retain it if overlapping requests arrive.
+    if (_deferredSyncOperation != _SyncOperation.merge) {
+      _deferredSyncOperation = operation;
+    }
+  }
+
+  void _releaseLearningSyncPause() {
+    if (_learningSyncPauseCount == 0) return;
+    _learningSyncPauseCount--;
+    if (_learningSyncPauseCount == 0) {
+      unawaited(_resumeDeferredWorkAfterLearning());
+    }
+  }
+
+  Future<void> _resumeDeferredWorkAfterLearning() async {
+    if (_resumingDeferredWork || isLearningSyncPaused) return;
+    _resumingDeferredWork = true;
+    try {
+      if (_isPushingStudyData) await _studySyncTail;
+      // Durable local mutations, especially SRS answers, must reach the
+      // server before any deferred pull is allowed to replace local SQLite.
+      await retryPendingOutbox();
+      if (isLearningSyncPaused) return;
+      if (await _hasPendingOutbox()) return;
+
+      final operation = _deferredSyncOperation;
+      _deferredSyncOperation = null;
+      if (operation != null && SupabaseConfig.isLoggedIn) {
+        await _startManualSync(operation);
+      }
+      if (!isLearningSyncPaused && _realtimePendingChanges.isNotEmpty) {
+        _scheduleRealtimeApply();
+      }
+    } catch (error) {
+      debugPrint('RESUME SYNC AFTER LEARNING ERROR: $error');
+    } finally {
+      _resumingDeferredWork = false;
+    }
+  }
+
+  SyncResult _learningDeferredResult() => SyncResult(
+        pushed: 0,
+        pulled: 0,
+        error: 'Đang học hoặc kiểm tra thẻ; đồng bộ đã được hoãn',
+      );
 
   Future<_OutboxTicket> _enqueueOutbox(String kind, String entityId) async {
     await AppDatabase.instance.ensureSyncOutboxTable();
@@ -180,6 +266,17 @@ class SupabaseSyncService {
         .toSet();
   }
 
+  Future<bool> _hasPendingOutbox() async {
+    await AppDatabase.instance.ensureSyncOutboxTable();
+    final db = await AppDatabase.instance.database;
+    final rows = await db.query(
+      'sync_outbox',
+      columns: const ['kind'],
+      limit: 1,
+    );
+    return rows.isNotEmpty;
+  }
+
   /// Pull-only replacement. No local rows are uploaded by this action.
   Future<SyncResult> syncAll() =>
       _startManualSync(_SyncOperation.pullReplace);
@@ -187,16 +284,45 @@ class SupabaseSyncService {
   Future<SyncResult> mergeAll() => _startManualSync(_SyncOperation.merge);
 
   Future<SyncResult> _startManualSync(_SyncOperation operation) async {
+    if (isLearningSyncPaused) {
+      _deferFullSync(operation);
+      return _learningDeferredResult();
+    }
     final active = _activeSync;
     if (active != null) await active;
+    if (await _hasPendingOutbox()) {
+      _deferFullSync(operation);
+      if (!_resumingDeferredWork) {
+        unawaited(_resumeDeferredWorkAfterLearning());
+      }
+      return SyncResult(
+        pushed: 0,
+        pulled: 0,
+        error: 'Còn thay đổi local đang chờ tải lên; đã hoãn đồng bộ',
+      );
+    }
     return _startSync(operation);
   }
 
-  Future<SyncResult> _startSync(_SyncOperation operation) {
+  Future<SyncResult> _startSync(
+    _SyncOperation operation, {
+    bool bypassStudyPushWait = false,
+    bool allowWhileLearning = false,
+  }) {
+    if (isLearningSyncPaused && !allowWhileLearning) {
+      if (operation != _SyncOperation.livePush) _deferFullSync(operation);
+      return Future.value(_learningDeferredResult());
+    }
     final active = _activeSync;
     if (active != null) return active;
-    if (_isPushingStudyData) {
-      return _studySyncTail.then((_) => _startSync(operation));
+    if (_isPushingStudyData && !bypassStudyPushWait) {
+      return _studySyncTail.then(
+        (_) => _startSync(
+          operation,
+          bypassStudyPushWait: bypassStudyPushWait,
+          allowWhileLearning: allowWhileLearning,
+        ),
+      );
     }
     if (!SupabaseConfig.isLoggedIn) {
       return Future.value(
@@ -234,6 +360,13 @@ class SupabaseSyncService {
     _generalPushRequestsInFlight++;
     try {
       final entry = await _enqueueOutbox('general', '');
+      if (isLearningSyncPaused) {
+        return SyncResult(
+          pushed: 0,
+          pulled: 0,
+          logs: const ['Thay đổi local đã được lưu và chờ hết phiên học'],
+        );
+      }
       return await _pushGeneralOutboxEntries([entry]);
     } finally {
       _generalPushRequestsInFlight--;
@@ -241,9 +374,18 @@ class SupabaseSyncService {
   }
 
   Future<SyncResult> _pushGeneralOutboxEntries(
-    List<_OutboxTicket> entries,
+    List<_OutboxTicket> entries, {
+    bool allowWhileLearning = false,
+    bool isStudyDependency = false,
   ) async {
     try {
+      if (isLearningSyncPaused && !allowWhileLearning) {
+        return SyncResult(
+          pushed: 0,
+          pulled: 0,
+          logs: const ['Thay đổi local đang chờ hết phiên học'],
+        );
+      }
       final active = _activeSync;
       if (active != null) await active;
       if (!SupabaseConfig.isLoggedIn) {
@@ -254,7 +396,11 @@ class SupabaseSyncService {
         );
       }
       await beginAuthenticatedSession();
-      final result = await _startSync(_SyncOperation.livePush);
+      final result = await _startSync(
+        _SyncOperation.livePush,
+        bypassStudyPushWait: isStudyDependency,
+        allowWhileLearning: allowWhileLearning,
+      );
       if (result.hasError) {
         await _failOutbox(entries, result.error!);
       } else {
@@ -297,6 +443,7 @@ class SupabaseSyncService {
         final result = await _syncReviewStatesAfterStudyOnce(
           sessionId: sessionId,
           cardIds: requestedCardIds,
+          allowWhileLearning: true,
         );
         if (result.hasError) {
           await _failOutbox(outboxEntries, result.error!);
@@ -318,6 +465,7 @@ class SupabaseSyncService {
         _generalPushRequestsInFlight > 0 ||
         _activeSync != null ||
         _isPushingStudyData ||
+        isLearningSyncPaused ||
         !SupabaseConfig.isLoggedIn) {
       return null;
     }
@@ -330,6 +478,7 @@ class SupabaseSyncService {
       final db = await AppDatabase.instance.database;
       final rows = await db.query('sync_outbox', orderBy: 'createdAt ASC');
       if (rows.isEmpty) return null;
+      if (isLearningSyncPaused) return null;
 
       List<_OutboxTicket> ticketsFor(String kind) => rows
           .where((row) => row['kind'] == kind)
@@ -412,21 +561,35 @@ class SupabaseSyncService {
           .map((row) => int.tryParse(row['entityId']?.toString() ?? ''))
           .whereType<int>()
           .toSet();
+      if (isLearningSyncPaused) return lastResult;
       if (deletedReviewCardIds.isNotEmpty) {
         await deleteRemoteReviewStatesForCards(deletedReviewCardIds);
       }
       return lastResult;
     } finally {
       _outboxRetryInFlight = false;
+      if (!isLearningSyncPaused &&
+          !_resumingDeferredWork &&
+          (_deferredSyncOperation != null ||
+              _realtimePendingChanges.isNotEmpty)) {
+        unawaited(_resumeDeferredWorkAfterLearning());
+      }
     }
   }
 
   Future<SyncResult> _syncReviewStatesAfterStudyOnce({
     int? sessionId,
     Set<int>? cardIds,
+    bool allowWhileLearning = false,
   }) async {
+    if (isLearningSyncPaused && !allowWhileLearning) {
+      return _learningDeferredResult();
+    }
     final active = _activeSync;
     if (active != null) await active;
+    if (isLearningSyncPaused && !allowWhileLearning) {
+      return _learningDeferredResult();
+    }
     if (!SupabaseConfig.isLoggedIn) {
       return SyncResult(pushed: 0, pulled: 0, error: 'ChÆ°a Ä‘Äƒng nháº­p');
     }
@@ -438,8 +601,29 @@ class SupabaseSyncService {
       });
       // Push newly created topics/courses/cards first. Otherwise an SRS row can
       // be skipped because its card does not exist on Supabase yet.
-      final dependencySync = await syncPendingChanges();
+      _studyPushCanOverlapLearning = allowWhileLearning;
       _isPushingStudyData = true;
+      // This is the one permitted sync while the learning pause is held: it
+      // creates any missing parent rows required by the just-finished SRS
+      // upload. It never pulls/replaces local learning state.
+      _generalPushRequestsInFlight++;
+      late final SyncResult dependencySync;
+      try {
+        final dependencyEntry = await _enqueueOutbox('general', '');
+        dependencySync = await _pushGeneralOutboxEntries(
+          [dependencyEntry],
+          allowWhileLearning: allowWhileLearning,
+          isStudyDependency: true,
+        );
+      } finally {
+        _generalPushRequestsInFlight--;
+      }
+      if (isLearningSyncPaused && !allowWhileLearning) {
+        _isPushingStudyData = false;
+        _studyPushCanOverlapLearning = false;
+        _cancelSyncRequested = false;
+        return _learningDeferredResult();
+      }
       await ServerLogService.write('study_sync.dependencies', details: {
         'sessionId': sessionId,
         'pushed': dependencySync.pushed,
@@ -509,6 +693,9 @@ $targetWhere
       }
 
       for (var start = 0; start < payload.length; start += 200) {
+        if (isLearningSyncPaused && !allowWhileLearning) {
+          throw StateError('Đồng bộ SRS tự động đã được hoãn đến hết phiên học');
+        }
         final end = math.min(start + 200, payload.length);
         final chunk = payload.sublist(start, end);
         try {
@@ -708,6 +895,8 @@ $targetWhere
         'error': errors.isEmpty ? null : errors.join(' | '),
       });
       _isPushingStudyData = false;
+      _studyPushCanOverlapLearning = false;
+      _cancelSyncRequested = false;
       return SyncResult(
         pushed: verifiedStateCount + verifiedStudyResultCount,
         pulled: 0,
@@ -719,6 +908,8 @@ $targetWhere
       );
     } catch (error) {
       _isPushingStudyData = false;
+      _studyPushCanOverlapLearning = false;
+      _cancelSyncRequested = false;
       await ServerLogService.write('study_sync.error', details: {
         'sessionId': sessionId,
         'error': error,
@@ -939,6 +1130,7 @@ $targetWhere
     _sessionOwnerId = null;
     _livePushCursorAt = null;
     _identityOwnerId = null;
+    _deferredSyncOperation = null;
   }
 
   /// Rebuilds the channel so Realtime uses the latest access token.
@@ -1038,10 +1230,12 @@ $targetWhere
   void _scheduleRealtimeApply({
     Duration delay = const Duration(milliseconds: 150),
   }) {
+    if (isLearningSyncPaused) return;
     if (_realtimeMergeDebounce?.isActive ?? false) return;
     _realtimeMergeDebounce = Timer(delay, () async {
       _realtimeMergeDebounce = null;
       if (!SupabaseConfig.isLoggedIn) return;
+      if (isLearningSyncPaused) return;
       if (_isSyncing || _isPushingStudyData) {
         await ServerLogService.write('realtime.deferred', details: {
           'syncing': _isSyncing,
@@ -1067,6 +1261,7 @@ $targetWhere
     if (!SupabaseConfig.isLoggedIn || _realtimePendingChanges.isEmpty) {
       return;
     }
+    if (isLearningSyncPaused) return;
     if (_isSyncing || _isPushingStudyData) {
       _scheduleRealtimeApply(delay: const Duration(milliseconds: 250));
       return;
@@ -1115,6 +1310,18 @@ $targetWhere
         'pendingAfter': _realtimePendingChanges.length,
       });
     } finally {
+      if (_cancelSyncRequested && isLearningSyncPaused) {
+        for (final change in changes) {
+          final row = change.newRecord.isNotEmpty
+              ? change.newRecord
+              : change.oldRecord;
+          final id = row['id']?.toString() ?? row['key']?.toString() ?? '';
+          if (id.isNotEmpty) {
+            _realtimePendingChanges['${change.table}:$id'] = change;
+          }
+        }
+        _cancelSyncRequested = false;
+      }
       _isSyncing = false;
       if (_realtimePendingChanges.isNotEmpty) {
         _scheduleRealtimeApply();
